@@ -1,13 +1,27 @@
 package internal
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
 
-func ListDatastores(datastoreType string) ([]string, error) {
+// ListServicesInput is the input for the ListServices function
+type ListServicesInput struct {
+	// DatastoreType is the type of datastore to list
+	DatastoreType string
+	// Trace is whether to enable trace output
+	Trace bool
+}
+
+// ListServices lists all services of a given datastore type
+func ListServices(input ListServicesInput) ([]string, error) {
+	if input.DatastoreType == "" {
+		return nil, fmt.Errorf("datastore type is required")
+	}
+
 	// list all immediate subfolders in PluginDataRoot
-	subfolders, err := os.ReadDir(filepath.Join(PluginDataRoot, datastoreType))
+	subfolders, err := os.ReadDir(filepath.Join(PluginDataRoot, input.DatastoreType))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []string{}, nil
@@ -20,8 +34,10 @@ func ListDatastores(datastoreType string) ([]string, error) {
 		datastores[i] = subfolder.Name()
 	}
 
-	// todo: filter out services not allowed by the user-auth-service trigger
-	// https://github.com/dokku/dokku-pushpin/blob/bdbefaab90b0a97af9a29052f7f0bd9e7f55778d/common-functions#L20
+	datastores, err = FilterServices(input.DatastoreType, datastores, input.Trace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to filter services: %w", err)
+	}
 
 	return datastores, nil
 }
