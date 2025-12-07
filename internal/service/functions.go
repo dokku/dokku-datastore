@@ -266,8 +266,8 @@ func ImageForService(input ImageForServiceInput) (string, error) {
 }
 
 // PullTaggedImage pulls a tagged image
-func PullTaggedImage(taggedImage string) (bool, error) {
-	result, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
+func PullTaggedImage(ctx context.Context, taggedImage string) (bool, error) {
+	result, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command:      common.DockerBin(),
 		Args:         []string{"image", "pull", taggedImage},
 		StreamStderr: true,
@@ -282,29 +282,39 @@ func PullTaggedImage(taggedImage string) (bool, error) {
 	return false, errors.New("unspecified error")
 }
 
+// FilterServicesInput is the input for the FilterServices function
+type FilterServicesInput struct {
+	// DatastoreType is the type of datastore to filter services for
+	DatastoreType string
+	// Services is the services to filter
+	Services []string
+	// Trace is whether to enable trace output
+	Trace bool
+}
+
 // FilterServices filters out services that are not allowed by the user-auth-service trigger
-func FilterServices(datastoreType string, services []string, trace bool) ([]string, error) {
-	if len(services) == 0 {
-		return services, nil
+func FilterServices(ctx context.Context, input FilterServicesInput) ([]string, error) {
+	if len(input.Services) == 0 {
+		return input.Services, nil
 	}
 
 	// check if there are plugins with the user-auth-service trigger
 	triggers, err := filepath.Glob(filepath.Join(PluginPath, "enabled", "*", "user-auth-service"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return services, nil
+			return input.Services, nil
 		}
-		return services, fmt.Errorf("failed to glob plugins with user-auth-service trigger: %w", err)
+		return input.Services, fmt.Errorf("failed to glob plugins with user-auth-service trigger: %w", err)
 	}
 
 	if len(triggers) == 0 {
-		return services, nil
+		return input.Services, nil
 	}
 
 	// check if there is only one trigger and if the file  `PLUGIN_PATH/enabled/20_events/user-auth-service` exists
 	if len(triggers) == 1 {
 		if _, err := os.Stat(filepath.Join(PluginPath, "enabled", "20_events", "user-auth-service")); err == nil {
-			return services, nil
+			return input.Services, nil
 		}
 	}
 
@@ -318,24 +328,24 @@ func FilterServices(datastoreType string, services []string, trace bool) ([]stri
 		defaultSShName = "default"
 	}
 
-	serviceWrapper, ok := Services[datastoreType]
+	serviceWrapper, ok := Services[input.DatastoreType]
 	if !ok {
-		return services, fmt.Errorf("datastore type %s is not supported", datastoreType)
+		return input.Services, fmt.Errorf("datastore type %s is not supported", input.DatastoreType)
 	}
 	pluginCommandPrefix := serviceWrapper.Properties().CommandPrefix
 
 	// call the user-auth-service trigger
-	results, err := CallPlugnTrigger(common.PlugnTriggerInput{
+	results, err := CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
 		Trigger: "user-auth-app",
-		Args:    append([]string{defaultSShUser, defaultSShName, pluginCommandPrefix}, services...),
+		Args:    append([]string{defaultSShUser, defaultSShName, pluginCommandPrefix}, input.Services...),
 		Env: map[string]string{
 			"SSH_NAME": defaultSShName,
 			"SSH_USER": defaultSShUser,
-			"TRACE":    strconv.FormatBool(trace),
+			"TRACE":    strconv.FormatBool(input.Trace),
 		},
 	})
 	if err != nil {
-		return services, fmt.Errorf("failed to call user-auth-service trigger: %w", err)
+		return input.Services, fmt.Errorf("failed to call user-auth-service trigger: %w", err)
 	}
 
 	filteredServices := make([]string, 0)
@@ -352,32 +362,40 @@ func FilterServices(datastoreType string, services []string, trace bool) ([]stri
 }
 
 // CallPlugnTrigger calls a plugin trigger
-func CallPlugnTrigger(input common.PlugnTriggerInput) (common.ExecCommandResponse, error) {
+func CallPlugnTriggerWithContext(ctx context.Context, input common.PlugnTriggerInput) (common.ExecCommandResponse, error) {
 	if os.Getenv("PLUGIN_PATH") == "" {
 		return common.ExecCommandResponse{
 			ExitCode: 0,
 		}, nil
 	}
 
-	return common.CallPlugnTrigger(input)
+	return common.CallPlugnTriggerWithContext(ctx, input)
+}
+
+// ServicePortReconcileStatusInput is the input for the ServicePortReconcileStatus function
+type ServicePortReconcileStatusInput struct {
+	// DatastoreType is the type of datastore to reconcile the port for
+	DatastoreType string
+	// ServiceName is the name of the service to reconcile the port for
+	ServiceName string
 }
 
 // ServicePortReconcileStatus reconciles the port for a service
-func ServicePortReconcileStatus(datastoreType string, serviceName string) error {
-	serviceWrapper, ok := Services[datastoreType]
+func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileStatusInput) error {
+	serviceWrapper, ok := Services[input.DatastoreType]
 	if !ok {
-		return fmt.Errorf("datastore type %s is not supported", datastoreType)
+		return fmt.Errorf("datastore type %s is not supported", input.DatastoreType)
 	}
 
 	serviceProperties := serviceWrapper.Properties()
-	serviceFiles := Files(serviceWrapper, serviceName)
+	serviceFiles := Files(serviceWrapper, input.ServiceName)
 	portFile := serviceFiles.Port
-	serviceName = ContainerName(serviceWrapper, serviceName)
-	exposedName := fmt.Sprintf("%s.ambassador", serviceName)
+	containerName := ContainerName(serviceWrapper, input.ServiceName)
+	exposedName := fmt.Sprintf("%s.ambassador", containerName)
 
 	if !common.FileExists(portFile) || common.ReadFirstLine(portFile) == "" {
 		if common.ContainerExists(exposedName) {
-			_, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
+			_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 				Command: common.DockerBin(),
 				Args:    []string{"container", "stop", exposedName},
 			})
@@ -394,7 +412,7 @@ func ServicePortReconcileStatus(datastoreType string, serviceName string) error 
 	}
 
 	if common.ContainerExists(exposedName) {
-		_, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
+		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 			Command: common.DockerBin(),
 			Args:    []string{"container", "start", exposedName},
 		})
@@ -416,7 +434,7 @@ func ServicePortReconcileStatus(datastoreType string, serviceName string) error 
 		"container",
 		"run",
 		"-d",
-		"--link=" + fmt.Sprintf("%s:%s", serviceName, serviceProperties.CommandPrefix),
+		"--link=" + fmt.Sprintf("%s:%s", containerName, serviceProperties.CommandPrefix),
 		"--name=" + exposedName,
 		"--restart=always",
 		"--label=dokku=ambassador",
@@ -429,7 +447,7 @@ func ServicePortReconcileStatus(datastoreType string, serviceName string) error 
 
 	dockerRunOptions = append(dockerRunOptions, PluginAmbassadorImage)
 
-	_, err = CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
+	_, err = CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    dockerRunOptions,
 	})

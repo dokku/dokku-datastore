@@ -18,7 +18,7 @@ type DestroyServiceInput struct {
 }
 
 // DestroyService destroys a service
-func DestroyService(input DestroyServiceInput) error {
+func DestroyService(ctx context.Context, input DestroyServiceInput) error {
 	if input.DatastoreType == "" {
 		return fmt.Errorf("datastore type is required")
 	}
@@ -28,7 +28,7 @@ func DestroyService(input DestroyServiceInput) error {
 		return fmt.Errorf("datastore type %s is not supported", input.DatastoreType)
 	}
 
-	_, err := service.CallPlugnTrigger(common.PlugnTriggerInput{
+	_, err := service.CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
 		Trigger:      "service-action",
 		Args:         []string{"pre-delete", input.DatastoreType, input.ServiceName},
 		StreamStderr: true,
@@ -38,18 +38,24 @@ func DestroyService(input DestroyServiceInput) error {
 		return fmt.Errorf("failed to call service-action pre-delete trigger: %w", err)
 	}
 
-	err = service.RemoveBackupSchedule(serviceWrapper, input.ServiceName)
+	err = service.RemoveBackupSchedule(ctx, service.RemoveBackupScheduleInput{
+		Service:     serviceWrapper,
+		ServiceName: input.ServiceName,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to remove backup schedule: %w", err)
 	}
 
-	err = service.RemoveServiceContainer(serviceWrapper, input.ServiceName)
+	err = service.RemoveServiceContainer(ctx, service.RemoveServiceContainerInput{
+		Service:     serviceWrapper,
+		ServiceName: input.ServiceName,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to remove container: %w", err)
 	}
 
 	serviceFolders := service.Folders(serviceWrapper, input.ServiceName)
-	_, err = service.CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
+	_, err = service.CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    []string{"container", "run", "--rm", "-v", fmt.Sprintf("%s/data:/data", serviceFolders.HostRoot), "-v", fmt.Sprintf("%s/config:/config", serviceFolders.HostRoot), service.PluginBusyboxImage, "chmod", "777", "-R", "/config", "/data"},
 	})
@@ -66,7 +72,7 @@ func DestroyService(input DestroyServiceInput) error {
 		return fmt.Errorf("failed to destroy properties: %w", err)
 	}
 
-	_, err = service.CallPlugnTrigger(common.PlugnTriggerInput{
+	_, err = service.CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
 		Trigger:      "service-action",
 		Args:         []string{"post-delete", input.DatastoreType, input.ServiceName},
 		StreamStderr: true,

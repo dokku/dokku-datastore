@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
 	"github.com/dokku/dokku-datastore/internal/service"
@@ -89,6 +92,17 @@ func (c *EnterCommand) AutocompleteFlags() complete.Flags {
 
 // Run runs the command
 func (c *EnterCommand) Run(args []string) int {
+	ctx, cancel := context.WithCancel(context.Background())
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGQUIT,
+		syscall.SIGTERM)
+	go func() {
+		<-signals
+		cancel()
+	}()
+
 	logger := internal.Ui{
 		Ui:     c.Ui,
 		Format: c.format,
@@ -155,7 +169,7 @@ func (c *EnterCommand) Run(args []string) int {
 		return 1
 	}
 
-	err = internal.EnterService(internal.EnterServiceInput{
+	err = internal.EnterService(ctx, internal.EnterServiceInput{
 		DatastoreType: datastoreType,
 		ServiceName:   serviceName,
 	})

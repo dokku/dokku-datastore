@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 )
@@ -30,9 +31,9 @@ type ServiceStruct struct {
 // Service is the interface for a service
 type Service interface {
 	// CreateService creates a new service
-	CreateService(serviceName string) error
+	CreateService(ctx context.Context, serviceName string) error
 	// CreateServiceContainer creates a new service container
-	CreateServiceContainer(serviceName string) error
+	CreateServiceContainer(ctx context.Context, serviceName string) error
 	// Properties returns the properties of a service
 	Properties() ServiceStruct
 	// URL returns the url for a service

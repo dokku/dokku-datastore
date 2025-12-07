@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -40,7 +41,7 @@ type CreateServiceInput struct {
 }
 
 // CreateService creates a new service
-func CreateService(input CreateServiceInput) error {
+func CreateService(ctx context.Context, input CreateServiceInput) error {
 	if input.DatastoreType == "" {
 		return fmt.Errorf("datastore type is required")
 	}
@@ -82,12 +83,12 @@ func CreateService(input CreateServiceInput) error {
 		}
 
 		// pull the image
-		if _, err := service.PullTaggedImage(taggedImage); err != nil {
+		if _, err := service.PullTaggedImage(ctx, taggedImage); err != nil {
 			return fmt.Errorf("failed to pull image %s: %w", taggedImage, err)
 		}
 	}
 
-	_, err = service.CallPlugnTrigger(common.PlugnTriggerInput{
+	_, err = service.CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
 		Trigger:      "service-action",
 		Args:         []string{"pre-create", input.DatastoreType, input.ServiceName},
 		Env:          map[string]string{},
@@ -117,7 +118,7 @@ func CreateService(input CreateServiceInput) error {
 		return fmt.Errorf("failed to create service links file %s: %w", linksFile, err)
 	}
 
-	err = serviceWrapper.CreateService(input.ServiceName)
+	err = serviceWrapper.CreateService(ctx, input.ServiceName)
 	if err != nil {
 		return fmt.Errorf("failed to create service: %w", err)
 	}
@@ -142,7 +143,7 @@ func CreateService(input CreateServiceInput) error {
 		return fmt.Errorf("failed to write database name: %w", err)
 	}
 
-	_, err = service.CallPlugnTrigger(common.PlugnTriggerInput{
+	_, err = service.CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
 		Trigger:      "service-action",
 		Args:         []string{"post-create", input.DatastoreType, input.ServiceName},
 		StreamStderr: true,
@@ -152,11 +153,11 @@ func CreateService(input CreateServiceInput) error {
 		return fmt.Errorf("failed to call service-action post-create trigger: %w", err)
 	}
 
-	if err := serviceWrapper.CreateServiceContainer(input.ServiceName); err != nil {
+	if err := serviceWrapper.CreateServiceContainer(ctx, input.ServiceName); err != nil {
 		return fmt.Errorf("failed to create service container: %w", err)
 	}
 
-	_, err = service.CallPlugnTrigger(common.PlugnTriggerInput{
+	_, err = service.CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
 		Trigger:      "service-action",
 		Args:         []string{"post-create-complete", input.DatastoreType, input.ServiceName},
 		StreamStderr: true,

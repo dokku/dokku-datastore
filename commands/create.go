@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
 	"github.com/dokku/dokku-datastore/internal/service"
@@ -137,6 +139,17 @@ func (c *CreateCommand) AutocompleteFlags() complete.Flags {
 
 // Run runs the command
 func (c *CreateCommand) Run(args []string) int {
+	ctx, cancel := context.WithCancel(context.Background())
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGQUIT,
+		syscall.SIGTERM)
+	go func() {
+		<-signals
+		cancel()
+	}()
+
 	logger := internal.Ui{
 		Ui:     c.Ui,
 		Format: c.format,
@@ -203,7 +216,7 @@ func (c *CreateCommand) Run(args []string) int {
 		return 1
 	}
 
-	err = internal.CreateService(internal.CreateServiceInput{
+	err = internal.CreateService(ctx, internal.CreateServiceInput{
 		DatastoreType:  datastoreType,
 		ServiceName:    serviceName,
 		ConfigOptions:  updatedFlags.ConfigOptions,
@@ -243,7 +256,7 @@ func (c *CreateCommand) Run(args []string) int {
 	linkContainerDockerArgs = append(linkContainerDockerArgs, "-c", fmt.Sprintf("%s:%d", networkAlias, waitPort))
 
 	logger.Header1(fmt.Sprintf("Waiting for %s container to be ready", serviceName))
-	_, err = service.CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
+	_, err = service.CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    linkContainerDockerArgs,
 	})
@@ -251,14 +264,20 @@ func (c *CreateCommand) Run(args []string) int {
 		logger.Error(internal.ErrorInput{
 			Error: err,
 		})
-		containerID := service.LiveContainerID(serviceWrapper, serviceName)
+		containerID := service.LiveContainerID(ctx, service.LiveContainerIDInput{
+			Service:     serviceWrapper,
+			ServiceName: serviceName,
+		})
 		logger.Header1(fmt.Sprintf("Start of %s container output", serviceName))
 		common.LogVerboseQuietContainerLogs(containerID)
 		logger.Header1(fmt.Sprintf("End of %s container output", serviceName))
 		return 1
 	}
 	// output service info
-	info := service.Info(serviceWrapper, serviceName)
+	info := service.Info(ctx, service.InfoInput{
+		Service:     serviceWrapper,
+		ServiceName: serviceName,
+	})
 	if c.format == "json" {
 		if err := json.NewEncoder(os.Stdout).Encode(info); err != nil {
 			logger.Error(internal.ErrorInput{

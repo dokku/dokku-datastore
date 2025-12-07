@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -81,6 +84,17 @@ func (c *ListCommand) AutocompleteFlags() complete.Flags {
 
 // Run runs the command
 func (c *ListCommand) Run(args []string) int {
+	ctx, cancel := context.WithCancel(context.Background())
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGQUIT,
+		syscall.SIGTERM)
+	go func() {
+		<-signals
+		cancel()
+	}()
+
 	logger := internal.Ui{
 		Ui:     c.Ui,
 		Format: c.format,
@@ -116,7 +130,7 @@ func (c *ListCommand) Run(args []string) int {
 		return 1
 	}
 
-	services, err := internal.ListServices(internal.ListServicesInput{
+	services, err := internal.ListServices(ctx, internal.ListServicesInput{
 		DatastoreType: datastoreType,
 		Trace:         c.trace,
 	})

@@ -44,9 +44,12 @@ type ContainerIPInput struct {
 }
 
 // ContainerIP gets the container IP for a service
-func ContainerIP(input ContainerIPInput) string {
+func ContainerIP(ctx context.Context, input ContainerIPInput) string {
 	if input.ContainerID == "" {
-		input.ContainerID = LiveContainerID(input.Service, input.ServiceName)
+		input.ContainerID = LiveContainerID(ctx, LiveContainerIDInput{
+			Service:     input.Service,
+			ServiceName: input.ServiceName,
+		})
 	}
 
 	containerIP, _ := common.DockerInspect(input.ContainerID, "{{ .NetworkSettings.IPAddress }}")
@@ -76,7 +79,10 @@ type EnterServiceContainerInput struct {
 
 // EnterServiceContainer enters a service container
 func EnterServiceContainer(ctx context.Context, input EnterServiceContainerInput) error {
-	containerID := LiveContainerID(input.Service, input.ServiceName)
+	containerID := LiveContainerID(ctx, LiveContainerIDInput{
+		Service:     input.Service,
+		ServiceName: input.ServiceName,
+	})
 	if containerID == "" {
 		return fmt.Errorf("%s container %s does not exist", input.Service.Properties().CommandPrefix, input.ServiceName)
 	}
@@ -85,7 +91,7 @@ func EnterServiceContainer(ctx context.Context, input EnterServiceContainerInput
 		return fmt.Errorf("%s container %s does not exist", input.Service.Properties().CommandPrefix, input.ServiceName)
 	}
 
-	status := Status(StatusInput{ContainerID: containerID})
+	status := Status(ctx, StatusInput{ContainerID: containerID})
 	if strings.ToLower(status) != "running" {
 		return fmt.Errorf("%s container %s is not running", input.Service.Properties().CommandPrefix, input.ServiceName)
 	}
@@ -202,26 +208,37 @@ func Folders(s Service, serviceName string) ServiceFolders {
 	}
 }
 
-// Info returns the information about a service
-func Info(s Service, serviceName string) map[string]string {
-	serviceFolders := Folders(s, serviceName)
+// InfoInput is the input for the Info function
+type InfoInput struct {
+	// Service is the service to get the information for
+	Service Service
+	// ServiceName is the name of the service to get the information for
+	ServiceName string
+}
 
-	containerID := LiveContainerID(s, serviceName)
+// Info returns the information about a service
+func Info(ctx context.Context, input InfoInput) map[string]string {
+	serviceFolders := Folders(input.Service, input.ServiceName)
+
+	containerID := LiveContainerID(ctx, LiveContainerIDInput{
+		Service:     input.Service,
+		ServiceName: input.ServiceName,
+	})
 	return map[string]string{
 		"config-dir":          serviceFolders.Config,
-		"config-options":      ConfigOptions(s, serviceName),
+		"config-options":      ConfigOptions(input.Service, input.ServiceName),
 		"data-dir":            serviceFolders.Data,
-		"dsn":                 s.URL(serviceName),
-		"exposed-ports":       ExposedPorts(s, serviceName),
+		"dsn":                 input.Service.URL(input.ServiceName),
+		"exposed-ports":       ExposedPorts(input.Service, input.ServiceName),
 		"id":                  containerID,
-		"internal-ip":         ContainerIP(ContainerIPInput{ContainerID: containerID}),
-		"initial-network":     InitialNetwork(s, serviceName),
-		"links":               strings.Join(LinkedApps(s, serviceName), ","),
-		"post-create-network": PostCreateNetwork(s, serviceName),
-		"post-start-network":  PostStartNetwork(s, serviceName),
+		"internal-ip":         ContainerIP(ctx, ContainerIPInput{ContainerID: containerID}),
+		"initial-network":     InitialNetwork(input.Service, input.ServiceName),
+		"links":               strings.Join(LinkedApps(input.Service, input.ServiceName), ","),
+		"post-create-network": PostCreateNetwork(input.Service, input.ServiceName),
+		"post-start-network":  PostStartNetwork(input.Service, input.ServiceName),
 		"service-root":        serviceFolders.Root,
-		"status":              Status(StatusInput{ContainerID: containerID}),
-		"version":             Version(VersionInput{ContainerID: containerID}),
+		"status":              Status(ctx, StatusInput{ContainerID: containerID}),
+		"version":             Version(ctx, VersionInput{ContainerID: containerID}),
 	}
 }
 
@@ -244,11 +261,18 @@ func LinkedApps(s Service, serviceName string) []string {
 	return lines
 }
 
+// LiveContainerIDInput is the input for the LiveContainerID function
+type LiveContainerIDInput struct {
+	// Service is the service to get the live container ID for
+	Service Service
+	// ServiceName is the name of the service to get the live container ID for
+	ServiceName string
+}
+
 // LiveContainerID gets the live container ID for a service, regardless of what is set in the ID file
-func LiveContainerID(s Service, serviceName string) string {
-	//   ID=$("$DOCKER_BIN" container ps -aq --no-trunc --filter "name=^/$SERVICE_NAME$") || true
-	containerName := ContainerName(s, serviceName)
-	result, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
+func LiveContainerID(ctx context.Context, input LiveContainerIDInput) string {
+	containerName := ContainerName(input.Service, input.ServiceName)
+	result, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    []string{"container", "ps", "-aq", "--no-trunc", "--filter", fmt.Sprintf("name=^/%s$", containerName)},
 	})
@@ -264,19 +288,29 @@ func LiveContainerID(s Service, serviceName string) string {
 	return id
 }
 
+// PauseServiceContainerInput is the input for the PauseServiceContainer function
+type PauseServiceContainerInput struct {
+	// Service is the service to pause
+	Service Service
+	// ServiceName is the name of the service to pause
+	ServiceName string
+	// ContainerID is the ID of the container to pause
+	ContainerID string
+}
+
 // PauseServiceContainer pauses a service container
-func PauseServiceContainer(s Service, serviceName string, containerID string) error {
-	_, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
+func PauseServiceContainer(ctx context.Context, input PauseServiceContainerInput) error {
+	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
-		Args:    []string{"container", "stop", containerID},
+		Args:    []string{"container", "stop", input.ContainerID},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
-	ambassadorContainerName := AmbassadorContainerName(s, serviceName)
+	ambassadorContainerName := AmbassadorContainerName(input.Service, input.ServiceName)
 	if common.ContainerExists(ambassadorContainerName) {
-		_, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
+		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 			Command: common.DockerBin(),
 			Args:    []string{"container", "stop", ambassadorContainerName},
 		})
@@ -298,15 +332,23 @@ func PostStartNetwork(s Service, serviceName string) string {
 	return common.PropertyGet(s.Properties().CommandPrefix, serviceName, "post-start-network")
 }
 
+// RemoveBackupScheduleInput is the input for the RemoveBackupSchedule function
+type RemoveBackupScheduleInput struct {
+	// Service is the service to remove the backup schedule for
+	Service Service
+	// ServiceName is the name of the service to remove the backup schedule for
+	ServiceName string
+}
+
 // RemoveBackupSchedule removes the backup schedule for a service
-func RemoveBackupSchedule(s Service, serviceName string) error {
-	serviceFiles := Files(s, serviceName)
+func RemoveBackupSchedule(ctx context.Context, input RemoveBackupScheduleInput) error {
+	serviceFiles := Files(input.Service, input.ServiceName)
 	if !common.FileExists(serviceFiles.CronFile) {
 		return nil
 	}
 
 	// run with sudo
-	_, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
+	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: "sudo",
 		Args:    []string{"rm", "-f", serviceFiles.CronFile},
 	})
@@ -318,8 +360,8 @@ func RemoveBackupSchedule(s Service, serviceName string) error {
 }
 
 // RemoveContainer removes a container
-func RemoveContainer(containerID string) error {
-	_, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
+func RemoveContainer(ctx context.Context, containerID string) error {
+	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    []string{"container", "rm", "-f", containerID},
 	})
@@ -330,23 +372,38 @@ func RemoveContainer(containerID string) error {
 	return nil
 }
 
+// RemoveServiceContainerInput is the input for the RemoveServiceContainer function
+type RemoveServiceContainerInput struct {
+	// Service is the service to remove the container for
+	Service Service
+	// ServiceName is the name of the service to remove the container for
+	ServiceName string
+}
+
 // RemoveServiceContainer removes the service container for a service
-func RemoveServiceContainer(s Service, serviceName string) error {
-	containerID := LiveContainerID(s, serviceName)
+func RemoveServiceContainer(ctx context.Context, input RemoveServiceContainerInput) error {
+	containerID := LiveContainerID(ctx, LiveContainerIDInput{
+		Service:     input.Service,
+		ServiceName: input.ServiceName,
+	})
 	if containerID == "" {
 		return nil
 	}
 
-	if err := PauseServiceContainer(s, serviceName, containerID); err != nil {
+	if err := PauseServiceContainer(ctx, PauseServiceContainerInput{
+		Service:     input.Service,
+		ServiceName: input.ServiceName,
+		ContainerID: containerID,
+	}); err != nil {
 		return err
 	}
 
-	ambassadorContainerName := AmbassadorContainerName(s, serviceName)
-	if err := RemoveContainer(ambassadorContainerName); err != nil {
+	ambassadorContainerName := AmbassadorContainerName(input.Service, input.ServiceName)
+	if err := RemoveContainer(ctx, ambassadorContainerName); err != nil {
 		return err
 	}
 
-	_, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
+	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    []string{"container", "update", "--restart=no", containerID},
 	})
@@ -354,7 +411,7 @@ func RemoveServiceContainer(s Service, serviceName string) error {
 		return fmt.Errorf("failed to update container restart policy: %w", err)
 	}
 
-	if err := RemoveContainer(containerID); err != nil {
+	if err := RemoveContainer(ctx, containerID); err != nil {
 		return err
 	}
 
@@ -374,9 +431,12 @@ type StatusInput struct {
 }
 
 // Status gets the status of a service
-func Status(input StatusInput) string {
+func Status(ctx context.Context, input StatusInput) string {
 	if input.ContainerID == "" {
-		input.ContainerID = LiveContainerID(input.Service, input.ServiceName)
+		input.ContainerID = LiveContainerID(ctx, LiveContainerIDInput{
+			Service:     input.Service,
+			ServiceName: input.ServiceName,
+		})
 	}
 
 	containerStatus, _ := common.DockerInspect(input.ContainerID, "{{ .State.Status }}")
@@ -400,9 +460,12 @@ type VersionInput struct {
 }
 
 // Version gets the version of a service
-func Version(input VersionInput) string {
+func Version(ctx context.Context, input VersionInput) string {
 	if input.ContainerID == "" {
-		input.ContainerID = LiveContainerID(input.Service, input.ServiceName)
+		input.ContainerID = LiveContainerID(ctx, LiveContainerIDInput{
+			Service:     input.Service,
+			ServiceName: input.ServiceName,
+		})
 	}
 
 	containerVersion, _ := common.DockerInspect(input.ContainerID, "{{ .Config.Image }}")

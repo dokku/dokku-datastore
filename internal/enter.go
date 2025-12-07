@@ -3,9 +3,6 @@ package internal
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal/service"
 )
@@ -19,7 +16,7 @@ type EnterServiceInput struct {
 }
 
 // EnterService enters a service
-func EnterService(input EnterServiceInput) error {
+func EnterService(ctx context.Context, input EnterServiceInput) error {
 	if input.DatastoreType == "" {
 		return fmt.Errorf("datastore type is required")
 	}
@@ -28,17 +25,6 @@ func EnterService(input EnterServiceInput) error {
 	if !ok {
 		return fmt.Errorf("datastore type %s is not supported", input.DatastoreType)
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGQUIT,
-		syscall.SIGTERM)
-	go func() {
-		<-signals
-		cancel()
-	}()
 
 	return service.EnterServiceContainer(ctx, service.EnterServiceContainerInput{
 		Service:     serviceWrapper,

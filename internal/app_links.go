@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	"slices"
 
@@ -16,7 +17,7 @@ type LinkedAppsInput struct {
 }
 
 // LinkedApps lists all services that are linked to a given app
-func LinkedApps(input LinkedAppsInput) ([]string, error) {
+func LinkedApps(ctx context.Context, input LinkedAppsInput) ([]string, error) {
 	if input.AppName == "" {
 		return []string{}, fmt.Errorf("app name is required")
 	}
@@ -25,7 +26,7 @@ func LinkedApps(input LinkedAppsInput) ([]string, error) {
 		return []string{}, fmt.Errorf("datastore type is required")
 	}
 
-	services, err := ListServices(ListServicesInput{
+	services, err := ListServices(ctx, ListServicesInput{
 		DatastoreType: input.DatastoreType,
 		Trace:         true,
 	})

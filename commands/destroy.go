@@ -1,9 +1,12 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
 	"github.com/dokku/dokku-datastore/internal/service"
@@ -97,6 +100,17 @@ func (c *DestroyCommand) AutocompleteFlags() complete.Flags {
 
 // Run runs the command
 func (c *DestroyCommand) Run(args []string) int {
+	ctx, cancel := context.WithCancel(context.Background())
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGQUIT,
+		syscall.SIGTERM)
+	go func() {
+		<-signals
+		cancel()
+	}()
+
 	logger := internal.Ui{
 		Ui:     c.Ui,
 		Format: c.format,
@@ -177,7 +191,7 @@ func (c *DestroyCommand) Run(args []string) int {
 	}
 
 	logger.Info(fmt.Sprintf("Destroying %s service %s", datastoreType, serviceName))
-	err = internal.DestroyService(internal.DestroyServiceInput{
+	err = internal.DestroyService(ctx, internal.DestroyServiceInput{
 		DatastoreType: datastoreType,
 		ServiceName:   serviceName,
 	})

@@ -17,7 +17,7 @@ type RedisService struct {
 }
 
 // CreateService creates a new service
-func (s *RedisService) CreateService(serviceName string) error {
+func (s *RedisService) CreateService(ctx context.Context, serviceName string) error {
 	serviceFolders := Folders(s, serviceName)
 	serviceRoot := serviceFolders.Root
 	redisServiceConfig := filepath.Join(serviceFolders.Config, "redis.conf")
@@ -91,7 +91,7 @@ func (s *RedisService) CreateService(serviceName string) error {
 }
 
 // CreateServiceContainer creates a new service container
-func (s *RedisService) CreateServiceContainer(serviceName string) error {
+func (s *RedisService) CreateServiceContainer(ctx context.Context, serviceName string) error {
 	serviceProperties := s.Properties()
 	serviceFolders := Folders(s, serviceName)
 	serviceFiles := Files(s, serviceName)
@@ -171,7 +171,7 @@ func (s *RedisService) CreateServiceContainer(serviceName string) error {
 	}
 
 	// create the container
-	_, err = CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
+	_, err = CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    dockerCreateArgs,
 	})
@@ -181,7 +181,7 @@ func (s *RedisService) CreateServiceContainer(serviceName string) error {
 
 	postCreateNetworks := common.PropertyGet(serviceProperties.CommandPrefix, serviceName, "post-create-network")
 	if postCreateNetworks != "" {
-		err := AttachNetworksToContainer(context.Background(), AttachNetworksToContainerInput{
+		err := AttachNetworksToContainer(ctx, AttachNetworksToContainerInput{
 			ContainerID:  common.ReadFirstLine(cidFilename),
 			Networks:     strings.Split(postCreateNetworks, ","),
 			NetworkAlias: networkAlias,
@@ -197,7 +197,7 @@ func (s *RedisService) CreateServiceContainer(serviceName string) error {
 	}
 
 	// start the container
-	_, err = CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
+	_, err = CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    []string{"container", "start", containerID},
 	})
@@ -205,13 +205,17 @@ func (s *RedisService) CreateServiceContainer(serviceName string) error {
 		return fmt.Errorf("failed to start container: %w", err)
 	}
 
-	if err := ServicePortReconcileStatus(serviceProperties.CommandPrefix, serviceName); err != nil {
+	err = ServicePortReconcileStatus(ctx, ServicePortReconcileStatusInput{
+		DatastoreType: "redis",
+		ServiceName:   serviceName,
+	})
+	if err != nil {
 		return fmt.Errorf("failed to reconcile port status: %w", err)
 	}
 
 	postStartNetworks := common.PropertyGet(serviceProperties.CommandPrefix, serviceName, "post-start-network")
 	if postStartNetworks != "" {
-		err := AttachNetworksToContainer(context.Background(), AttachNetworksToContainerInput{
+		err := AttachNetworksToContainer(ctx, AttachNetworksToContainerInput{
 			ContainerID:  common.ReadFirstLine(cidFilename),
 			Networks:     strings.Split(postStartNetworks, ","),
 			NetworkAlias: networkAlias,

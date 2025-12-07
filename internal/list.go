@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,7 +18,7 @@ type ListServicesInput struct {
 }
 
 // ListServices lists all services of a given datastore type
-func ListServices(input ListServicesInput) ([]string, error) {
+func ListServices(ctx context.Context, input ListServicesInput) ([]string, error) {
 	if input.DatastoreType == "" {
 		return nil, fmt.Errorf("datastore type is required")
 	}
@@ -36,7 +37,11 @@ func ListServices(input ListServicesInput) ([]string, error) {
 		services[i] = subfolder.Name()
 	}
 
-	services, err = service.FilterServices(input.DatastoreType, services, input.Trace)
+	services, err = service.FilterServices(ctx, service.FilterServicesInput{
+		DatastoreType: input.DatastoreType,
+		Services:      services,
+		Trace:         input.Trace,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to filter services: %w", err)
 	}
