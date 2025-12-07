@@ -29,9 +29,25 @@ func ContainerID(s Service, serviceName string) string {
 	return common.ReadFirstLine(serviceFiles.ID)
 }
 
+// ContainerIPInput is the input for the ContainerIP function
+type ContainerIPInput struct {
+	// ContainerID is the ID of the container to get the IP for
+	ContainerID string
+
+	// Service is the service to get the IP for
+	Service Service
+
+	// ServiceName is the name of the service to get the IP for
+	ServiceName string
+}
+
 // ContainerIP gets the container IP for a service
-func ContainerIP(s Service, serviceName string) string {
-	containerIP, _ := common.DockerInspect(ContainerID(s, serviceName), "{{ .NetworkSettings.IPAddress }}")
+func ContainerIP(input ContainerIPInput) string {
+	if input.ContainerID == "" {
+		input.ContainerID = LiveContainerID(input.Service, input.ServiceName)
+	}
+
+	containerIP, _ := common.DockerInspect(input.ContainerID, "{{ .NetworkSettings.IPAddress }}")
 	return containerIP
 }
 
@@ -149,21 +165,22 @@ func Folders(s Service, serviceName string) ServiceFolders {
 func Info(s Service, serviceName string) map[string]string {
 	serviceFolders := Folders(s, serviceName)
 
+	containerID := LiveContainerID(s, serviceName)
 	return map[string]string{
 		"config-dir":          serviceFolders.Config,
 		"config-options":      ConfigOptions(s, serviceName),
 		"data-dir":            serviceFolders.Data,
 		"dsn":                 s.URL(serviceName),
 		"exposed-ports":       ExposedPorts(s, serviceName),
-		"id":                  ContainerID(s, serviceName),
-		"internal-ip":         ContainerIP(s, serviceName),
+		"id":                  containerID,
+		"internal-ip":         ContainerIP(ContainerIPInput{ContainerID: containerID}),
 		"initial-network":     InitialNetwork(s, serviceName),
 		"links":               strings.Join(LinkedApps(s, serviceName), ","),
 		"post-create-network": PostCreateNetwork(s, serviceName),
 		"post-start-network":  PostStartNetwork(s, serviceName),
 		"service-root":        serviceFolders.Root,
-		"status":              Status(s, serviceName),
-		"version":             Version(s, serviceName),
+		"status":              Status(StatusInput{ContainerID: containerID}),
+		"version":             Version(VersionInput{ContainerID: containerID}),
 	}
 }
 
@@ -321,9 +338,25 @@ func RemoveServiceContainer(s Service, serviceName string) error {
 	return nil
 }
 
+// StatusInput is the input for the Status function
+type StatusInput struct {
+	// ContainerID is the ID of the container to get the status for
+	ContainerID string
+
+	// Service is the service to get the status for
+	Service Service
+
+	// ServiceName is the name of the service to get the status for
+	ServiceName string
+}
+
 // Status gets the status of a service
-func Status(s Service, serviceName string) string {
-	containerStatus, _ := common.DockerInspect(ContainerID(s, serviceName), "{{ .State.Status }}")
+func Status(input StatusInput) string {
+	if input.ContainerID == "" {
+		input.ContainerID = LiveContainerID(input.Service, input.ServiceName)
+	}
+
+	containerStatus, _ := common.DockerInspect(input.ContainerID, "{{ .State.Status }}")
 	if containerStatus == "" {
 		return "missing"
 	}
@@ -331,8 +364,24 @@ func Status(s Service, serviceName string) string {
 	return containerStatus
 }
 
+// VersionInput is the input for the Version function
+type VersionInput struct {
+	// ContainerID is the ID of the container to get the version for
+	ContainerID string
+
+	// Service is the service to get the version for
+	Service Service
+
+	// ServiceName is the name of the service to get the version for
+	ServiceName string
+}
+
 // Version gets the version of a service
-func Version(s Service, serviceName string) string {
-	containerVersion, _ := common.DockerInspect(ContainerID(s, serviceName), "{{ .Config.Image }}")
+func Version(input VersionInput) string {
+	if input.ContainerID == "" {
+		input.ContainerID = LiveContainerID(input.Service, input.ServiceName)
+	}
+
+	containerVersion, _ := common.DockerInspect(input.ContainerID, "{{ .Config.Image }}")
 	return containerVersion
 }

@@ -250,7 +250,7 @@ func (c *CreateCommand) Run(args []string) int {
 		logger.Error(internal.ErrorInput{
 			Error: err,
 		})
-		containerID := service.ContainerID(serviceWrapper, serviceName)
+		containerID := service.LiveContainerID(serviceWrapper, serviceName)
 		logger.Header1(fmt.Sprintf("Start of %s container output", serviceName))
 		common.LogVerboseQuietContainerLogs(containerID)
 		logger.Header1(fmt.Sprintf("End of %s container output", serviceName))
