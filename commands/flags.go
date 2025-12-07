@@ -5,12 +5,17 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
+// GlobalFlagCommand is the global flag command
 type GlobalFlagCommand struct {
-	quiet  bool
+	// quiet is whether to suppress output
+	quiet bool
+	// format is the format to output the data in
 	format string
-	trace  bool
+	// trace is whether to enable trace output
+	trace bool
 }
 
+// GlobalFlags adds the global flags to the flag set
 func (c *GlobalFlagCommand) GlobalFlags(f *flag.FlagSet) {
 	f.BoolVar(&c.quiet, "quiet", false, "suppress output")
 	// one of json, table
@@ -18,6 +23,7 @@ func (c *GlobalFlagCommand) GlobalFlags(f *flag.FlagSet) {
 	f.BoolVar(&c.trace, "trace", false, "enable trace output")
 }
 
+// AutocompleteGlobalFlags returns the autocomplete global flags
 func (c *GlobalFlagCommand) AutocompleteGlobalFlags() complete.Flags {
 	return complete.Flags{
 		"--quiet":  complete.PredictNothing,
