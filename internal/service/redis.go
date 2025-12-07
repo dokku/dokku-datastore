@@ -171,15 +171,12 @@ func (s *RedisService) CreateServiceContainer(serviceName string) error {
 	}
 
 	// create the container
-	result, err := common.CallExecCommand(common.ExecCommandInput{
+	_, err = CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    dockerCreateArgs,
 	})
 	if err != nil {
 		return err
-	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("failed to create container: %s", result.StderrContents())
 	}
 
 	postCreateNetworks := common.PropertyGet(serviceProperties.CommandPrefix, serviceName, "post-create-network")
@@ -200,15 +197,12 @@ func (s *RedisService) CreateServiceContainer(serviceName string) error {
 	}
 
 	// start the container
-	result, err = common.CallExecCommand(common.ExecCommandInput{
+	_, err = CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    []string{"container", "start", containerID},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to start container: %w", err)
-	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("failed to start container: %s", result.StderrContents())
 	}
 
 	if err := ServicePortReconcileStatus(serviceProperties.CommandPrefix, serviceName); err != nil {

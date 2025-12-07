@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -48,15 +49,12 @@ func DestroyService(input DestroyServiceInput) error {
 	}
 
 	serviceFolders := service.Folders(serviceWrapper, input.ServiceName)
-	result, err := common.CallExecCommand(common.ExecCommandInput{
+	_, err = service.CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    []string{"container", "run", "--rm", "-v", fmt.Sprintf("%s/data:/data", serviceFolders.HostRoot), "-v", fmt.Sprintf("%s/config:/config", serviceFolders.HostRoot), service.PluginBusyboxImage, "chmod", "777", "-R", "/config", "/data"},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to remove data: %w", err)
-	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("failed to remove data: %s", result.StderrContents())
 	}
 
 	if err := os.RemoveAll(serviceFolders.Root); err != nil {

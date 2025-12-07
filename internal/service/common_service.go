@@ -90,7 +90,7 @@ func EnterServiceContainer(ctx context.Context, input EnterServiceContainerInput
 		return fmt.Errorf("%s container %s is not running", input.Service.Properties().CommandPrefix, input.ServiceName)
 	}
 
-	result, err := common.CallExecCommandWithContext(ctx, common.ExecCommandInput{
+	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command:      common.DockerBin(),
 		Args:         []string{"container", "exec", "-it", containerID, "/bin/bash"},
 		Stdin:        os.Stdin,
@@ -99,9 +99,6 @@ func EnterServiceContainer(ctx context.Context, input EnterServiceContainerInput
 	})
 	if err != nil {
 		return fmt.Errorf("failed to exec container: %w", err)
-	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("failed to exec container: %s", result.StderrContents())
 	}
 
 	return nil
@@ -251,14 +248,11 @@ func LinkedApps(s Service, serviceName string) []string {
 func LiveContainerID(s Service, serviceName string) string {
 	//   ID=$("$DOCKER_BIN" container ps -aq --no-trunc --filter "name=^/$SERVICE_NAME$") || true
 	containerName := ContainerName(s, serviceName)
-	result, err := common.CallExecCommand(common.ExecCommandInput{
+	result, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    []string{"container", "ps", "-aq", "--no-trunc", "--filter", fmt.Sprintf("name=^/%s$", containerName)},
 	})
 	if err != nil {
-		return ""
-	}
-	if result.ExitCode != 0 {
 		return ""
 	}
 
@@ -272,28 +266,22 @@ func LiveContainerID(s Service, serviceName string) string {
 
 // PauseServiceContainer pauses a service container
 func PauseServiceContainer(s Service, serviceName string, containerID string) error {
-	result, err := common.CallExecCommand(common.ExecCommandInput{
+	_, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    []string{"container", "stop", containerID},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("failed to stop container: %s", result.StderrContents())
-	}
 
 	ambassadorContainerName := AmbassadorContainerName(s, serviceName)
 	if common.ContainerExists(ambassadorContainerName) {
-		result, err = common.CallExecCommand(common.ExecCommandInput{
+		_, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
 			Command: common.DockerBin(),
 			Args:    []string{"container", "stop", ambassadorContainerName},
 		})
 		if err != nil {
 			return fmt.Errorf("failed to stop ambassador container: %w", err)
-		}
-		if result.ExitCode != 0 {
-			return fmt.Errorf("failed to stop ambassador container: %s", result.StderrContents())
 		}
 	}
 
@@ -318,15 +306,12 @@ func RemoveBackupSchedule(s Service, serviceName string) error {
 	}
 
 	// run with sudo
-	result, err := common.CallExecCommand(common.ExecCommandInput{
+	_, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
 		Command: "sudo",
 		Args:    []string{"rm", "-f", serviceFiles.CronFile},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to remove cron file: %w", err)
-	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("failed to remove cron file: %s", result.StderrContents())
 	}
 
 	return nil
@@ -334,15 +319,12 @@ func RemoveBackupSchedule(s Service, serviceName string) error {
 
 // RemoveContainer removes a container
 func RemoveContainer(containerID string) error {
-	result, err := common.CallExecCommand(common.ExecCommandInput{
+	_, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    []string{"container", "rm", "-f", containerID},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to remove container: %w", err)
-	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("failed to remove container: %s", result.StderrContents())
 	}
 
 	return nil
@@ -364,15 +346,12 @@ func RemoveServiceContainer(s Service, serviceName string) error {
 		return err
 	}
 
-	result, err := common.CallExecCommand(common.ExecCommandInput{
+	_, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    []string{"container", "update", "--restart=no", containerID},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to update container restart policy: %w", err)
-	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("failed to update container restart policy: %s", result.StderrContents())
 	}
 
 	if err := RemoveContainer(containerID); err != nil {

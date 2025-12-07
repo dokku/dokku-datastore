@@ -30,28 +30,32 @@ type AttachNetworksToContainerInput struct {
 // AttachNetworksToContainer attaches networks to a container
 func AttachNetworksToContainer(ctx context.Context, input AttachNetworksToContainerInput) error {
 	for _, network := range input.Networks {
-		result, err := common.CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 			Command: common.DockerBin(),
 			Args:    []string{"network", "connect", "--alias", input.NetworkAlias, network, input.ContainerID},
 		})
 		if err != nil {
 			return fmt.Errorf("failed to connect to network %s: %w", network, err)
 		}
-		if result.ExitCode != 0 {
-			return fmt.Errorf("failed to connect to network %s: %s", network, result.StderrContents())
-		}
 	}
 	return nil
 }
 
-// GenerateRandomHexString generates a random hex string
-func GenerateRandomHexString(length int) (string, error) {
-	bytes := make([]byte, length/2)
-	_, err := rand.Read(bytes)
+// CallExecCommandWithContext calls a command with a context
+func CallExecCommandWithContext(ctx context.Context, input common.ExecCommandInput) (common.ExecCommandResponse, error) {
+	result, err := common.CallExecCommandWithContext(ctx, input)
 	if err != nil {
-		return "", err
+		return result, err
 	}
-	return hex.EncodeToString(bytes), nil
+	if result.ExitCode != 0 {
+		if input.StreamStderr {
+			return result, errors.New("command exited non-zero")
+		}
+
+		return result, fmt.Errorf("command exited non-zero: %s", result.StderrContents())
+	}
+
+	return result, nil
 }
 
 // CommitServiceConfigInput is the input for the CommitServiceConfig function
@@ -183,6 +187,16 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	return nil
 }
 
+// GenerateRandomHexString generates a random hex string
+func GenerateRandomHexString(length int) (string, error) {
+	bytes := make([]byte, length/2)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
 // ImageForServiceInput is the input for the ImageForService function
 type ImageForServiceInput struct {
 	// DatastoreType is the type of datastore to get the image for
@@ -253,7 +267,7 @@ func ImageForService(input ImageForServiceInput) (string, error) {
 
 // PullTaggedImage pulls a tagged image
 func PullTaggedImage(taggedImage string) (bool, error) {
-	result, err := common.CallExecCommand(common.ExecCommandInput{
+	result, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
 		Command:      common.DockerBin(),
 		Args:         []string{"image", "pull", taggedImage},
 		StreamStderr: true,
@@ -363,15 +377,12 @@ func ServicePortReconcileStatus(datastoreType string, serviceName string) error 
 
 	if !common.FileExists(portFile) || common.ReadFirstLine(portFile) == "" {
 		if common.ContainerExists(exposedName) {
-			result, err := common.CallExecCommand(common.ExecCommandInput{
+			_, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
 				Command: common.DockerBin(),
 				Args:    []string{"container", "stop", exposedName},
 			})
 			if err != nil {
 				return fmt.Errorf("failed to stop container %s: %w", exposedName, err)
-			}
-			if result.ExitCode != 0 {
-				return fmt.Errorf("failed to stop container %s: %s", exposedName, result.StderrContents())
 			}
 		}
 
@@ -383,15 +394,12 @@ func ServicePortReconcileStatus(datastoreType string, serviceName string) error 
 	}
 
 	if common.ContainerExists(exposedName) {
-		result, err := common.CallExecCommand(common.ExecCommandInput{
+		_, err := CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
 			Command: common.DockerBin(),
 			Args:    []string{"container", "start", exposedName},
 		})
 		if err != nil {
 			return fmt.Errorf("failed to start container %s: %w", exposedName, err)
-		}
-		if result.ExitCode != 0 {
-			return fmt.Errorf("failed to start container %s: %s", exposedName, result.StderrContents())
 		}
 		return nil
 	}
@@ -421,17 +429,13 @@ func ServicePortReconcileStatus(datastoreType string, serviceName string) error 
 
 	dockerRunOptions = append(dockerRunOptions, PluginAmbassadorImage)
 
-	result, err := common.CallExecCommand(common.ExecCommandInput{
+	_, err = CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    dockerRunOptions,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to run container %s: %w", exposedName, err)
 	}
-	if result.ExitCode != 0 {
-		return fmt.Errorf("failed to run container %s: %s", exposedName, result.StderrContents())
-	}
-
 	return nil
 }
 

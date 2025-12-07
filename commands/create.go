@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -242,7 +243,7 @@ func (c *CreateCommand) Run(args []string) int {
 	linkContainerDockerArgs = append(linkContainerDockerArgs, "-c", fmt.Sprintf("%s:%d", networkAlias, waitPort))
 
 	logger.Header1(fmt.Sprintf("Waiting for %s container to be ready", serviceName))
-	result, err := common.CallExecCommand(common.ExecCommandInput{
+	_, err = service.CallExecCommandWithContext(context.Background(), common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    linkContainerDockerArgs,
 	})
@@ -256,13 +257,6 @@ func (c *CreateCommand) Run(args []string) int {
 		logger.Header1(fmt.Sprintf("End of %s container output", serviceName))
 		return 1
 	}
-	if result.ExitCode != 0 {
-		logger.Error(internal.ErrorInput{
-			Error: fmt.Errorf("failed to wait for container to be ready: %s", result.StderrContents()),
-		})
-		return 1
-	}
-
 	// output service info
 	info := service.Info(serviceWrapper, serviceName)
 	if c.format == "json" {
