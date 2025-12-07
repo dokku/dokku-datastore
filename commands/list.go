@@ -127,6 +127,12 @@ func (c *ListCommand) Run(args []string) int {
 		return 1
 	}
 
-	logger.Table(fmt.Sprintf("%v services", datastoreType), services)
+	if err := logger.Table(fmt.Sprintf("%v services", datastoreType), services); err != nil {
+		logger.Error(internal.ErrorInput{
+			Error: err,
+		})
+		return 1
+	}
+
 	return 0
 }
