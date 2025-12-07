@@ -50,6 +50,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"destroy": func() (cli.Command, error) {
 			return &commands.DestroyCommand{Meta: meta}, nil
 		},
+		"enter": func() (cli.Command, error) {
+			return &commands.EnterCommand{Meta: meta}, nil
+		},
 		"list": func() (cli.Command, error) {
 			return &commands.ListCommand{Meta: meta}, nil
 		},

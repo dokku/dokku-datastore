@@ -15,8 +15,10 @@ go build -ldflags "-X main.Version=0.1.0
 Usage: dokku-datastore [--version] [--help] <command> [<args>]
 
 Available commands are:
-    app-links    Lists all service links for a given app
+    app-links    Lists all app links for a given app
     create       Creates a new datastore service
+    destroy      Destroys a datastore service
+    enter        Enters a service
     list         Lists all services of a given datastore type
     version      Return the version of the binary
 ```

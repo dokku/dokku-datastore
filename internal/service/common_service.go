@@ -1,7 +1,9 @@
 package service
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -61,6 +63,48 @@ func ContainerName(s Service, serviceName string) string {
 func DNSHostname(s Service, serviceName string) string {
 	serviceName = ContainerName(s, serviceName)
 	return strings.NewReplacer(".", "-", "_", "-").Replace(serviceName)
+}
+
+// EnterServiceContainerInput is the input for the EnterServiceContainer function
+type EnterServiceContainerInput struct {
+	// Service is the service to enter
+	Service Service
+
+	// ServiceName is the name of the service to enter
+	ServiceName string
+}
+
+// EnterServiceContainer enters a service container
+func EnterServiceContainer(ctx context.Context, input EnterServiceContainerInput) error {
+	containerID := LiveContainerID(input.Service, input.ServiceName)
+	if containerID == "" {
+		return fmt.Errorf("%s container %s does not exist", input.Service.Properties().CommandPrefix, input.ServiceName)
+	}
+
+	if !common.ContainerExists(containerID) {
+		return fmt.Errorf("%s container %s does not exist", input.Service.Properties().CommandPrefix, input.ServiceName)
+	}
+
+	status := Status(StatusInput{ContainerID: containerID})
+	if strings.ToLower(status) != "running" {
+		return fmt.Errorf("%s container %s is not running", input.Service.Properties().CommandPrefix, input.ServiceName)
+	}
+
+	result, err := common.CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		Command:      common.DockerBin(),
+		Args:         []string{"container", "exec", "-it", containerID, "/bin/bash"},
+		Stdin:        os.Stdin,
+		StdoutWriter: os.Stdout,
+		StderrWriter: os.Stderr,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to exec container: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("failed to exec container: %s", result.StderrContents())
+	}
+
+	return nil
 }
 
 // Exists checks if a service exists
