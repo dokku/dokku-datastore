@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -13,6 +14,35 @@ import (
 
 	"github.com/dokku/dokku/plugins/common"
 )
+
+// AttachNetworksToContainerInput is the input for the AttachNetworksToContainer function
+type AttachNetworksToContainerInput struct {
+	// ContainerID is the ID of the container to attach networks to
+	ContainerID string
+
+	// Networks is the networks to attach to the container
+	Networks []string
+
+	// NetworkAlias is the alias to use for the networks
+	NetworkAlias string
+}
+
+// AttachNetworksToContainer attaches networks to a container
+func AttachNetworksToContainer(ctx context.Context, input AttachNetworksToContainerInput) error {
+	for _, network := range input.Networks {
+		result, err := common.CallExecCommandWithContext(ctx, common.ExecCommandInput{
+			Command: common.DockerBin(),
+			Args:    []string{"network", "connect", "--alias", input.NetworkAlias, network, input.ContainerID},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to connect to network %s: %w", network, err)
+		}
+		if result.ExitCode != 0 {
+			return fmt.Errorf("failed to connect to network %s: %s", network, result.StderrContents())
+		}
+	}
+	return nil
+}
 
 // GenerateRandomHexString generates a random hex string
 func GenerateRandomHexString(length int) (string, error) {

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -183,20 +184,13 @@ func (s *RedisService) CreateServiceContainer(serviceName string) error {
 
 	postCreateNetworks := common.PropertyGet(serviceProperties.CommandPrefix, serviceName, "post-create-network")
 	if postCreateNetworks != "" {
-		// todo: add log message: "Connecting to networks after container create"
-		networksToConnect := strings.Split(postCreateNetworks, ",")
-		for _, network := range networksToConnect {
-			// todo: log the network being connected to: "- <network>"
-			result, err := common.CallExecCommand(common.ExecCommandInput{
-				Command: common.DockerBin(),
-				Args:    []string{"network", "connect", "--alias", networkAlias, network, serviceName},
-			})
-			if err != nil {
-				return fmt.Errorf("failed to connect to network %s: %w", network, err)
-			}
-			if result.ExitCode != 0 {
-				return fmt.Errorf("failed to connect to network %s: %s", network, result.StderrContents())
-			}
+		err := AttachNetworksToContainer(context.Background(), AttachNetworksToContainerInput{
+			ContainerID:  common.ReadFirstLine(cidFilename),
+			Networks:     strings.Split(postCreateNetworks, ","),
+			NetworkAlias: networkAlias,
+		})
+		if err != nil {
+			return err
 		}
 	}
 
@@ -223,25 +217,16 @@ func (s *RedisService) CreateServiceContainer(serviceName string) error {
 
 	postStartNetworks := common.PropertyGet(serviceProperties.CommandPrefix, serviceName, "post-start-network")
 	if postStartNetworks != "" {
-		// todo: add log message: "Connecting to networks after container start"
-		networksToConnect := strings.Split(postStartNetworks, ",")
-		for _, network := range networksToConnect {
-			// todo: log the network being connected to: "- <network>"
-			result, err := common.CallExecCommand(common.ExecCommandInput{
-				Command: common.DockerBin(),
-				Args:    []string{"network", "connect", "--alias", networkAlias, network, serviceName},
-			})
-			if err != nil {
-				return fmt.Errorf("failed to connect to network %s: %w", network, err)
-			}
-			if result.ExitCode != 0 {
-				return fmt.Errorf("failed to connect to network %s: %s", network, result.StderrContents())
-			}
+		err := AttachNetworksToContainer(context.Background(), AttachNetworksToContainerInput{
+			ContainerID:  common.ReadFirstLine(cidFilename),
+			Networks:     strings.Split(postStartNetworks, ","),
+			NetworkAlias: networkAlias,
+		})
+		if err != nil {
+			return err
 		}
 	}
 
-	//   dokku_log_info2 "$PLUGIN_SERVICE container created: $SERVICE"
-	//   service_info "$SERVICE"
 	return nil
 }
 
