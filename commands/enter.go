@@ -164,7 +164,7 @@ func (c *EnterCommand) Run(args []string) int {
 		return 1
 	}
 
-	if !service.Exists(serviceWrapper, serviceName) {
+	if !service.Exists(ctx, serviceWrapper, serviceName) {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("service %s does not exist", serviceName),
 		})

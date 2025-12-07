@@ -166,7 +166,7 @@ func (c *DestroyCommand) Run(args []string) int {
 	}
 
 	// check if the service exists
-	if !service.Exists(serviceWrapper, serviceName) {
+	if !service.Exists(ctx, serviceWrapper, serviceName) {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("service %s does not exist", serviceName),
 		})
@@ -192,7 +192,7 @@ func (c *DestroyCommand) Run(args []string) int {
 		}
 	}
 
-	logger.Info(fmt.Sprintf("Destroying %s service %s", datastoreType, serviceName)) //nolint:errcheck
+	logger.Info(fmt.Sprintf("Destroying %s service %s", datastoreType, serviceName))
 	err = internal.DestroyService(ctx, internal.DestroyServiceInput{
 		DatastoreType: datastoreType,
 		ServiceName:   serviceName,

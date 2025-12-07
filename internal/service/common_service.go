@@ -111,7 +111,7 @@ func EnterServiceContainer(ctx context.Context, input EnterServiceContainerInput
 }
 
 // Exists checks if a service exists
-func Exists(s Service, serviceName string) bool {
+func Exists(ctx context.Context, s Service, serviceName string) bool {
 	serviceFolders := Folders(s, serviceName)
 	return common.DirectoryExists(serviceFolders.Root)
 }
