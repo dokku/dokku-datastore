@@ -15,7 +15,8 @@ go build -ldflags "-X main.Version=0.1.0
 Usage: dokku-datastore [--version] [--help] <command> [<args>]
 
 Available commands are:
-    create     Creates a new datastore service
-    list       Lists all services of a given datastore type
-    version    Return the version of the binary
+    app-links    Lists all service links for a given app
+    create       Creates a new datastore service
+    list         Lists all services of a given datastore type
+    version      Return the version of the binary
 ```
