@@ -13,7 +13,7 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
-// ListCommand is the command for listing all services of a given datastore type
+// AppLinksCommand is the command for listing all app links for a given app
 type AppLinksCommand struct {
 	// Meta is the command meta
 	command.Meta
@@ -23,12 +23,12 @@ type AppLinksCommand struct {
 
 // Name returns the name of the command
 func (c *AppLinksCommand) Name() string {
-	return "list"
+	return "app-links"
 }
 
 // Synopsis returns the synopsis of the command
 func (c *AppLinksCommand) Synopsis() string {
-	return "Lists all service links for a given app"
+	return "Lists all app links for a given app"
 }
 
 // Help returns the help text for the command
@@ -40,7 +40,7 @@ func (c *AppLinksCommand) Help() string {
 func (c *AppLinksCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Lists all redis services links for the app test": fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Lists all redis app links for the app test": fmt.Sprintf("%s %s redis test", appName, c.Name()),
 	}
 }
 
@@ -49,13 +49,13 @@ func (c *AppLinksCommand) Arguments() []command.Argument {
 	args := []command.Argument{}
 	args = append(args, command.Argument{
 		Name:        "datastore-type",
-		Description: "the type of datastore to list",
+		Description: "the type of datastore to list the app links for",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
 	args = append(args, command.Argument{
 		Name:        "app-name",
-		Description: "the name of the app to list the service links for",
+		Description: "the name of the app to list the app links for",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
