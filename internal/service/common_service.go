@@ -11,6 +11,12 @@ import (
 // CommonService is the common service for all services
 type CommonService struct{}
 
+// AmbassadorContainerName gets the name of the ambassador container for a service
+func AmbassadorContainerName(s Service, serviceName string) string {
+	commandPrefix := s.Properties().CommandPrefix
+	return fmt.Sprintf("dokku.%s.%s.ambassador", commandPrefix, serviceName)
+}
+
 // ConfigOptions gets the config options for a service
 func ConfigOptions(s Service, serviceName string) string {
 	serviceRoot := Folders(s, serviceName).Root
@@ -41,6 +47,12 @@ func DNSHostname(s Service, serviceName string) string {
 	return strings.NewReplacer(".", "-", "_", "-").Replace(serviceName)
 }
 
+// Exists checks if a service exists
+func Exists(s Service, serviceName string) bool {
+	serviceFolders := Folders(s, serviceName)
+	return common.DirectoryExists(serviceFolders.Root)
+}
+
 // ExposedPorts gets the exposed ports for a service
 func ExposedPorts(s Service, serviceName string) string {
 	serviceFiles := Files(s, serviceName)
@@ -64,6 +76,8 @@ func ExposedPorts(s Service, serviceName string) string {
 type ServiceFiles struct {
 	// ConfigOptions is the config options file for the service
 	ConfigOptions string
+	// CronFile is the cron file for the service
+	CronFile string
 	// DatabaseName is the database name file for the service
 	DatabaseName string
 	// Env is the environment file for the service
@@ -89,6 +103,7 @@ func Files(s Service, serviceName string) ServiceFiles {
 	folders := Folders(s, serviceName)
 	return ServiceFiles{
 		ConfigOptions: filepath.Join(folders.Root, "CONFIG_OPTIONS"),
+		CronFile:      fmt.Sprintf("/etc/cron.d/dokku-%s-%s", s.Properties().CommandPrefix, serviceName),
 		DatabaseName:  filepath.Join(folders.Root, "DATABASE_NAME"),
 		Env:           filepath.Join(folders.Root, "ENV"),
 		ID:            filepath.Join(folders.Root, "ID"),
@@ -171,6 +186,59 @@ func LinkedApps(s Service, serviceName string) []string {
 	return lines
 }
 
+// LiveContainerID gets the live container ID for a service, regardless of what is set in the ID file
+func LiveContainerID(s Service, serviceName string) string {
+	//   ID=$("$DOCKER_BIN" container ps -aq --no-trunc --filter "name=^/$SERVICE_NAME$") || true
+	containerName := ContainerName(s, serviceName)
+	result, err := common.CallExecCommand(common.ExecCommandInput{
+		Command: common.DockerBin(),
+		Args:    []string{"container", "ps", "-aq", "--no-trunc", "--filter", fmt.Sprintf("name=^/%s$", containerName)},
+	})
+	if err != nil {
+		return ""
+	}
+	if result.ExitCode != 0 {
+		return ""
+	}
+
+	id := result.StdoutContents()
+	if id == "true" {
+		return ""
+	}
+
+	return id
+}
+
+// PauseServiceContainer pauses a service container
+func PauseServiceContainer(s Service, serviceName string, containerID string) error {
+	result, err := common.CallExecCommand(common.ExecCommandInput{
+		Command: common.DockerBin(),
+		Args:    []string{"container", "stop", containerID},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to stop container: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("failed to stop container: %s", result.StderrContents())
+	}
+
+	ambassadorContainerName := AmbassadorContainerName(s, serviceName)
+	if common.ContainerExists(ambassadorContainerName) {
+		result, err = common.CallExecCommand(common.ExecCommandInput{
+			Command: common.DockerBin(),
+			Args:    []string{"container", "stop", ambassadorContainerName},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to stop ambassador container: %w", err)
+		}
+		if result.ExitCode != 0 {
+			return fmt.Errorf("failed to stop ambassador container: %s", result.StderrContents())
+		}
+	}
+
+	return nil
+}
+
 // PostCreateNetwork gets the post create network for a service
 func PostCreateNetwork(s Service, serviceName string) string {
 	return common.PropertyGet(s.Properties().CommandPrefix, serviceName, "post-create-network")
@@ -179,6 +247,78 @@ func PostCreateNetwork(s Service, serviceName string) string {
 // PostStartNetwork gets the post start network for a service
 func PostStartNetwork(s Service, serviceName string) string {
 	return common.PropertyGet(s.Properties().CommandPrefix, serviceName, "post-start-network")
+}
+
+// RemoveBackupSchedule removes the backup schedule for a service
+func RemoveBackupSchedule(s Service, serviceName string) error {
+	serviceFiles := Files(s, serviceName)
+	if !common.FileExists(serviceFiles.CronFile) {
+		return nil
+	}
+
+	// run with sudo
+	result, err := common.CallExecCommand(common.ExecCommandInput{
+		Command: "sudo",
+		Args:    []string{"rm", "-f", serviceFiles.CronFile},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to remove cron file: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("failed to remove cron file: %s", result.StderrContents())
+	}
+
+	return nil
+}
+
+// RemoveContainer removes a container
+func RemoveContainer(containerID string) error {
+	result, err := common.CallExecCommand(common.ExecCommandInput{
+		Command: common.DockerBin(),
+		Args:    []string{"container", "rm", "-f", containerID},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to remove container: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("failed to remove container: %s", result.StderrContents())
+	}
+
+	return nil
+}
+
+// RemoveServiceContainer removes the service container for a service
+func RemoveServiceContainer(s Service, serviceName string) error {
+	containerID := LiveContainerID(s, serviceName)
+	if containerID == "" {
+		return nil
+	}
+
+	if err := PauseServiceContainer(s, serviceName, containerID); err != nil {
+		return err
+	}
+
+	ambassadorContainerName := AmbassadorContainerName(s, serviceName)
+	if err := RemoveContainer(ambassadorContainerName); err != nil {
+		return err
+	}
+
+	result, err := common.CallExecCommand(common.ExecCommandInput{
+		Command: common.DockerBin(),
+		Args:    []string{"container", "update", "--restart=no", containerID},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update container restart policy: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("failed to update container restart policy: %s", result.StderrContents())
+	}
+
+	if err := RemoveContainer(containerID); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Status gets the status of a service

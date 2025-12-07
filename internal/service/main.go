@@ -56,6 +56,9 @@ var (
 // PluginAmbassadorImage is the ambassador image
 var PluginAmbassadorImage = "dokku/ambassador:0.8.2"
 
+// PluginBusyboxImage is the busybox image
+var PluginBusyboxImage = "busybox:1.37.0-uclibc"
+
 // PluginWaitImage is the wait image
 var PluginWaitImage = "dokku/wait:0.9.3"
 

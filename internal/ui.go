@@ -74,6 +74,16 @@ func (u *Ui) Header1(message string) error {
 	return nil
 }
 
+// Info outputs an info message
+func (u *Ui) Info(message string) error {
+	if u.Format == "json" {
+		return json.NewEncoder(os.Stdout).Encode(map[string]string{"info": message})
+	}
+
+	u.Ui.Output(message)
+	return nil
+}
+
 // Table outputs a table of data
 func (u *Ui) Table(header string, rows []string) error {
 	if u.Format == "json" {
