@@ -205,11 +205,11 @@ func (c *CreateCommand) Run(args []string) int {
 	}
 
 	updatedFlags, err := internal.UpdateFlagFromEnv(internal.UpdateFlagFromEnvInput{
-		DatastoreType: datastoreType,
 		ConfigOptions: c.configOptions,
 		CustomEnv:     c.customEnv,
 		Image:         c.image,
 		ImageVersion:  c.imageVersion,
+		Service:       serviceWrapper,
 	})
 	if err != nil {
 		logger.Error(internal.ErrorInput{
@@ -219,15 +219,15 @@ func (c *CreateCommand) Run(args []string) int {
 	}
 
 	err = internal.CreateService(ctx, internal.CreateServiceInput{
-		DatastoreType:  datastoreType,
-		ServiceName:    serviceName,
 		ConfigOptions:  updatedFlags.ConfigOptions,
 		CustomEnv:      updatedFlags.CustomEnv,
 		Image:          updatedFlags.Image,
 		ImageVersion:   updatedFlags.ImageVersion,
-		Memory:         c.memory,
 		InitialNetwork: c.initialNetwork,
+		Memory:         c.memory,
 		Password:       c.password,
+		Service:        serviceWrapper,
+		ServiceName:    serviceName,
 		ShmSize:        c.shmSize,
 	})
 	if err != nil {

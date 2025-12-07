@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/dokku/dokku-datastore/internal/service"
@@ -13,29 +12,21 @@ type UpdateFlagFromEnvInput struct {
 	ConfigOptions string
 	// CustomEnv is the custom environment variables to update from the environment
 	CustomEnv string
-	// DatastoreType is the type of datastore to update the flags for
-	DatastoreType string
 	// Image is the image to update from the environment
 	Image string
 	// ImageVersion is the image version to update from the environment
 	ImageVersion string
+	// Service is the service to update the flags for
+	Service service.Service
 }
 
 // UpdateFlagFromEnv updates the flags from the environment
 func UpdateFlagFromEnv(input UpdateFlagFromEnvInput) (UpdateFlagFromEnvInput, error) {
-	if input.DatastoreType == "" {
-		return input, fmt.Errorf("datastore type is required")
-	}
-
-	serviceWrapper, ok := service.Services[input.DatastoreType]
-	if !ok {
-		return input, fmt.Errorf("datastore type %s is not supported", input.DatastoreType)
-	}
-
-	defaultImage := serviceWrapper.Properties().DefaultImage
-	defaultImageVersion := serviceWrapper.Properties().DefaultImageVersion
-	configVariable := serviceWrapper.Properties().ConfigVariable
-	envVariable := serviceWrapper.Properties().EnvVariable
+	properties := input.Service.Properties()
+	defaultImage := properties.DefaultImage
+	defaultImageVersion := properties.DefaultImageVersion
+	configVariable := properties.ConfigVariable
+	envVariable := properties.EnvVariable
 
 	if input.ConfigOptions == "" {
 		input.ConfigOptions = os.Getenv(configVariable)

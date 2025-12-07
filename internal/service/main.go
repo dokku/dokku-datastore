@@ -36,6 +36,8 @@ type Service interface {
 	CreateServiceContainer(ctx context.Context, serviceName string) error
 	// Properties returns the properties of a service
 	Properties() ServiceStruct
+	// ServiceType returns the type of service
+	ServiceType() string
 	// URL returns the url for a service
 	URL(serviceName string) string
 }

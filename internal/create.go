@@ -14,8 +14,6 @@ import (
 
 // CreateServiceInput is the input for the CreateService function
 type CreateServiceInput struct {
-	// DatastoreType is the type of datastore to create
-	DatastoreType string
 	// ServiceName is the name of the service to create
 	ServiceName string
 	// ConfigOptions is the configuration options to use for the service
@@ -36,26 +34,19 @@ type CreateServiceInput struct {
 	PostCreateNetworks []string
 	// PostStartNetworks is the networks to attach the service container to after service start
 	PostStartNetworks []string
+	// Service is the service to create
+	Service service.Service
 	// ShmSize is the shared memory size to use for the service
 	ShmSize string
 }
 
 // CreateService creates a new service
 func CreateService(ctx context.Context, input CreateServiceInput) error {
-	if input.DatastoreType == "" {
-		return fmt.Errorf("datastore type is required")
-	}
-
-	serviceWrapper, ok := service.Services[input.DatastoreType]
-	if !ok {
-		return fmt.Errorf("datastore type %s is not supported", input.DatastoreType)
-	}
-
 	if err := service.ValidateServiceName(input.ServiceName); err != nil {
 		return err
 	}
 
-	serviceFolders := service.Folders(serviceWrapper, input.ServiceName)
+	serviceFolders := service.Folders(input.Service, input.ServiceName)
 	serviceRoot := serviceFolders.Root
 	if _, err := os.Stat(serviceRoot); err == nil {
 		return fmt.Errorf("service %s already exists", input.ServiceName)
@@ -63,19 +54,20 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 
 	// check if the image exists
 	taggedImage, err := service.ImageForService(service.ImageForServiceInput{
-		DatastoreType:        input.DatastoreType,
-		ServiceName:          input.ServiceName,
 		ImageOverride:        input.Image,
 		ImageVersionOverride: input.ImageVersion,
+		Service:              input.Service,
+		ServiceName:          input.ServiceName,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to get image for service: %w", err)
 	}
 
+	properties := input.Service.Properties()
 	if err := service.ValidateTaggedImageExists(taggedImage); err != nil {
-		if os.Getenv(serviceWrapper.Properties().ImagePullVariable) == "true" {
+		if os.Getenv(properties.ImagePullVariable) == "true" {
 			message := []string{
-				fmt.Sprintf("%s environment variable detected. Not running pull command.", serviceWrapper.Properties().ImagePullVariable),
+				fmt.Sprintf("%s environment variable detected. Not running pull command.", properties.ImagePullVariable),
 				fmt.Sprintf("docker image pull %s", taggedImage),
 				fmt.Sprintf("%s service creation failed", input.ServiceName),
 			}
@@ -90,7 +82,7 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 
 	_, err = service.CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
 		Trigger:      "service-action",
-		Args:         []string{"pre-create", input.DatastoreType, input.ServiceName},
+		Args:         []string{"pre-create", input.Service.ServiceType(), input.ServiceName},
 		Env:          map[string]string{},
 		StreamStderr: true,
 		StreamStdout: true,
@@ -118,34 +110,34 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return fmt.Errorf("failed to create service links file %s: %w", linksFile, err)
 	}
 
-	err = serviceWrapper.CreateService(ctx, input.ServiceName)
+	err = input.Service.CreateService(ctx, input.ServiceName)
 	if err != nil {
 		return fmt.Errorf("failed to create service: %w", err)
 	}
 
 	if err := service.CommitServiceConfig(service.CommitServiceConfigInput{
-		DatastoreType:      input.DatastoreType,
-		ServiceName:        input.ServiceName,
-		CustomEnv:          input.CustomEnv,
 		ConfigOptions:      input.ConfigOptions,
-		Memory:             input.Memory,
-		ShmSize:            input.ShmSize,
+		CustomEnv:          input.CustomEnv,
 		Image:              input.Image,
 		ImageVersion:       input.ImageVersion,
 		InitialNetwork:     input.InitialNetwork,
+		Memory:             input.Memory,
 		PostCreateNetworks: input.PostCreateNetworks,
 		PostStartNetworks:  input.PostStartNetworks,
+		Service:            input.Service,
+		ServiceName:        input.ServiceName,
+		ShmSize:            input.ShmSize,
 	}); err != nil {
 		return fmt.Errorf("failed to commit service config: %w", err)
 	}
 
-	if err := service.WriteDatabaseName(input.DatastoreType, input.ServiceName); err != nil {
+	if err := service.WriteDatabaseName(input.Service.ServiceType(), input.ServiceName); err != nil {
 		return fmt.Errorf("failed to write database name: %w", err)
 	}
 
 	_, err = service.CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
 		Trigger:      "service-action",
-		Args:         []string{"post-create", input.DatastoreType, input.ServiceName},
+		Args:         []string{"post-create", input.Service.ServiceType(), input.ServiceName},
 		StreamStderr: true,
 		StreamStdout: true,
 	})
@@ -153,13 +145,13 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return fmt.Errorf("failed to call service-action post-create trigger: %w", err)
 	}
 
-	if err := serviceWrapper.CreateServiceContainer(ctx, input.ServiceName); err != nil {
+	if err := input.Service.CreateServiceContainer(ctx, input.ServiceName); err != nil {
 		return fmt.Errorf("failed to create service container: %w", err)
 	}
 
 	_, err = service.CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
 		Trigger:      "service-action",
-		Args:         []string{"post-create-complete", input.DatastoreType, input.ServiceName},
+		Args:         []string{"post-create-complete", input.Service.ServiceType(), input.ServiceName},
 		StreamStderr: true,
 		StreamStdout: true,
 	})

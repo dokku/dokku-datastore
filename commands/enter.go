@@ -172,8 +172,8 @@ func (c *EnterCommand) Run(args []string) int {
 	}
 
 	err = internal.EnterService(ctx, internal.EnterServiceInput{
-		DatastoreType: datastoreType,
-		ServiceName:   serviceName,
+		Service:     serviceWrapper,
+		ServiceName: serviceName,
 	})
 	if err != nil {
 		logger.Error(internal.ErrorInput{

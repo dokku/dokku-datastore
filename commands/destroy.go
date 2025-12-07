@@ -194,8 +194,8 @@ func (c *DestroyCommand) Run(args []string) int {
 
 	logger.Info(fmt.Sprintf("Destroying %s service %s", datastoreType, serviceName))
 	err = internal.DestroyService(ctx, internal.DestroyServiceInput{
-		DatastoreType: datastoreType,
-		ServiceName:   serviceName,
+		Service:     serviceWrapper,
+		ServiceName: serviceName,
 	})
 	if err != nil {
 		logger.Error(internal.ErrorInput{

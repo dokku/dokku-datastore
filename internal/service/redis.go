@@ -206,8 +206,8 @@ func (s *RedisService) CreateServiceContainer(ctx context.Context, serviceName s
 	}
 
 	err = ServicePortReconcileStatus(ctx, ServicePortReconcileStatusInput{
-		DatastoreType: "redis",
-		ServiceName:   serviceName,
+		Service:     s,
+		ServiceName: serviceName,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to reconcile port status: %w", err)
@@ -241,6 +241,11 @@ func (s *RedisService) Properties() ServiceStruct {
 		Ports:               []int{6379},
 		WaitPort:            6379,
 	}
+}
+
+// ServiceType returns the type of service
+func (s *RedisService) ServiceType() string {
+	return "redis"
 }
 
 // URL gets the url for a service

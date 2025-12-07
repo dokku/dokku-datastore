@@ -141,7 +141,7 @@ func (c *AppLinksCommand) Run(args []string) int {
 		return 1
 	}
 
-	_, ok := service.Services[datastoreType]
+	serviceWrapper, ok := service.Services[datastoreType]
 	if !ok {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
@@ -166,8 +166,8 @@ func (c *AppLinksCommand) Run(args []string) int {
 	}
 
 	services, err := internal.LinkedApps(ctx, internal.LinkedAppsInput{
-		AppName:       appName,
-		DatastoreType: datastoreType,
+		AppName: appName,
+		Service: serviceWrapper,
 	})
 	if err != nil {
 		logger.Error(internal.ErrorInput{

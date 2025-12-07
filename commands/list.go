@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
+	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/josegonzalez/cli-skeleton/command"
 	"github.com/posener/complete"
 	flag "github.com/spf13/pflag"
@@ -132,9 +133,17 @@ func (c *ListCommand) Run(args []string) int {
 		return 1
 	}
 
+	serviceWrapper, ok := service.Services[datastoreType]
+	if !ok {
+		logger.Error(internal.ErrorInput{
+			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
+		})
+		return 1
+	}
+
 	services, err := internal.ListServices(ctx, internal.ListServicesInput{
-		DatastoreType: datastoreType,
-		Trace:         c.trace,
+		Service: serviceWrapper,
+		Trace:   c.trace,
 	})
 	if err != nil {
 		logger.Error(internal.ErrorInput{
