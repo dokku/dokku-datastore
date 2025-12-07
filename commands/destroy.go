@@ -9,7 +9,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
-	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/dokku/dokku-datastore/internal/datastores"
 
 	"github.com/dokku/dokku/plugins/common"
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -157,7 +157,7 @@ func (c *DestroyCommand) Run(args []string) int {
 		return 1
 	}
 
-	serviceWrapper, ok := service.Services[datastoreType]
+	datastore, ok := datastores.Datastores[datastoreType]
 	if !ok {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
@@ -166,7 +166,7 @@ func (c *DestroyCommand) Run(args []string) int {
 	}
 
 	// check if the service exists
-	if !service.Exists(ctx, serviceWrapper, serviceName) {
+	if !datastores.Exists(ctx, datastore, serviceName) {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("service %s does not exist", serviceName),
 		})
@@ -174,7 +174,7 @@ func (c *DestroyCommand) Run(args []string) int {
 	}
 
 	// check if the service is linked to any apps
-	if len(service.LinkedApps(serviceWrapper, serviceName)) > 0 {
+	if len(datastores.LinkedApps(datastore, serviceName)) > 0 {
 		logger.Error(internal.ErrorInput{
 			Error: errors.New("cannot delete linked service"),
 		})
@@ -194,7 +194,7 @@ func (c *DestroyCommand) Run(args []string) int {
 
 	logger.Info(fmt.Sprintf("Destroying %s service %s", datastoreType, serviceName))
 	err = internal.DestroyService(ctx, internal.DestroyServiceInput{
-		Service:     serviceWrapper,
+		Datastore:   datastore,
 		ServiceName: serviceName,
 	})
 	if err != nil {

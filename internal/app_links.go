@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/dokku/dokku-datastore/internal/datastores"
 )
 
 // LinkedAppsInput is the input for the LinkedApps function
 type LinkedAppsInput struct {
 	// AppName is the name of the app to list the linked services for
 	AppName string
-	// Service is the service to list the linked services for
-	Service service.Service
+
+	// Datastore is the service to list the linked services for
+	Datastore datastores.Datastore
 }
 
 // LinkedApps lists all services that are linked to a given app
@@ -23,8 +24,8 @@ func LinkedApps(ctx context.Context, input LinkedAppsInput) ([]string, error) {
 	}
 
 	services, err := ListServices(ctx, ListServicesInput{
-		Service: input.Service,
-		Trace:   true,
+		Datastore: input.Datastore,
+		Trace:     true,
 	})
 	if err != nil {
 		return []string{}, err
@@ -32,7 +33,7 @@ func LinkedApps(ctx context.Context, input LinkedAppsInput) ([]string, error) {
 
 	linkedServices := []string{}
 	for _, serviceName := range services {
-		linkedApps := service.LinkedApps(input.Service, serviceName)
+		linkedApps := datastores.LinkedApps(input.Datastore, serviceName)
 		if slices.Contains(linkedApps, input.AppName) {
 			linkedServices = append(linkedServices, serviceName)
 		}

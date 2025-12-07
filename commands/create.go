@@ -9,7 +9,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
-	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/dokku/dokku-datastore/internal/datastores"
 
 	"github.com/dokku/dokku/plugins/common"
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -196,7 +196,7 @@ func (c *CreateCommand) Run(args []string) int {
 		return 1
 	}
 
-	serviceWrapper, ok := service.Services[datastoreType]
+	datastore, ok := datastores.Datastores[datastoreType]
 	if !ok {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
@@ -207,9 +207,9 @@ func (c *CreateCommand) Run(args []string) int {
 	updatedFlags, err := internal.UpdateFlagFromEnv(internal.UpdateFlagFromEnvInput{
 		ConfigOptions: c.configOptions,
 		CustomEnv:     c.customEnv,
+		Datastore:     datastore,
 		Image:         c.image,
 		ImageVersion:  c.imageVersion,
-		Service:       serviceWrapper,
 	})
 	if err != nil {
 		logger.Error(internal.ErrorInput{
@@ -221,12 +221,12 @@ func (c *CreateCommand) Run(args []string) int {
 	err = internal.CreateService(ctx, internal.CreateServiceInput{
 		ConfigOptions:  updatedFlags.ConfigOptions,
 		CustomEnv:      updatedFlags.CustomEnv,
+		Datastore:      datastore,
 		Image:          updatedFlags.Image,
 		ImageVersion:   updatedFlags.ImageVersion,
 		InitialNetwork: c.initialNetwork,
 		Memory:         c.memory,
 		Password:       c.password,
-		Service:        serviceWrapper,
 		ServiceName:    serviceName,
 		ShmSize:        c.shmSize,
 	})
@@ -237,11 +237,11 @@ func (c *CreateCommand) Run(args []string) int {
 		return 1
 	}
 
-	serviceProperties := serviceWrapper.Properties()
+	serviceProperties := datastore.Properties()
 	waitPort := serviceProperties.WaitPort
-	initialNetwork := service.InitialNetwork(serviceWrapper, serviceName)
-	networkAlias := service.DNSHostname(serviceWrapper, serviceName)
-	containerName := service.ContainerName(serviceWrapper, serviceName)
+	initialNetwork := datastores.InitialNetwork(datastore, serviceName)
+	networkAlias := datastores.DNSHostname(datastore, serviceName)
+	containerName := datastores.ContainerName(datastore, serviceName)
 
 	linkContainerDockerArgs := []string{
 		"container",
@@ -254,11 +254,11 @@ func (c *CreateCommand) Run(args []string) int {
 		linkContainerDockerArgs = append(linkContainerDockerArgs, "--network="+initialNetwork)
 	}
 
-	linkContainerDockerArgs = append(linkContainerDockerArgs, service.PluginWaitImage)
+	linkContainerDockerArgs = append(linkContainerDockerArgs, datastores.PluginWaitImage)
 	linkContainerDockerArgs = append(linkContainerDockerArgs, "-c", fmt.Sprintf("%s:%d", networkAlias, waitPort))
 
 	logger.Header1(fmt.Sprintf("Waiting for %s container to be ready", serviceName)) //nolint:errcheck
-	_, err = service.CallExecCommandWithContext(ctx, common.ExecCommandInput{
+	_, err = datastores.CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    linkContainerDockerArgs,
 	})
@@ -266,8 +266,8 @@ func (c *CreateCommand) Run(args []string) int {
 		logger.Error(internal.ErrorInput{
 			Error: err,
 		})
-		containerID := service.LiveContainerID(ctx, service.LiveContainerIDInput{
-			Service:     serviceWrapper,
+		containerID := datastores.LiveContainerID(ctx, datastores.LiveContainerIDInput{
+			Datastore:   datastore,
 			ServiceName: serviceName,
 		})
 		logger.Header1(fmt.Sprintf("Start of %s container output", serviceName)) //nolint:errcheck
@@ -276,8 +276,8 @@ func (c *CreateCommand) Run(args []string) int {
 		return 1
 	}
 	// output service info
-	info := service.Info(ctx, service.InfoInput{
-		Service:     serviceWrapper,
+	info := datastores.Info(ctx, datastores.InfoInput{
+		Datastore:   datastore,
 		ServiceName: serviceName,
 	})
 	if c.format == "json" {

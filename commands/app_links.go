@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
-	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/dokku/dokku-datastore/internal/datastores"
 
 	"github.com/dokku/dokku/plugins/common"
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -141,7 +141,7 @@ func (c *AppLinksCommand) Run(args []string) int {
 		return 1
 	}
 
-	serviceWrapper, ok := service.Services[datastoreType]
+	datastore, ok := datastores.Datastores[datastoreType]
 	if !ok {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
@@ -166,8 +166,8 @@ func (c *AppLinksCommand) Run(args []string) int {
 	}
 
 	services, err := internal.LinkedApps(ctx, internal.LinkedAppsInput{
-		AppName: appName,
-		Service: serviceWrapper,
+		AppName:   appName,
+		Datastore: datastore,
 	})
 	if err != nil {
 		logger.Error(internal.ErrorInput{

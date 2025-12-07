@@ -1,4 +1,4 @@
-package service
+package datastores
 
 import (
 	"context"
@@ -14,19 +14,19 @@ import (
 type CommonService struct{}
 
 // AmbassadorContainerName gets the name of the ambassador container for a service
-func AmbassadorContainerName(s Service, serviceName string) string {
+func AmbassadorContainerName(s Datastore, serviceName string) string {
 	commandPrefix := s.Properties().CommandPrefix
 	return fmt.Sprintf("dokku.%s.%s.ambassador", commandPrefix, serviceName)
 }
 
 // ConfigOptions gets the config options for a service
-func ConfigOptions(s Service, serviceName string) string {
+func ConfigOptions(s Datastore, serviceName string) string {
 	serviceRoot := Folders(s, serviceName).Root
 	return common.ReadFirstLine(filepath.Join(serviceRoot, "CONFIG_OPTIONS"))
 }
 
 // ContainerID gets the container ID for a service
-func ContainerID(s Service, serviceName string) string {
+func ContainerID(s Datastore, serviceName string) string {
 	serviceFiles := Files(s, serviceName)
 	return common.ReadFirstLine(serviceFiles.ID)
 }
@@ -36,8 +36,8 @@ type ContainerIPInput struct {
 	// ContainerID is the ID of the container to get the IP for
 	ContainerID string
 
-	// Service is the service to get the IP for
-	Service Service
+	// Datastore is the service to get the IP for
+	Datastore Datastore
 
 	// ServiceName is the name of the service to get the IP for
 	ServiceName string
@@ -47,7 +47,7 @@ type ContainerIPInput struct {
 func ContainerIP(ctx context.Context, input ContainerIPInput) string {
 	if input.ContainerID == "" {
 		input.ContainerID = LiveContainerID(ctx, LiveContainerIDInput{
-			Service:     input.Service,
+			Datastore:   input.Datastore,
 			ServiceName: input.ServiceName,
 		})
 	}
@@ -57,21 +57,21 @@ func ContainerIP(ctx context.Context, input ContainerIPInput) string {
 }
 
 // ContainerName gets the name of a service
-func ContainerName(s Service, serviceName string) string {
+func ContainerName(s Datastore, serviceName string) string {
 	commandPrefix := s.Properties().CommandPrefix
 	return fmt.Sprintf("dokku.%s.%s", commandPrefix, serviceName)
 }
 
 // DNSHostname gets the DNS hostname for a service
-func DNSHostname(s Service, serviceName string) string {
+func DNSHostname(s Datastore, serviceName string) string {
 	serviceName = ContainerName(s, serviceName)
 	return strings.NewReplacer(".", "-", "_", "-").Replace(serviceName)
 }
 
 // EnterServiceContainerInput is the input for the EnterServiceContainer function
 type EnterServiceContainerInput struct {
-	// Service is the service to enter
-	Service Service
+	// Datastore is the service to enter
+	Datastore Datastore
 
 	// ServiceName is the name of the service to enter
 	ServiceName string
@@ -80,20 +80,20 @@ type EnterServiceContainerInput struct {
 // EnterServiceContainer enters a service container
 func EnterServiceContainer(ctx context.Context, input EnterServiceContainerInput) error {
 	containerID := LiveContainerID(ctx, LiveContainerIDInput{
-		Service:     input.Service,
+		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})
 	if containerID == "" {
-		return fmt.Errorf("%s container %s does not exist", input.Service.Properties().CommandPrefix, input.ServiceName)
+		return fmt.Errorf("%s container %s does not exist", input.Datastore.Properties().CommandPrefix, input.ServiceName)
 	}
 
 	if !common.ContainerExists(containerID) {
-		return fmt.Errorf("%s container %s does not exist", input.Service.Properties().CommandPrefix, input.ServiceName)
+		return fmt.Errorf("%s container %s does not exist", input.Datastore.Properties().CommandPrefix, input.ServiceName)
 	}
 
 	status := Status(ctx, StatusInput{ContainerID: containerID})
 	if strings.ToLower(status) != "running" {
-		return fmt.Errorf("%s container %s is not running", input.Service.Properties().CommandPrefix, input.ServiceName)
+		return fmt.Errorf("%s container %s is not running", input.Datastore.Properties().CommandPrefix, input.ServiceName)
 	}
 
 	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
@@ -111,13 +111,13 @@ func EnterServiceContainer(ctx context.Context, input EnterServiceContainerInput
 }
 
 // Exists checks if a service exists
-func Exists(ctx context.Context, s Service, serviceName string) bool {
+func Exists(ctx context.Context, s Datastore, serviceName string) bool {
 	serviceFolders := Folders(s, serviceName)
 	return common.DirectoryExists(serviceFolders.Root)
 }
 
 // ExposedPorts gets the exposed ports for a service
-func ExposedPorts(s Service, serviceName string) string {
+func ExposedPorts(s Datastore, serviceName string) string {
 	serviceFiles := Files(s, serviceName)
 	portFile := serviceFiles.Port
 
@@ -139,30 +139,40 @@ func ExposedPorts(s Service, serviceName string) string {
 type ServiceFiles struct {
 	// ConfigOptions is the config options file for the service
 	ConfigOptions string
+
 	// CronFile is the cron file for the service
 	CronFile string
+
 	// DatabaseName is the database name file for the service
 	DatabaseName string
+
 	// Env is the environment file for the service
 	Env string
+
 	// ID is the ID file for the service
 	ID string
+
 	// Links is the links file for the service
 	Links string
+
 	// Image is the image file for the service
 	Image string
+
 	// ImageVersion is the image version file for the service
 	ImageVersion string
+
 	// Memory is the memory file for the service
 	Memory string
+
 	// Port is the port file for the service
 	Port string
+
 	// ShmSize is the shared memory size file for the service
 	ShmSize string
 }
 
 // Files returns the files for a service
-func Files(s Service, serviceName string) ServiceFiles {
+func Files(s Datastore, serviceName string) ServiceFiles {
 	folders := Folders(s, serviceName)
 	return ServiceFiles{
 		ConfigOptions: filepath.Join(folders.Root, "CONFIG_OPTIONS"),
@@ -183,20 +193,25 @@ func Files(s Service, serviceName string) ServiceFiles {
 type ServiceFolders struct {
 	// Root is the root folder for the service
 	Root string
+
 	// Config is the config folder for the service
 	Config string
+
 	// Data is the data folder for the service
 	Data string
+
 	// HostRoot is the host root folder for the service
 	HostRoot string
+
 	// HostConfig is the host config folder for the service
 	HostConfig string
+
 	// HostData is the host data folder for the service
 	HostData string
 }
 
 // Folders returns the folders for a service
-func Folders(s Service, serviceName string) ServiceFolders {
+func Folders(s Datastore, serviceName string) ServiceFolders {
 	serviceRoot := filepath.Join(DokkuLibRoot, "services", s.Properties().CommandPrefix, serviceName)
 	return ServiceFolders{
 		Root:       serviceRoot,
@@ -210,32 +225,33 @@ func Folders(s Service, serviceName string) ServiceFolders {
 
 // InfoInput is the input for the Info function
 type InfoInput struct {
-	// Service is the service to get the information for
-	Service Service
+	// Datastore is the service to get the information for
+	Datastore Datastore
+
 	// ServiceName is the name of the service to get the information for
 	ServiceName string
 }
 
 // Info returns the information about a service
 func Info(ctx context.Context, input InfoInput) map[string]string {
-	serviceFolders := Folders(input.Service, input.ServiceName)
+	serviceFolders := Folders(input.Datastore, input.ServiceName)
 
 	containerID := LiveContainerID(ctx, LiveContainerIDInput{
-		Service:     input.Service,
+		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})
 	return map[string]string{
 		"config-dir":          serviceFolders.Config,
-		"config-options":      ConfigOptions(input.Service, input.ServiceName),
+		"config-options":      ConfigOptions(input.Datastore, input.ServiceName),
 		"data-dir":            serviceFolders.Data,
-		"dsn":                 input.Service.URL(input.ServiceName),
-		"exposed-ports":       ExposedPorts(input.Service, input.ServiceName),
+		"dsn":                 input.Datastore.URL(input.ServiceName),
+		"exposed-ports":       ExposedPorts(input.Datastore, input.ServiceName),
 		"id":                  containerID,
 		"internal-ip":         ContainerIP(ctx, ContainerIPInput{ContainerID: containerID}),
-		"initial-network":     InitialNetwork(input.Service, input.ServiceName),
-		"links":               strings.Join(LinkedApps(input.Service, input.ServiceName), ","),
-		"post-create-network": PostCreateNetwork(input.Service, input.ServiceName),
-		"post-start-network":  PostStartNetwork(input.Service, input.ServiceName),
+		"initial-network":     InitialNetwork(input.Datastore, input.ServiceName),
+		"links":               strings.Join(LinkedApps(input.Datastore, input.ServiceName), ","),
+		"post-create-network": PostCreateNetwork(input.Datastore, input.ServiceName),
+		"post-start-network":  PostStartNetwork(input.Datastore, input.ServiceName),
 		"service-root":        serviceFolders.Root,
 		"status":              Status(ctx, StatusInput{ContainerID: containerID}),
 		"version":             Version(ctx, VersionInput{ContainerID: containerID}),
@@ -243,12 +259,12 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 }
 
 // InitialNetwork gets the initial network for a service
-func InitialNetwork(s Service, serviceName string) string {
+func InitialNetwork(s Datastore, serviceName string) string {
 	return common.PropertyGet(s.Properties().CommandPrefix, serviceName, "initial-network")
 }
 
 // LinkedApps returns the linked apps for a service
-func LinkedApps(s Service, serviceName string) []string {
+func LinkedApps(s Datastore, serviceName string) []string {
 	linksFile := Files(s, serviceName).Links
 	if !common.FileExists(linksFile) {
 		return []string{}
@@ -263,15 +279,16 @@ func LinkedApps(s Service, serviceName string) []string {
 
 // LiveContainerIDInput is the input for the LiveContainerID function
 type LiveContainerIDInput struct {
-	// Service is the service to get the live container ID for
-	Service Service
+	// Datastore is the service to get the live container ID for
+	Datastore Datastore
+
 	// ServiceName is the name of the service to get the live container ID for
 	ServiceName string
 }
 
 // LiveContainerID gets the live container ID for a service, regardless of what is set in the ID file
 func LiveContainerID(ctx context.Context, input LiveContainerIDInput) string {
-	containerName := ContainerName(input.Service, input.ServiceName)
+	containerName := ContainerName(input.Datastore, input.ServiceName)
 	result, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    []string{"container", "ps", "-aq", "--no-trunc", "--filter", fmt.Sprintf("name=^/%s$", containerName)},
@@ -290,10 +307,12 @@ func LiveContainerID(ctx context.Context, input LiveContainerIDInput) string {
 
 // PauseServiceContainerInput is the input for the PauseServiceContainer function
 type PauseServiceContainerInput struct {
-	// Service is the service to pause
-	Service Service
+	// Datastore is the service to pause
+	Datastore Datastore
+
 	// ServiceName is the name of the service to pause
 	ServiceName string
+
 	// ContainerID is the ID of the container to pause
 	ContainerID string
 }
@@ -308,7 +327,7 @@ func PauseServiceContainer(ctx context.Context, input PauseServiceContainerInput
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
-	ambassadorContainerName := AmbassadorContainerName(input.Service, input.ServiceName)
+	ambassadorContainerName := AmbassadorContainerName(input.Datastore, input.ServiceName)
 	if common.ContainerExists(ambassadorContainerName) {
 		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 			Command: common.DockerBin(),
@@ -323,26 +342,27 @@ func PauseServiceContainer(ctx context.Context, input PauseServiceContainerInput
 }
 
 // PostCreateNetwork gets the post create network for a service
-func PostCreateNetwork(s Service, serviceName string) string {
+func PostCreateNetwork(s Datastore, serviceName string) string {
 	return common.PropertyGet(s.Properties().CommandPrefix, serviceName, "post-create-network")
 }
 
 // PostStartNetwork gets the post start network for a service
-func PostStartNetwork(s Service, serviceName string) string {
+func PostStartNetwork(s Datastore, serviceName string) string {
 	return common.PropertyGet(s.Properties().CommandPrefix, serviceName, "post-start-network")
 }
 
 // RemoveBackupScheduleInput is the input for the RemoveBackupSchedule function
 type RemoveBackupScheduleInput struct {
-	// Service is the service to remove the backup schedule for
-	Service Service
+	// Datastore is the service to remove the backup schedule for
+	Datastore Datastore
+
 	// ServiceName is the name of the service to remove the backup schedule for
 	ServiceName string
 }
 
 // RemoveBackupSchedule removes the backup schedule for a service
 func RemoveBackupSchedule(ctx context.Context, input RemoveBackupScheduleInput) error {
-	serviceFiles := Files(input.Service, input.ServiceName)
+	serviceFiles := Files(input.Datastore, input.ServiceName)
 	if !common.FileExists(serviceFiles.CronFile) {
 		return nil
 	}
@@ -374,8 +394,9 @@ func RemoveContainer(ctx context.Context, containerID string) error {
 
 // RemoveServiceContainerInput is the input for the RemoveServiceContainer function
 type RemoveServiceContainerInput struct {
-	// Service is the service to remove the container for
-	Service Service
+	// Datastore is the service to remove the container for
+	Datastore Datastore
+
 	// ServiceName is the name of the service to remove the container for
 	ServiceName string
 }
@@ -383,7 +404,7 @@ type RemoveServiceContainerInput struct {
 // RemoveServiceContainer removes the service container for a service
 func RemoveServiceContainer(ctx context.Context, input RemoveServiceContainerInput) error {
 	containerID := LiveContainerID(ctx, LiveContainerIDInput{
-		Service:     input.Service,
+		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})
 	if containerID == "" {
@@ -391,14 +412,14 @@ func RemoveServiceContainer(ctx context.Context, input RemoveServiceContainerInp
 	}
 
 	if err := PauseServiceContainer(ctx, PauseServiceContainerInput{
-		Service:     input.Service,
+		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 		ContainerID: containerID,
 	}); err != nil {
 		return err
 	}
 
-	ambassadorContainerName := AmbassadorContainerName(input.Service, input.ServiceName)
+	ambassadorContainerName := AmbassadorContainerName(input.Datastore, input.ServiceName)
 	if err := RemoveContainer(ctx, ambassadorContainerName); err != nil {
 		return err
 	}
@@ -423,8 +444,8 @@ type StatusInput struct {
 	// ContainerID is the ID of the container to get the status for
 	ContainerID string
 
-	// Service is the service to get the status for
-	Service Service
+	// Datastore is the service to get the status for
+	Datastore Datastore
 
 	// ServiceName is the name of the service to get the status for
 	ServiceName string
@@ -434,7 +455,7 @@ type StatusInput struct {
 func Status(ctx context.Context, input StatusInput) string {
 	if input.ContainerID == "" {
 		input.ContainerID = LiveContainerID(ctx, LiveContainerIDInput{
-			Service:     input.Service,
+			Datastore:   input.Datastore,
 			ServiceName: input.ServiceName,
 		})
 	}
@@ -452,8 +473,8 @@ type VersionInput struct {
 	// ContainerID is the ID of the container to get the version for
 	ContainerID string
 
-	// Service is the service to get the version for
-	Service Service
+	// Datastore is the service to get the version for
+	Datastore Datastore
 
 	// ServiceName is the name of the service to get the version for
 	ServiceName string
@@ -463,7 +484,7 @@ type VersionInput struct {
 func Version(ctx context.Context, input VersionInput) string {
 	if input.ContainerID == "" {
 		input.ContainerID = LiveContainerID(ctx, LiveContainerIDInput{
-			Service:     input.Service,
+			Datastore:   input.Datastore,
 			ServiceName: input.ServiceName,
 		})
 	}

@@ -3,7 +3,7 @@ package internal
 import (
 	"os"
 
-	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/dokku/dokku-datastore/internal/datastores"
 )
 
 // UpdateFlagFromEnvInput is the input for the UpdateFlagFromEnv function
@@ -16,13 +16,13 @@ type UpdateFlagFromEnvInput struct {
 	Image string
 	// ImageVersion is the image version to update from the environment
 	ImageVersion string
-	// Service is the service to update the flags for
-	Service service.Service
+	// Datastore is the service to update the flags for
+	Datastore datastores.Datastore
 }
 
 // UpdateFlagFromEnv updates the flags from the environment
 func UpdateFlagFromEnv(input UpdateFlagFromEnvInput) (UpdateFlagFromEnvInput, error) {
-	properties := input.Service.Properties()
+	properties := input.Datastore.Properties()
 	defaultImage := properties.DefaultImage
 	defaultImageVersion := properties.DefaultImageVersion
 	configVariable := properties.ConfigVariable

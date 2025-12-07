@@ -1,4 +1,4 @@
-package service
+package datastores
 
 import (
 	"context"
@@ -62,24 +62,34 @@ func CallExecCommandWithContext(ctx context.Context, input common.ExecCommandInp
 type CommitServiceConfigInput struct {
 	// CustomEnv is the custom environment variables to commit for the service
 	CustomEnv string
+
 	// ConfigOptions is the configuration options to commit for the service
 	ConfigOptions string
+
 	// Image is the image to commit for the service
 	Image string
+
 	// ImageVersion is the image version to commit for the service
 	ImageVersion string
+
 	// Memory is the memory limit to commit for the service
 	Memory int
-	// Service is the service to commit the service config for
-	Service Service
+
+	// Datastore is the service to commit the service config for
+	Datastore Datastore
+
 	// ServiceName is the name of the service to commit the service config for
 	ServiceName string
+
 	// ShmSize is the shared memory size to commit for the service
 	ShmSize string
+
 	// InitialNetwork is the initial network to commit for the service
 	InitialNetwork string
+
 	// PostCreateNetworks is the networks to attach the service container to after service creation
 	PostCreateNetworks []string
+
 	// PostStartNetworks is the networks to attach the service container to after service start
 	PostStartNetworks []string
 }
@@ -90,7 +100,7 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 		return fmt.Errorf("service name is required")
 	}
 
-	serviceFiles := Files(input.Service, input.ServiceName)
+	serviceFiles := Files(input.Datastore, input.ServiceName)
 
 	lines := strings.Split(input.CustomEnv, ";")
 	err := common.WriteStringToFile(common.WriteStringToFileInput{
@@ -159,7 +169,7 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 		return fmt.Errorf("failed to write image version to %s: %w", serviceFiles.ImageVersion, err)
 	}
 
-	properties := input.Service.Properties()
+	properties := input.Datastore.Properties()
 	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, "initial-network", input.InitialNetwork)
 	if err != nil {
 		return fmt.Errorf("failed to write initial-network property: %w", err)
@@ -190,12 +200,15 @@ func GenerateRandomHexString(length int) (string, error) {
 
 // ImageForServiceInput is the input for the ImageForService function
 type ImageForServiceInput struct {
-	// Service is the service to get the image for
-	Service Service
+	// Datastore is the service to get the image for
+	Datastore Datastore
+
 	// ServiceName is the name of the service to get the image for
 	ServiceName string
+
 	// ImageOverride is the image to use for the service
 	ImageOverride string
+
 	// ImageVersionOverride is the image version to use for the service
 	ImageVersionOverride string
 }
@@ -206,8 +219,8 @@ func ImageForService(input ImageForServiceInput) (string, error) {
 		return "", fmt.Errorf("service name is required")
 	}
 
-	serviceProperties := input.Service.Properties()
-	serviceFiles := Files(input.Service, input.ServiceName)
+	serviceProperties := input.Datastore.Properties()
+	serviceFiles := Files(input.Datastore, input.ServiceName)
 
 	image := serviceProperties.DefaultImage
 	imageVersion := serviceProperties.DefaultImageVersion
@@ -266,10 +279,12 @@ func PullTaggedImage(ctx context.Context, taggedImage string) (bool, error) {
 
 // FilterServicesInput is the input for the FilterServices function
 type FilterServicesInput struct {
-	// Service is the service to filter services for
-	Service Service
+	// Datastore is the service to filter services for
+	Datastore Datastore
+
 	// Services is the services to filter
 	Services []string
+
 	// Trace is whether to enable trace output
 	Trace bool
 }
@@ -310,7 +325,7 @@ func FilterServices(ctx context.Context, input FilterServicesInput) ([]string, e
 		defaultSShName = "default"
 	}
 
-	pluginCommandPrefix := input.Service.Properties().CommandPrefix
+	pluginCommandPrefix := input.Datastore.Properties().CommandPrefix
 	results, err := CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
 		Trigger: "user-auth-app",
 		Args:    append([]string{defaultSShUser, defaultSShName, pluginCommandPrefix}, input.Services...),
@@ -350,18 +365,19 @@ func CallPlugnTriggerWithContext(ctx context.Context, input common.PlugnTriggerI
 
 // ServicePortReconcileStatusInput is the input for the ServicePortReconcileStatus function
 type ServicePortReconcileStatusInput struct {
-	// Service is the service to reconcile the port for
-	Service Service
+	// Datastore is the service to reconcile the port for
+	Datastore Datastore
+
 	// ServiceName is the name of the service to reconcile the port for
 	ServiceName string
 }
 
 // ServicePortReconcileStatus reconciles the port for a service
 func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileStatusInput) error {
-	serviceProperties := input.Service.Properties()
-	serviceFiles := Files(input.Service, input.ServiceName)
+	serviceProperties := input.Datastore.Properties()
+	serviceFiles := Files(input.Datastore, input.ServiceName)
 	portFile := serviceFiles.Port
-	containerName := ContainerName(input.Service, input.ServiceName)
+	containerName := ContainerName(input.Datastore, input.ServiceName)
 	exposedName := fmt.Sprintf("%s.ambassador", containerName)
 
 	if !common.FileExists(portFile) || common.ReadFirstLine(portFile) == "" {
@@ -470,7 +486,7 @@ func ValidateTaggedImageExists(taggedImage string) error {
 
 // WriteDatabaseName writes the database name to the service
 func WriteDatabaseName(datastoreType string, serviceName string) error {
-	serviceWrapper, ok := Services[datastoreType]
+	serviceWrapper, ok := Datastores[datastoreType]
 	if !ok {
 		return fmt.Errorf("datastore type %s is not supported", datastoreType)
 	}

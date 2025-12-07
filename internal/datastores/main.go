@@ -1,4 +1,4 @@
-package service
+package datastores
 
 import (
 	"context"
@@ -10,51 +10,66 @@ import (
 type ServiceStruct struct {
 	// CommandPrefix is the command prefix for a service
 	CommandPrefix string
+
 	// ConfigVariable is the configuration variable for a service
 	ConfigVariable string
+
 	// ConfigSuffix is the suffix for the configuration directory
 	ConfigSuffix string
+
 	// DefaultImage is the default image for a service
 	DefaultImage string
+
 	// DefaultImageVersion is the default image version for a service
 	DefaultImageVersion string
+
 	// EnvVariable is the environment variable for a service
 	EnvVariable string
+
 	// ImagePullVariable is the image pull variable for a service
 	ImagePullVariable string
+
 	// Ports is the ports for a service
 	Ports []int
+
 	// WaitPort is the port to wait for a service to be ready
 	WaitPort int
 }
 
-// Service is the interface for a service
-type Service interface {
+// Datastore is the interface for a service
+type Datastore interface {
 	// CreateService creates a new service
 	CreateService(ctx context.Context, serviceName string) error
+
 	// CreateServiceContainer creates a new service container
 	CreateServiceContainer(ctx context.Context, serviceName string) error
+
 	// Properties returns the properties of a service
 	Properties() ServiceStruct
+
 	// ServiceType returns the type of service
 	ServiceType() string
+
 	// URL returns the url for a service
 	URL(serviceName string) string
 }
 
-// Services is the map of services
-var Services = map[string]Service{}
-
 var (
 	// PluginDataRoot is the root of the plugin data
 	PluginDataRoot string
+
 	// PluginPath is the path to the plugin
 	PluginPath string
+
 	// DokkuLibRoot is the root of the dokku library
 	DokkuLibRoot string
+
 	// DokkuLibHostRoot is the root of the dokku library host
 	DokkuLibHostRoot string
 )
+
+// Datastores is the map of datastores
+var Datastores = map[string]Datastore{}
 
 // PluginAmbassadorImage is the ambassador image
 var PluginAmbassadorImage = "dokku/ambassador:0.8.2"
@@ -80,5 +95,5 @@ func init() {
 	PluginPath = filepath.Join(DokkuLibRoot, "plugins")
 	PluginDataRoot = filepath.Join(DokkuLibRoot, "services")
 
-	Services["redis"] = &RedisService{}
+	Datastores["redis"] = &RedisService{}
 }

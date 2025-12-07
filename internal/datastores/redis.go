@@ -1,4 +1,4 @@
-package service
+package datastores
 
 import (
 	"context"
@@ -206,7 +206,7 @@ func (s *RedisService) CreateServiceContainer(ctx context.Context, serviceName s
 	}
 
 	err = ServicePortReconcileStatus(ctx, ServicePortReconcileStatusInput{
-		Service:     s,
+		Datastore:   s,
 		ServiceName: serviceName,
 	})
 	if err != nil {
