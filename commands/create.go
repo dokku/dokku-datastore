@@ -158,7 +158,9 @@ func (c *CreateCommand) Run(args []string) int {
 	}
 
 	flags := c.FlagSet()
-	flags.Usage = func() { logger.Help(c.Help()) }
+	flags.Usage = func() {
+		logger.Help(c.Help()) //nolint:errcheck
+	}
 	if err := flags.Parse(args); err != nil {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
@@ -255,7 +257,7 @@ func (c *CreateCommand) Run(args []string) int {
 	linkContainerDockerArgs = append(linkContainerDockerArgs, service.PluginWaitImage)
 	linkContainerDockerArgs = append(linkContainerDockerArgs, "-c", fmt.Sprintf("%s:%d", networkAlias, waitPort))
 
-	logger.Header1(fmt.Sprintf("Waiting for %s container to be ready", serviceName))
+	logger.Header1(fmt.Sprintf("Waiting for %s container to be ready", serviceName)) //nolint:errcheck
 	_, err = service.CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    linkContainerDockerArgs,
@@ -268,9 +270,9 @@ func (c *CreateCommand) Run(args []string) int {
 			Service:     serviceWrapper,
 			ServiceName: serviceName,
 		})
-		logger.Header1(fmt.Sprintf("Start of %s container output", serviceName))
+		logger.Header1(fmt.Sprintf("Start of %s container output", serviceName)) //nolint:errcheck
 		common.LogVerboseQuietContainerLogs(containerID)
-		logger.Header1(fmt.Sprintf("End of %s container output", serviceName))
+		logger.Header1(fmt.Sprintf("End of %s container output", serviceName)) //nolint:errcheck
 		return 1
 	}
 	// output service info

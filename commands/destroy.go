@@ -119,7 +119,9 @@ func (c *DestroyCommand) Run(args []string) int {
 	}
 
 	flags := c.FlagSet()
-	flags.Usage = func() { logger.Help(c.Help()) }
+	flags.Usage = func() {
+		logger.Help(c.Help()) //nolint:errcheck
+	}
 	if err := flags.Parse(args); err != nil {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
@@ -190,7 +192,7 @@ func (c *DestroyCommand) Run(args []string) int {
 		}
 	}
 
-	logger.Info(fmt.Sprintf("Destroying %s service %s", datastoreType, serviceName))
+	logger.Info(fmt.Sprintf("Destroying %s service %s", datastoreType, serviceName)) //nolint:errcheck
 	err = internal.DestroyService(ctx, internal.DestroyServiceInput{
 		DatastoreType: datastoreType,
 		ServiceName:   serviceName,

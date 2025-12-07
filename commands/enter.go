@@ -111,7 +111,9 @@ func (c *EnterCommand) Run(args []string) int {
 	}
 
 	flags := c.FlagSet()
-	flags.Usage = func() { logger.Help(c.Help()) }
+	flags.Usage = func() {
+		logger.Help(c.Help()) //nolint:errcheck
+	}
 	if err := flags.Parse(args); err != nil {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),

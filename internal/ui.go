@@ -31,9 +31,9 @@ type ErrorInput struct {
 }
 
 // Error outputs an error message
-func (u *Ui) Error(input ErrorInput) error {
+func (u *Ui) Error(input ErrorInput) {
 	if u.Format == "json" {
-		return json.NewEncoder(os.Stderr).Encode(input)
+		json.NewEncoder(os.Stderr).Encode(input) //nolint:errcheck
 	}
 
 	errorMessage := input.Error.Error()
@@ -45,8 +45,6 @@ func (u *Ui) Error(input ErrorInput) error {
 	if input.Message != "" {
 		u.Ui.Error(input.Message)
 	}
-
-	return nil
 }
 
 // Help outputs a help message
