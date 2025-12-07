@@ -19,6 +19,7 @@ Available commands are:
     create       Creates a new datastore service
     destroy      Destroys a datastore service
     enter        Enters a service
+    exists       Checks if a service exists
     list         Lists all services of a given datastore type
     version      Return the version of the binary
 ```
