@@ -484,15 +484,18 @@ func ValidateTaggedImageExists(taggedImage string) error {
 	return fmt.Errorf("image %s does not exist", taggedImage)
 }
 
-// WriteDatabaseName writes the database name to the service
-func WriteDatabaseName(datastoreType string, serviceName string) error {
-	serviceWrapper, ok := Datastores[datastoreType]
-	if !ok {
-		return fmt.Errorf("datastore type %s is not supported", datastoreType)
-	}
+type WriteDatabaseNameInput struct {
+	// Datastore is the datastore to write the database name to
+	Datastore Datastore
 
-	serviceFiles := Files(serviceWrapper, serviceName)
-	sanitizedDatabaseName := strings.ReplaceAll(serviceName, ".", "_")
+	// ServiceName is the name of the service to write the database name to
+	ServiceName string
+}
+
+// WriteDatabaseName writes the database name to the service
+func WriteDatabaseName(input WriteDatabaseNameInput) error {
+	serviceFiles := Files(input.Datastore, input.ServiceName)
+	sanitizedDatabaseName := strings.ReplaceAll(input.ServiceName, ".", "_")
 	sanitizedDatabaseName = strings.ReplaceAll(sanitizedDatabaseName, "-", "_")
 	err := common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   sanitizedDatabaseName,

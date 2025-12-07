@@ -142,7 +142,10 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return fmt.Errorf("failed to commit service config: %w", err)
 	}
 
-	if err := datastores.WriteDatabaseName(input.Datastore.ServiceType(), input.ServiceName); err != nil {
+	if err := datastores.WriteDatabaseName(datastores.WriteDatabaseNameInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+	}); err != nil {
 		return fmt.Errorf("failed to write database name: %w", err)
 	}
 
