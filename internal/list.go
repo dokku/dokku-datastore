@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 // ListServicesInput is the input for the ListServices function
@@ -21,7 +23,7 @@ func ListServices(input ListServicesInput) ([]string, error) {
 	}
 
 	// list all immediate subfolders in PluginDataRoot
-	subfolders, err := os.ReadDir(filepath.Join(PluginDataRoot, input.DatastoreType))
+	subfolders, err := os.ReadDir(filepath.Join(service.PluginDataRoot, input.DatastoreType))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []string{}, nil
@@ -29,15 +31,15 @@ func ListServices(input ListServicesInput) ([]string, error) {
 		return nil, err
 	}
 
-	datastores := make([]string, len(subfolders))
+	services := make([]string, len(subfolders))
 	for i, subfolder := range subfolders {
-		datastores[i] = subfolder.Name()
+		services[i] = subfolder.Name()
 	}
 
-	datastores, err = FilterServices(input.DatastoreType, datastores, input.Trace)
+	services, err = service.FilterServices(input.DatastoreType, services, input.Trace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to filter services: %w", err)
 	}
 
-	return datastores, nil
+	return services, nil
 }

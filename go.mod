@@ -8,6 +8,7 @@ require (
 	github.com/mitchellh/cli v1.1.5
 	github.com/posener/complete v1.2.3
 	github.com/spf13/pflag v1.0.10
+	mvdan.cc/sh/v3 v3.12.0
 )
 
 require (
