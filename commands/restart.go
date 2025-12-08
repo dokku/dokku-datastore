@@ -15,8 +15,8 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
-// ExposeCommand is the command for exposing a service
-type ExposeCommand struct {
+// RestartCommand is the command for restarting a service
+type RestartCommand struct {
 	// Meta is the command meta
 	command.Meta
 	// GlobalFlagCommand is the global flag command
@@ -24,71 +24,65 @@ type ExposeCommand struct {
 }
 
 // Name returns the name of the command
-func (c *ExposeCommand) Name() string {
-	return "expose"
+func (c *RestartCommand) Name() string {
+	return "restart"
 }
 
 // Synopsis returns the synopsis of the command
-func (c *ExposeCommand) Synopsis() string {
-	return "Exposes a service"
+func (c *RestartCommand) Synopsis() string {
+	return "Restarts a service"
 }
 
 // Help returns the help text for the command
-func (c *ExposeCommand) Help() string {
+func (c *RestartCommand) Help() string {
 	return command.CommandHelp(c)
 }
 
 // Examples returns the examples for the command
-func (c *ExposeCommand) Examples() map[string]string {
+func (c *RestartCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Exposes a redis service named test": fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Restarts a redis service named test": fmt.Sprintf("%s %s redis test", appName, c.Name()),
 	}
 }
 
 // Arguments returns the arguments for the command
-func (c *ExposeCommand) Arguments() []command.Argument {
+func (c *RestartCommand) Arguments() []command.Argument {
 	args := []command.Argument{}
 	args = append(args, command.Argument{
 		Name:        "datastore-type",
-		Description: "the type of datastore to expose",
+		Description: "the type of datastore to restart the service",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
 	args = append(args, command.Argument{
 		Name:        "service-name",
-		Description: "the name of the service to expose",
+		Description: "the name of the service to restart",
 		Optional:    false,
 		Type:        command.ArgumentString,
-	})
-	args = append(args, command.Argument{
-		Name:        "ports",
-		Description: "the ports to expose on the host",
-		Optional:    true,
-		Type:        command.ArgumentList,
 	})
 	return args
 }
 
 // AutocompleteArgs returns the autocomplete arguments for the command
-func (c *ExposeCommand) AutocompleteArgs() complete.Predictor {
+func (c *RestartCommand) AutocompleteArgs() complete.Predictor {
 	return complete.PredictSet("redis")
 }
 
 // ParsedArguments parses the arguments for the command
-func (c *ExposeCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
+func (c *RestartCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
 	return command.ParseArguments(args, c.Arguments())
 }
 
 // FlagSet returns the flag set for the command
-func (c *ExposeCommand) FlagSet() *flag.FlagSet {
+func (c *RestartCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
 	return f
 }
 
 // AutocompleteFlags returns the autocomplete flags for the command
-func (c *ExposeCommand) AutocompleteFlags() complete.Flags {
+func (c *RestartCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
@@ -97,7 +91,7 @@ func (c *ExposeCommand) AutocompleteFlags() complete.Flags {
 }
 
 // Run runs the command
-func (c *ExposeCommand) Run(args []string) int {
+func (c *RestartCommand) Run(args []string) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGHUP,
@@ -178,39 +172,8 @@ func (c *ExposeCommand) Run(args []string) int {
 		return 1
 	}
 
-	if internal.IsExposed(datastore, serviceName) {
-		logger.Header2(fmt.Sprintf("Service %s is already exposed", serviceName)) //nolint:errcheck
-		err = datastores.ServicePortReconcileStatus(ctx, datastores.ServicePortReconcileStatusInput{
-			Datastore:   datastore,
-			ServiceName: serviceName,
-		})
-		if err != nil {
-			logger.Error(internal.ErrorInput{
-				Error: err,
-			})
-			return 1
-		}
-		return 0
-	}
-
-	ambassadorContainerName := datastores.AmbassadorContainerName(datastore, serviceName)
-	if datastores.ContainerExists(ctx, ambassadorContainerName) {
-		logger.Warn(internal.WarnInput{
-			Warning: fmt.Sprintf("Service %s has an untracked expose container, removing", serviceName),
-		})
-		err = internal.RemoveAmbassadorContainer(ctx, datastore, serviceName)
-		if err != nil {
-			logger.Warn(internal.WarnInput{
-				Warning: err.Error(),
-			})
-			return 1
-		}
-		return 1
-	}
-
-	err = internal.ExposeService(ctx, internal.ExposeServiceInput{
+	err = datastores.PauseServiceContainer(ctx, datastores.PauseServiceContainerInput{
 		Datastore:   datastore,
-		Ports:       arguments["ports"].ListValue(),
 		ServiceName: serviceName,
 	})
 	if err != nil {
@@ -219,6 +182,19 @@ func (c *ExposeCommand) Run(args []string) int {
 		})
 		return 1
 	}
-	logger.Header2(fmt.Sprintf("Service %s exposed on port(s) [container->host]: %s", serviceName, datastores.ExposedPorts(datastore, serviceName))) //nolint:errcheck
+
+	err = datastores.Start(ctx, datastores.StartInput{
+		Datastore:   datastore,
+		ServiceName: serviceName,
+	})
+	if err != nil {
+		logger.Error(internal.ErrorInput{
+			Error: err,
+		})
+		return 1
+	}
+
+	logger.Info(fmt.Sprintf("Service %s restarted", serviceName))
+
 	return 0
 }
