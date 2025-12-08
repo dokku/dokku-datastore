@@ -10,9 +10,6 @@ import (
 	"github.com/dokku/dokku/plugins/common"
 )
 
-// CommonService is the common service for all services
-type CommonService struct{}
-
 // AmbassadorContainerName gets the name of the ambassador container for a service
 func AmbassadorContainerName(s Datastore, serviceName string) string {
 	commandPrefix := s.Properties().CommandPrefix
@@ -23,6 +20,18 @@ func AmbassadorContainerName(s Datastore, serviceName string) string {
 func ConfigOptions(s Datastore, serviceName string) string {
 	serviceRoot := Folders(s, serviceName).Root
 	return common.ReadFirstLine(filepath.Join(serviceRoot, "CONFIG_OPTIONS"))
+}
+
+// ContainerExists checks to see if a container exists
+func ContainerExists(ctx context.Context, containerID string) bool {
+	result, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		Command: common.DockerBin(),
+		Args:    []string{"container", "inspect", containerID},
+	})
+	if err != nil {
+		return false
+	}
+	return result.ExitCode == 0
 }
 
 // ContainerID gets the container ID for a service
@@ -87,7 +96,7 @@ func EnterServiceContainer(ctx context.Context, input EnterServiceContainerInput
 		return fmt.Errorf("%s container %s does not exist", input.Datastore.Properties().CommandPrefix, input.ServiceName)
 	}
 
-	if !common.ContainerExists(containerID) {
+	if !ContainerExists(ctx, containerID) {
 		return fmt.Errorf("%s container %s does not exist", input.Datastore.Properties().CommandPrefix, input.ServiceName)
 	}
 
@@ -335,7 +344,7 @@ func PauseServiceContainer(ctx context.Context, input PauseServiceContainerInput
 	}
 
 	ambassadorContainerName := AmbassadorContainerName(input.Datastore, input.ServiceName)
-	if common.ContainerExists(ambassadorContainerName) {
+	if ContainerExists(ctx, ambassadorContainerName) {
 		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 			Command: common.DockerBin(),
 			Args:    []string{"container", "stop", ambassadorContainerName},
@@ -427,8 +436,10 @@ func RemoveServiceContainer(ctx context.Context, input RemoveServiceContainerInp
 	}
 
 	ambassadorContainerName := AmbassadorContainerName(input.Datastore, input.ServiceName)
-	if err := RemoveContainer(ctx, ambassadorContainerName); err != nil {
-		return err
+	if ContainerExists(ctx, ambassadorContainerName) {
+		if err := RemoveContainer(ctx, ambassadorContainerName); err != nil {
+			return err
+		}
 	}
 
 	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{

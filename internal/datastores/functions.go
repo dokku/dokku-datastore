@@ -416,7 +416,7 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 	ambassadorContainerName := fmt.Sprintf("%s.ambassador", containerName)
 
 	if !common.FileExists(portFile) || common.ReadFirstLine(portFile) == "" {
-		if common.ContainerExists(ambassadorContainerName) {
+		if ContainerExists(ctx, ambassadorContainerName) {
 			_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 				Command: common.DockerBin(),
 				Args:    []string{"container", "stop", ambassadorContainerName},
@@ -433,7 +433,7 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		return nil
 	}
 
-	if common.ContainerExists(ambassadorContainerName) {
+	if ContainerExists(ctx, ambassadorContainerName) {
 		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 			Command: common.DockerBin(),
 			Args:    []string{"container", "start", ambassadorContainerName},

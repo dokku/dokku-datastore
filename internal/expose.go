@@ -9,11 +9,7 @@ import (
 	"github.com/dokku/dokku/plugins/common"
 )
 
-func AmbassadorContainerExists(s datastores.Datastore, serviceName string) bool {
-	ambassadorName := datastores.AmbassadorContainerName(s, serviceName)
-	return common.ContainerExists(ambassadorName)
-}
-
+// IsExposed checks if a service is exposed
 func IsExposed(s datastores.Datastore, serviceName string) bool {
 	serviceFiles := datastores.Files(s, serviceName)
 	portFile := serviceFiles.Port

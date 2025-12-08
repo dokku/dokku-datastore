@@ -192,7 +192,8 @@ func (c *ExposeCommand) Run(args []string) int {
 		return 0
 	}
 
-	if internal.AmbassadorContainerExists(datastore, serviceName) {
+	ambassadorContainerName := datastores.AmbassadorContainerName(datastore, serviceName)
+	if datastores.ContainerExists(ctx, ambassadorContainerName) {
 		logger.Warn(internal.WarnInput{
 			Warning: fmt.Sprintf("Service %s has an untracked expose container, removing", serviceName),
 		})
