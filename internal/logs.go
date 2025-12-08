@@ -52,7 +52,6 @@ func Logs(ctx context.Context, input LogsInput) error {
 	})
 
 	if err != nil {
-		// check if the context was cancelled
 		if ctx.Err() != nil {
 			if errors.Is(ctx.Err(), context.Canceled) {
 				return nil
