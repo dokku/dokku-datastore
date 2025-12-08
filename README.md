@@ -23,6 +23,7 @@ Available commands are:
     expose       Exposes a service
     info         Gets information about a service
     linked       Checks if a service is linked to an app
+    links        Lists all apps that are linked to a given service
     list         Lists all services of a given datastore type
     pause        Pauses a service
     start        Starts a service

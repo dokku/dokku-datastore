@@ -258,7 +258,7 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 		"id":                  containerID,
 		"internal-ip":         ContainerIP(ctx, ContainerIPInput{ContainerID: containerID}),
 		"initial-network":     InitialNetwork(input.Datastore, input.ServiceName),
-		"links":               strings.Join(LinkedApps(input.Datastore, input.ServiceName), ","),
+		"links":               strings.Join(LinkedApps(ctx, LinkedAppsInput{Datastore: input.Datastore, ServiceName: input.ServiceName}), ","),
 		"post-create-network": PostCreateNetwork(input.Datastore, input.ServiceName),
 		"post-start-network":  PostStartNetwork(input.Datastore, input.ServiceName),
 		"service-root":        serviceFolders.Root,
@@ -272,15 +272,27 @@ func InitialNetwork(s Datastore, serviceName string) string {
 	return common.PropertyGet(s.Properties().CommandPrefix, serviceName, "initial-network")
 }
 
+// LinkedAppsInput is the input for the LinkedApps function
+type LinkedAppsInput struct {
+	// Datastore is the service to get the linked apps for
+	Datastore Datastore
+
+	// ServiceName is the name of the service to get the linked apps for
+	ServiceName string
+}
+
 // LinkedApps returns the linked apps for a service
-func LinkedApps(s Datastore, serviceName string) []string {
-	linksFile := Files(s, serviceName).Links
+func LinkedApps(ctx context.Context, input LinkedAppsInput) []string {
+	linksFile := Files(input.Datastore, input.ServiceName).Links
 	if !common.FileExists(linksFile) {
 		return []string{}
 	}
 
 	lines, err := common.FileToSlice(linksFile)
 	if err != nil {
+		return []string{}
+	}
+	if len(lines) == 0 {
 		return []string{}
 	}
 	return lines
