@@ -15,8 +15,8 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
-// StartCommand is the command for starting a service
-type StartCommand struct {
+// StopCommand is the command for stopping a service
+type StopCommand struct {
 	// Meta is the command meta
 	command.Meta
 	// GlobalFlagCommand is the global flag command
@@ -24,40 +24,40 @@ type StartCommand struct {
 }
 
 // Name returns the name of the command
-func (c *StartCommand) Name() string {
-	return "start"
+func (c *StopCommand) Name() string {
+	return "stop"
 }
 
 // Synopsis returns the synopsis of the command
-func (c *StartCommand) Synopsis() string {
-	return "Starts a service"
+func (c *StopCommand) Synopsis() string {
+	return "Stops a service and removes the container"
 }
 
 // Help returns the help text for the command
-func (c *StartCommand) Help() string {
+func (c *StopCommand) Help() string {
 	return command.CommandHelp(c)
 }
 
 // Examples returns the examples for the command
-func (c *StartCommand) Examples() map[string]string {
+func (c *StopCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Starts a redis service named test": fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Stops a redis service named test": fmt.Sprintf("%s %s redis test", appName, c.Name()),
 	}
 }
 
 // Arguments returns the arguments for the command
-func (c *StartCommand) Arguments() []command.Argument {
+func (c *StopCommand) Arguments() []command.Argument {
 	args := []command.Argument{}
 	args = append(args, command.Argument{
 		Name:        "datastore-type",
-		Description: "the type of datastore to start",
+		Description: "the type of datastore to stop",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
 	args = append(args, command.Argument{
 		Name:        "service-name",
-		Description: "the name of the service to start",
+		Description: "the name of the service to stop",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
@@ -65,24 +65,24 @@ func (c *StartCommand) Arguments() []command.Argument {
 }
 
 // AutocompleteArgs returns the autocomplete arguments for the command
-func (c *StartCommand) AutocompleteArgs() complete.Predictor {
+func (c *StopCommand) AutocompleteArgs() complete.Predictor {
 	return complete.PredictSet("redis")
 }
 
 // ParsedArguments parses the arguments for the command
-func (c *StartCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
+func (c *StopCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
 	return command.ParseArguments(args, c.Arguments())
 }
 
 // FlagSet returns the flag set for the command
-func (c *StartCommand) FlagSet() *flag.FlagSet {
+func (c *StopCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
 	return f
 }
 
 // AutocompleteFlags returns the autocomplete flags for the command
-func (c *StartCommand) AutocompleteFlags() complete.Flags {
+func (c *StopCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
@@ -91,7 +91,7 @@ func (c *StartCommand) AutocompleteFlags() complete.Flags {
 }
 
 // Run runs the command
-func (c *StartCommand) Run(args []string) int {
+func (c *StopCommand) Run(args []string) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGHUP,
@@ -171,7 +171,7 @@ func (c *StartCommand) Run(args []string) int {
 		return 1
 	}
 
-	err = datastores.Start(ctx, datastores.StartInput{
+	err = datastores.RemoveServiceContainer(ctx, datastores.RemoveServiceContainerInput{
 		Datastore:   datastore,
 		ServiceName: serviceName,
 	})
@@ -182,7 +182,7 @@ func (c *StartCommand) Run(args []string) int {
 		return 1
 	}
 
-	logger.Header1(fmt.Sprintf("Service %s started", serviceName))
+	logger.Header1(fmt.Sprintf("Service %s stopped", serviceName))
 
 	return 0
 }
