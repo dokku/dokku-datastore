@@ -22,6 +22,7 @@ Available commands are:
     exists       Checks if a service exists
     expose       Exposes a service
     info         Gets information about a service
+    linked       Checks if a service is linked to an app
     list         Lists all services of a given datastore type
     pause        Pauses a service
     start        Starts a service

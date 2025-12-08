@@ -65,6 +65,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"list": func() (cli.Command, error) {
 			return &commands.ListCommand{Meta: meta}, nil
 		},
+		"linked": func() (cli.Command, error) {
+			return &commands.LinkedCommand{Meta: meta}, nil
+		},
 		"pause": func() (cli.Command, error) {
 			return &commands.PauseCommand{Meta: meta}, nil
 		},

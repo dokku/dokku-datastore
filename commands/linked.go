@@ -5,19 +5,20 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
 	"github.com/dokku/dokku-datastore/internal/datastores"
-
 	"github.com/dokku/dokku/plugins/common"
+
 	"github.com/josegonzalez/cli-skeleton/command"
 	"github.com/posener/complete"
 	flag "github.com/spf13/pflag"
 )
 
-// AppLinksCommand is the command for listing all app links for a given app
-type AppLinksCommand struct {
+// LinkedCommand is the command for checking if a service is linked to an app
+type LinkedCommand struct {
 	// Meta is the command meta
 	command.Meta
 	// GlobalFlagCommand is the global flag command
@@ -25,40 +26,46 @@ type AppLinksCommand struct {
 }
 
 // Name returns the name of the command
-func (c *AppLinksCommand) Name() string {
-	return "app-links"
+func (c *LinkedCommand) Name() string {
+	return "linked"
 }
 
 // Synopsis returns the synopsis of the command
-func (c *AppLinksCommand) Synopsis() string {
-	return "Lists all app links for a given app"
+func (c *LinkedCommand) Synopsis() string {
+	return "Checks if a service is linked to an app"
 }
 
 // Help returns the help text for the command
-func (c *AppLinksCommand) Help() string {
+func (c *LinkedCommand) Help() string {
 	return command.CommandHelp(c)
 }
 
 // Examples returns the examples for the command
-func (c *AppLinksCommand) Examples() map[string]string {
+func (c *LinkedCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Lists all redis app links for the app test": fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Checks if a redis service named test is linked to the app test-app": fmt.Sprintf("%s %s redis test test-app", appName, c.Name()),
 	}
 }
 
 // Arguments returns the arguments for the command
-func (c *AppLinksCommand) Arguments() []command.Argument {
+func (c *LinkedCommand) Arguments() []command.Argument {
 	args := []command.Argument{}
 	args = append(args, command.Argument{
 		Name:        "datastore-type",
-		Description: "the type of datastore to list the app links for",
+		Description: "the type of datastore to check if the service is linked to an app",
+		Optional:    false,
+		Type:        command.ArgumentString,
+	})
+	args = append(args, command.Argument{
+		Name:        "service-name",
+		Description: "the name of the service to check if it is linked to an app",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
 	args = append(args, command.Argument{
 		Name:        "app-name",
-		Description: "the name of the app to list the app links for",
+		Description: "the name of the app to check if the service is linked to",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
@@ -66,24 +73,24 @@ func (c *AppLinksCommand) Arguments() []command.Argument {
 }
 
 // AutocompleteArgs returns the autocomplete arguments for the command
-func (c *AppLinksCommand) AutocompleteArgs() complete.Predictor {
+func (c *LinkedCommand) AutocompleteArgs() complete.Predictor {
 	return complete.PredictSet("redis")
 }
 
 // ParsedArguments parses the arguments for the command
-func (c *AppLinksCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
+func (c *LinkedCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
 	return command.ParseArguments(args, c.Arguments())
 }
 
 // FlagSet returns the flag set for the command
-func (c *AppLinksCommand) FlagSet() *flag.FlagSet {
+func (c *LinkedCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
 	return f
 }
 
 // AutocompleteFlags returns the autocomplete flags for the command
-func (c *AppLinksCommand) AutocompleteFlags() complete.Flags {
+func (c *LinkedCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
@@ -92,7 +99,7 @@ func (c *AppLinksCommand) AutocompleteFlags() complete.Flags {
 }
 
 // Run runs the command
-func (c *AppLinksCommand) Run(args []string) int {
+func (c *LinkedCommand) Run(args []string) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGHUP,
@@ -149,6 +156,22 @@ func (c *AppLinksCommand) Run(args []string) int {
 		return 1
 	}
 
+	serviceName := arguments["service-name"].StringValue()
+	if serviceName == "" {
+		logger.Error(internal.ErrorInput{
+			Message: command.CommandErrorText(c),
+			Error:   fmt.Errorf("service name is required"),
+		})
+		return 1
+	}
+
+	if err := datastores.ValidateServiceName(serviceName); err != nil {
+		logger.Error(internal.ErrorInput{
+			Error: err,
+		})
+		return 1
+	}
+
 	appName := arguments["app-name"].StringValue()
 	if appName == "" {
 		logger.Error(internal.ErrorInput{
@@ -165,7 +188,14 @@ func (c *AppLinksCommand) Run(args []string) int {
 		return 1
 	}
 
-	services, err := internal.LinkedServices(ctx, internal.LinkedServicesInput{
+	if !datastores.Exists(ctx, datastore, serviceName) {
+		logger.Error(internal.ErrorInput{
+			Error: fmt.Errorf("service %s does not exist", serviceName),
+		})
+		return 1
+	}
+
+	linkedServices, err := internal.LinkedServices(ctx, internal.LinkedServicesInput{
 		AppName:   appName,
 		Datastore: datastore,
 	})
@@ -176,9 +206,11 @@ func (c *AppLinksCommand) Run(args []string) int {
 		return 1
 	}
 
-	if err := logger.Table(fmt.Sprintf("%v linked services for app %s", datastoreType, appName), services); err != nil {
+	if slices.Contains(linkedServices, serviceName) {
+		logger.Info(fmt.Sprintf("Service %s is linked to app %s", serviceName, appName))
+	} else {
 		logger.Error(internal.ErrorInput{
-			Error: err,
+			Error: fmt.Errorf("service %s is not linked to app %s", serviceName, appName),
 		})
 		return 1
 	}
