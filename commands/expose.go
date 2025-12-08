@@ -51,19 +51,19 @@ func (c *ExposeCommand) Arguments() []command.Argument {
 	args := []command.Argument{}
 	args = append(args, command.Argument{
 		Name:        "datastore-type",
-		Description: "the type of datastore to enter",
+		Description: "the type of datastore to expose",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
 	args = append(args, command.Argument{
 		Name:        "service-name",
-		Description: "the name of the service to enter",
+		Description: "the name of the service to expose",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
 	args = append(args, command.Argument{
 		Name:        "ports",
-		Description: "the ports to expose",
+		Description: "the ports to expose on the host",
 		Optional:    true,
 		Type:        command.ArgumentList,
 	})

@@ -51,13 +51,13 @@ func (c *ExistsCommand) Arguments() []command.Argument {
 	args := []command.Argument{}
 	args = append(args, command.Argument{
 		Name:        "datastore-type",
-		Description: "the type of datastore to enter",
+		Description: "the type of datastore to check if the service exists",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
 	args = append(args, command.Argument{
 		Name:        "service-name",
-		Description: "the name of the service to enter",
+		Description: "the name of the service to check if it exists",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
