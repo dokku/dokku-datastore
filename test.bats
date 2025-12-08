@@ -10,7 +10,6 @@ setup_file() {
 
 teardown_file() {
   true
-  make clean
 }
 
 setup() {
