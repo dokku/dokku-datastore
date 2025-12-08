@@ -30,5 +30,6 @@ Available commands are:
     restart      Restarts a service
     start        Starts a service
     stop         Stops a service and removes the container
+    unexpose     Unexposes a service
     version      Return the version of the binary
 ```
