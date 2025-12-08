@@ -23,5 +23,6 @@ Available commands are:
     expose       Exposes a service
     info         Gets information about a service
     list         Lists all services of a given datastore type
+    start        Starts a service
     version      Return the version of the binary
 ```
