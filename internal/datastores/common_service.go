@@ -335,6 +335,17 @@ type PauseServiceContainerInput struct {
 
 // PauseServiceContainer pauses a service container
 func PauseServiceContainer(ctx context.Context, input PauseServiceContainerInput) error {
+	ambassadorContainerName := AmbassadorContainerName(input.Datastore, input.ServiceName)
+	if ContainerExists(ctx, ambassadorContainerName) {
+		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+			Command: common.DockerBin(),
+			Args:    []string{"container", "stop", ambassadorContainerName},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to stop ambassador container: %w", err)
+		}
+	}
+
 	if input.ContainerID == "" {
 		input.ContainerID = LiveContainerID(ctx, LiveContainerIDInput{
 			Datastore:   input.Datastore,
@@ -348,17 +359,6 @@ func PauseServiceContainer(ctx context.Context, input PauseServiceContainerInput
 	})
 	if err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
-	}
-
-	ambassadorContainerName := AmbassadorContainerName(input.Datastore, input.ServiceName)
-	if ContainerExists(ctx, ambassadorContainerName) {
-		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
-			Command: common.DockerBin(),
-			Args:    []string{"container", "stop", ambassadorContainerName},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to stop ambassador container: %w", err)
-		}
 	}
 
 	return nil
