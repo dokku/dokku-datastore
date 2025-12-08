@@ -11,7 +11,7 @@ go build -ldflags "-X main.Version=0.1.0
 
 ## Usage
 
-```
+```text
 Usage: dokku-datastore [--version] [--help] <command> [<args>]
 
 Available commands are:
