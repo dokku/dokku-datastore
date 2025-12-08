@@ -12,9 +12,7 @@ import (
 )
 
 // RedisService is the service for Redis
-type RedisService struct {
-	CommonService
-}
+type RedisService struct{}
 
 // CreateService creates a new service
 func (s *RedisService) CreateService(ctx context.Context, serviceName string) error {
