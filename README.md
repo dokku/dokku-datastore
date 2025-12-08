@@ -23,6 +23,7 @@ Available commands are:
     expose       Exposes a service
     info         Gets information about a service
     list         Lists all services of a given datastore type
+    pause        Pauses a service
     start        Starts a service
     stop         Stops a service and removes the container
     version      Return the version of the binary

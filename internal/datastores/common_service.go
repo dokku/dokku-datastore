@@ -335,6 +335,13 @@ type PauseServiceContainerInput struct {
 
 // PauseServiceContainer pauses a service container
 func PauseServiceContainer(ctx context.Context, input PauseServiceContainerInput) error {
+	if input.ContainerID == "" {
+		input.ContainerID = LiveContainerID(ctx, LiveContainerIDInput{
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+		})
+	}
+
 	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    []string{"container", "stop", input.ContainerID},

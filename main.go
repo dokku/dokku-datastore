@@ -65,6 +65,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"list": func() (cli.Command, error) {
 			return &commands.ListCommand{Meta: meta}, nil
 		},
+		"pause": func() (cli.Command, error) {
+			return &commands.PauseCommand{Meta: meta}, nil
+		},
 		"start": func() (cli.Command, error) {
 			return &commands.StartCommand{Meta: meta}, nil
 		},
