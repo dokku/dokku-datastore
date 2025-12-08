@@ -20,6 +20,7 @@ Available commands are:
     destroy      Destroys a datastore service
     enter        Enters a service
     exists       Checks if a service exists
+    expose       Exposes a service
     list         Lists all services of a given datastore type
     version      Return the version of the binary
 ```

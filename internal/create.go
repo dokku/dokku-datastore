@@ -159,7 +159,12 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return fmt.Errorf("failed to call service-action post-create trigger: %w", err)
 	}
 
-	if err := input.Datastore.CreateServiceContainer(ctx, input.ServiceName); err != nil {
+	err = input.Datastore.CreateServiceContainer(ctx, datastores.CreateServiceContainerInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		TaggedImage: taggedImage,
+	})
+	if err != nil {
 		return fmt.Errorf("failed to create service container: %w", err)
 	}
 

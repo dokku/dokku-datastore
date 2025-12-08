@@ -72,10 +72,25 @@ func (u *Ui) Header1(message string) error {
 	return nil
 }
 
+// Header1 outputs a header1 message
+func (u *Ui) Header2(message string) error {
+	if u.Format == "json" {
+		return json.NewEncoder(os.Stdout).Encode(map[string]string{"header2": message})
+	}
+
+	logger, ok := u.Ui.(*command.ZerologUi)
+	if !ok {
+		return fmt.Errorf("failed to cast Ui to ZerologUi")
+	}
+
+	logger.LogHeader1(message)
+	return nil
+}
+
 // Info outputs an info message
 func (u *Ui) Info(message string) {
 	if u.Format == "json" {
-		json.NewEncoder(os.Stdout).Encode(map[string]string{"info": message}) //nolint:errcheck
+		json.NewEncoder(os.Stdout).Encode(map[string]string{"message": message}) //nolint:errcheck
 	}
 
 	u.Ui.Output(message)
@@ -101,4 +116,19 @@ func (u *Ui) Table(header string, rows []string) error {
 	}
 
 	return nil
+}
+
+// WarnInput is the input for the Warn method
+type WarnInput struct {
+	// Warning is the warning message
+	Warning string `json:"message,omitempty"`
+}
+
+// Warn outputs a warning message
+func (u *Ui) Warn(input WarnInput) {
+	if u.Format == "json" {
+		json.NewEncoder(os.Stderr).Encode(input) //nolint:errcheck
+	}
+
+	u.Ui.Warn(input.Warning)
 }

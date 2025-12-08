@@ -36,13 +36,25 @@ type ServiceStruct struct {
 	WaitPort int
 }
 
+// CreateServiceContainerInput is the input for the CreateServiceContainer function
+type CreateServiceContainerInput struct {
+	// Datastore is the service to create the container for
+	Datastore Datastore
+
+	// ServiceName is the name of the service to create the container for
+	ServiceName string
+
+	// TaggedImage is the tagged image to use for the container
+	TaggedImage string
+}
+
 // Datastore is the interface for a service
 type Datastore interface {
 	// CreateService creates a new service
 	CreateService(ctx context.Context, serviceName string) error
 
 	// CreateServiceContainer creates a new service container
-	CreateServiceContainer(ctx context.Context, serviceName string) error
+	CreateServiceContainer(ctx context.Context, input CreateServiceContainerInput) error
 
 	// Properties returns the properties of a service
 	Properties() ServiceStruct

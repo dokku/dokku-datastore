@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -198,6 +199,40 @@ func GenerateRandomHexString(length int) (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
+// GenerateRandomPorts generates random ports
+func GenerateRandomPorts(iterations int) ([]int, error) {
+	var ports []int
+	for i := 0; i < iterations; i++ {
+		port := GetAvailablePort()
+		if port == 0 {
+			return nil, fmt.Errorf("failed to get available port")
+		}
+		ports = append(ports, port)
+	}
+	return ports, nil
+}
+
+// GetAvailablePort gets an available port
+func GetAvailablePort() int {
+	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
+	if err != nil {
+		return 0
+	}
+
+	for {
+		l, err := net.ListenTCP("tcp", addr)
+		if err != nil {
+			return 0
+		}
+		defer l.Close()
+
+		port := l.Addr().(*net.TCPAddr).Port
+		if port >= 1025 && port <= 65535 {
+			return port
+		}
+	}
+}
+
 // ImageForServiceInput is the input for the ImageForService function
 type ImageForServiceInput struct {
 	// Datastore is the service to get the image for
@@ -378,33 +413,33 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 	serviceFiles := Files(input.Datastore, input.ServiceName)
 	portFile := serviceFiles.Port
 	containerName := ContainerName(input.Datastore, input.ServiceName)
-	exposedName := fmt.Sprintf("%s.ambassador", containerName)
+	ambassadorContainerName := fmt.Sprintf("%s.ambassador", containerName)
 
 	if !common.FileExists(portFile) || common.ReadFirstLine(portFile) == "" {
-		if common.ContainerExists(exposedName) {
+		if common.ContainerExists(ambassadorContainerName) {
 			_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 				Command: common.DockerBin(),
-				Args:    []string{"container", "stop", exposedName},
+				Args:    []string{"container", "stop", ambassadorContainerName},
 			})
 			if err != nil {
-				return fmt.Errorf("failed to stop container %s: %w", exposedName, err)
+				return fmt.Errorf("failed to stop container %s: %w", ambassadorContainerName, err)
 			}
 		}
 
 		return nil
 	}
 
-	if common.ContainerIsRunning(exposedName) {
+	if common.ContainerIsRunning(ambassadorContainerName) {
 		return nil
 	}
 
-	if common.ContainerExists(exposedName) {
+	if common.ContainerExists(ambassadorContainerName) {
 		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 			Command: common.DockerBin(),
-			Args:    []string{"container", "start", exposedName},
+			Args:    []string{"container", "start", ambassadorContainerName},
 		})
 		if err != nil {
-			return fmt.Errorf("failed to start container %s: %w", exposedName, err)
+			return fmt.Errorf("failed to start container %s: %w", ambassadorContainerName, err)
 		}
 		return nil
 	}
@@ -422,14 +457,14 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		"run",
 		"-d",
 		"--link=" + fmt.Sprintf("%s:%s", containerName, serviceProperties.CommandPrefix),
-		"--name=" + exposedName,
+		"--name=" + ambassadorContainerName,
 		"--restart=always",
 		"--label=dokku=ambassador",
 		"--label=dokku.ambassador=" + serviceProperties.CommandPrefix,
 	}
 
 	for _, port := range portContents {
-		dockerRunOptions = append(dockerRunOptions, "--port="+port)
+		dockerRunOptions = append(dockerRunOptions, "--publish="+port)
 	}
 
 	dockerRunOptions = append(dockerRunOptions, PluginAmbassadorImage)
@@ -439,7 +474,7 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		Args:    dockerRunOptions,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to run container %s: %w", exposedName, err)
+		return fmt.Errorf("failed to run container %s: %w", ambassadorContainerName, err)
 	}
 	return nil
 }

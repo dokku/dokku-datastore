@@ -91,11 +91,11 @@ func (s *RedisService) CreateService(ctx context.Context, serviceName string) er
 }
 
 // CreateServiceContainer creates a new service container
-func (s *RedisService) CreateServiceContainer(ctx context.Context, serviceName string) error {
+func (s *RedisService) CreateServiceContainer(ctx context.Context, input CreateServiceContainerInput) error {
 	serviceProperties := s.Properties()
-	serviceFolders := Folders(s, serviceName)
-	serviceFiles := Files(s, serviceName)
-	serviceName = ContainerName(s, serviceName)
+	serviceFolders := Folders(input.Datastore, input.ServiceName)
+	serviceFiles := Files(input.Datastore, input.ServiceName)
+	containerName := ContainerName(input.Datastore, input.ServiceName)
 	cidFilename := serviceFiles.ID
 
 	lines, err := common.FileToSlice(serviceFiles.ConfigOptions)
@@ -119,10 +119,10 @@ func (s *RedisService) CreateServiceContainer(ctx context.Context, serviceName s
 		"create",
 		"--cidfile=" + cidFilename,
 		"--env-file=" + serviceFiles.Env,
-		"--hostname=" + serviceName,
+		"--hostname=" + containerName,
 		"--label=dokku.service=" + serviceProperties.CommandPrefix,
 		"--label=dokku=service",
-		"--name=" + serviceName,
+		"--name=" + containerName,
 		"--restart=always",
 		"--volume=" + serviceFolders.HostConfig + ":/usr/local/etc/redis",
 		"--volume=" + serviceFolders.HostData + ":/data",
@@ -138,18 +138,8 @@ func (s *RedisService) CreateServiceContainer(ctx context.Context, serviceName s
 		dockerCreateArgs = append(dockerCreateArgs, "--shm-size="+shmSize)
 	}
 
-	image := common.ReadFirstLine(serviceFiles.Image)
-	if image == "" {
-		image = serviceProperties.DefaultImage
-	}
-
-	imageVersion := common.ReadFirstLine(serviceFiles.ImageVersion)
-	if imageVersion == "" {
-		imageVersion = serviceProperties.DefaultImageVersion
-	}
-
-	networkAlias := DNSHostname(s, serviceName)
-	initialNetwork := InitialNetwork(s, serviceName)
+	networkAlias := DNSHostname(input.Datastore, input.ServiceName)
+	initialNetwork := InitialNetwork(input.Datastore, input.ServiceName)
 	if err != nil {
 		return fmt.Errorf("failed to get initial network: %w", err)
 	}
@@ -158,7 +148,21 @@ func (s *RedisService) CreateServiceContainer(ctx context.Context, serviceName s
 		dockerCreateArgs = append(dockerCreateArgs, "--network-alias="+networkAlias)
 	}
 
-	dockerCreateArgs = append(dockerCreateArgs, fmt.Sprintf("%s:%s", image, imageVersion))
+	taggedImage := input.TaggedImage
+	if taggedImage == "" {
+		image := common.ReadFirstLine(serviceFiles.Image)
+		if image == "" {
+			image = serviceProperties.DefaultImage
+		}
+
+		imageVersion := common.ReadFirstLine(serviceFiles.ImageVersion)
+		if imageVersion == "" {
+			imageVersion = serviceProperties.DefaultImageVersion
+		}
+		taggedImage = fmt.Sprintf("%s:%s", image, imageVersion)
+	}
+
+	dockerCreateArgs = append(dockerCreateArgs, taggedImage)
 	dockerCreateArgs = append(dockerCreateArgs, "redis-server")
 	dockerCreateArgs = append(dockerCreateArgs, "/usr/local/etc/redis/redis.conf")
 	dockerCreateArgs = append(dockerCreateArgs, []string{"--bind", "0.0.0.0"}...)
@@ -179,7 +183,7 @@ func (s *RedisService) CreateServiceContainer(ctx context.Context, serviceName s
 		return err
 	}
 
-	postCreateNetworks := common.PropertyGet(serviceProperties.CommandPrefix, serviceName, "post-create-network")
+	postCreateNetworks := common.PropertyGet(serviceProperties.CommandPrefix, input.ServiceName, "post-create-network")
 	if postCreateNetworks != "" {
 		err := AttachNetworksToContainer(ctx, AttachNetworksToContainerInput{
 			ContainerID:  common.ReadFirstLine(cidFilename),
@@ -206,14 +210,14 @@ func (s *RedisService) CreateServiceContainer(ctx context.Context, serviceName s
 	}
 
 	err = ServicePortReconcileStatus(ctx, ServicePortReconcileStatusInput{
-		Datastore:   s,
-		ServiceName: serviceName,
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to reconcile port status: %w", err)
 	}
 
-	postStartNetworks := common.PropertyGet(serviceProperties.CommandPrefix, serviceName, "post-start-network")
+	postStartNetworks := common.PropertyGet(serviceProperties.CommandPrefix, input.ServiceName, "post-start-network")
 	if postStartNetworks != "" {
 		err := AttachNetworksToContainer(ctx, AttachNetworksToContainerInput{
 			ContainerID:  common.ReadFirstLine(cidFilename),

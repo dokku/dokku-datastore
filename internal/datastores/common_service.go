@@ -284,14 +284,21 @@ type LiveContainerIDInput struct {
 
 	// ServiceName is the name of the service to get the live container ID for
 	ServiceName string
+
+	Filter string
 }
 
 // LiveContainerID gets the live container ID for a service, regardless of what is set in the ID file
 func LiveContainerID(ctx context.Context, input LiveContainerIDInput) string {
 	containerName := ContainerName(input.Datastore, input.ServiceName)
+	arguments := []string{"container", "ps", "-aq", "--no-trunc", "--filter", fmt.Sprintf("name=^/%s$", containerName)}
+	if input.Filter != "" {
+		arguments = append(arguments, "--filter", input.Filter)
+	}
+
 	result, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
-		Args:    []string{"container", "ps", "-aq", "--no-trunc", "--filter", fmt.Sprintf("name=^/%s$", containerName)},
+		Args:    arguments,
 	})
 	if err != nil {
 		return ""
@@ -466,6 +473,75 @@ func Status(ctx context.Context, input StatusInput) string {
 	}
 
 	return containerStatus
+}
+
+// StartInput is the input for the Start function
+type StartInput struct {
+	// Datastore is the service to start
+	Datastore Datastore
+
+	// ServiceName is the name of the service to start
+	ServiceName string
+}
+
+// Start starts a service
+func Start(ctx context.Context, input StartInput) error {
+	runningContainerID := LiveContainerID(ctx, LiveContainerIDInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		Filter:      "status=running",
+	})
+	if runningContainerID != "" {
+		return common.WriteStringToFile(common.WriteStringToFileInput{
+			Content:   runningContainerID,
+			Filename:  Files(input.Datastore, input.ServiceName).ID,
+			GroupName: SystemGroup(),
+			Mode:      0644,
+			Username:  SystemUser(),
+		})
+	}
+
+	previousContainerID := LiveContainerID(ctx, LiveContainerIDInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		Filter:      "status=exited",
+	})
+	if previousContainerID != "" {
+		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+			Command: common.DockerBin(),
+			Args:    []string{"container", "start", previousContainerID},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to start container: %w", err)
+		}
+
+		err = ServicePortReconcileStatus(ctx, ServicePortReconcileStatusInput{
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to reconcile port status: %w", err)
+		}
+
+		return nil
+	}
+
+	taggedImage, err := ImageForService(ImageForServiceInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get image for service: %w", err)
+	}
+
+	if err := ValidateTaggedImageExists(taggedImage); err != nil {
+		return err
+	}
+	return input.Datastore.CreateServiceContainer(ctx, CreateServiceContainerInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		TaggedImage: taggedImage,
+	})
 }
 
 // VersionInput is the input for the Version function
