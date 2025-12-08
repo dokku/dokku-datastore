@@ -158,13 +158,7 @@ func (c *InfoCommand) Run(args []string) int {
 		cancel()
 	}()
 
-	logger := internal.Ui{
-		Ui:     c.Ui,
-		Format: c.format,
-		Quiet:  c.quiet,
-		Trace:  c.trace,
-	}
-
+	logger := internal.Ui{Ui: c.Ui}
 	flags := c.FlagSet()
 	flags.Usage = func() {
 		logger.Help(c.Help()) //nolint:errcheck
@@ -175,6 +169,13 @@ func (c *InfoCommand) Run(args []string) int {
 			Error:   err,
 		})
 		return 1
+	}
+
+	logger = internal.Ui{
+		Ui:     c.Ui,
+		Format: c.format,
+		Quiet:  c.quiet,
+		Trace:  c.trace,
 	}
 
 	arguments, err := c.ParsedArguments(flags.Args())

@@ -33,7 +33,10 @@ func LinkedServices(ctx context.Context, input LinkedServicesInput) ([]string, e
 
 	linkedServices := []string{}
 	for _, serviceName := range services {
-		linkedApps := datastores.LinkedApps(input.Datastore, serviceName)
+		linkedApps := datastores.LinkedApps(ctx, datastores.LinkedAppsInput{
+			Datastore:   input.Datastore,
+			ServiceName: serviceName,
+		})
 		if slices.Contains(linkedApps, input.AppName) {
 			linkedServices = append(linkedServices, serviceName)
 		}

@@ -111,13 +111,7 @@ func (c *DestroyCommand) Run(args []string) int {
 		cancel()
 	}()
 
-	logger := internal.Ui{
-		Ui:     c.Ui,
-		Format: c.format,
-		Quiet:  c.quiet,
-		Trace:  c.trace,
-	}
-
+	logger := internal.Ui{Ui: c.Ui}
 	flags := c.FlagSet()
 	flags.Usage = func() {
 		logger.Help(c.Help()) //nolint:errcheck
@@ -128,6 +122,13 @@ func (c *DestroyCommand) Run(args []string) int {
 			Error:   err,
 		})
 		return 1
+	}
+
+	logger = internal.Ui{
+		Ui:     c.Ui,
+		Format: c.format,
+		Quiet:  c.quiet,
+		Trace:  c.trace,
 	}
 
 	arguments, err := c.ParsedArguments(flags.Args())
@@ -174,7 +175,11 @@ func (c *DestroyCommand) Run(args []string) int {
 	}
 
 	// check if the service is linked to any apps
-	if len(datastores.LinkedApps(datastore, serviceName)) > 0 {
+	linkedApps := datastores.LinkedApps(ctx, datastores.LinkedAppsInput{
+		Datastore:   datastore,
+		ServiceName: serviceName,
+	})
+	if len(linkedApps) > 0 {
 		logger.Error(internal.ErrorInput{
 			Error: errors.New("cannot delete linked service"),
 		})
