@@ -74,6 +74,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"restart": func() (cli.Command, error) {
 			return &commands.RestartCommand{Meta: meta}, nil
 		},
+		"logs": func() (cli.Command, error) {
+			return &commands.LogsCommand{Meta: meta}, nil
+		},
 		"pause": func() (cli.Command, error) {
 			return &commands.PauseCommand{Meta: meta}, nil
 		},

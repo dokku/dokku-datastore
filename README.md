@@ -25,6 +25,7 @@ Available commands are:
     linked       Checks if a service is linked to an app
     links        Lists all apps that are linked to a given service
     list         Lists all services of a given datastore type
+    logs         Gets the logs of a service
     pause        Pauses a service
     restart      Restarts a service
     start        Starts a service
