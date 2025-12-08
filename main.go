@@ -59,6 +59,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"expose": func() (cli.Command, error) {
 			return &commands.ExposeCommand{Meta: meta}, nil
 		},
+		"info": func() (cli.Command, error) {
+			return &commands.InfoCommand{Meta: meta}, nil
+		},
 		"list": func() (cli.Command, error) {
 			return &commands.ListCommand{Meta: meta}, nil
 		},
