@@ -1,0 +1,3 @@
+FROM scratch
+COPY ./build/linux/dokku-datastore /dokku-datastore
+ENTRYPOINT ["/dokku-datastore"]
