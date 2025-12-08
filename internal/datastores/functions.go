@@ -44,6 +44,9 @@ func AttachNetworksToContainer(ctx context.Context, input AttachNetworksToContai
 
 // CallExecCommandWithContext calls a command with a context
 func CallExecCommandWithContext(ctx context.Context, input common.ExecCommandInput) (common.ExecCommandResponse, error) {
+	if os.Getenv("TRACE") != "" {
+		input.PrintCommand = true
+	}
 	result, err := common.CallExecCommandWithContext(ctx, input)
 	if err != nil {
 		return result, err
