@@ -186,6 +186,10 @@ func (c *DestroyCommand) Run(args []string) int {
 		return 1
 	}
 
+	if os.Getenv("DOKKU_APPS_FORCE_DELETE") == "1" {
+		c.force = true
+	}
+
 	// if !c.force, ask for confirmation
 	if !c.force {
 		err := common.AskForDestructiveConfirmation(serviceName, fmt.Sprintf("%s service", datastoreType))
