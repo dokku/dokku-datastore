@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/datastores"
@@ -116,9 +115,18 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	}
 
 	// create the service links file
-	linksFile := filepath.Join(serviceRoot, "LINKS")
-	if err := common.TouchFile(linksFile); err != nil {
-		return fmt.Errorf("failed to create service links file %s: %w", linksFile, err)
+	serviceFiles := datastores.Files(input.Datastore, input.ServiceName)
+	if !common.FileExists(serviceFiles.Links) {
+		err = common.WriteStringToFile(common.WriteStringToFileInput{
+			Content:   "",
+			Filename:  serviceFiles.Links,
+			GroupName: datastores.SystemGroup(),
+			Mode:      0644,
+			Username:  datastores.SystemUser(),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create service links file %s: %w", serviceFiles.Links, err)
+		}
 	}
 
 	err = input.Datastore.CreateService(ctx, input.ServiceName)
