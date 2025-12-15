@@ -276,7 +276,7 @@ func (c *CreateCommand) Run(args []string) int {
 		logger.Header1(fmt.Sprintf("End of %s container output", serviceName)) //nolint:errcheck
 		return 1
 	}
-	// output service info
+
 	info := datastores.Info(ctx, datastores.InfoInput{
 		Datastore:   datastore,
 		ServiceName: serviceName,
@@ -289,6 +289,7 @@ func (c *CreateCommand) Run(args []string) int {
 			return 1
 		}
 	} else {
+		logger.Header2(fmt.Sprintf("%s container created: %s", datastore.Title(), serviceName)) //nolint:errcheck
 		flagKeys := []string{}
 
 		flags := map[string]string{}

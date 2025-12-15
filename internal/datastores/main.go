@@ -62,6 +62,9 @@ type Datastore interface {
 	// ServiceType returns the type of service
 	ServiceType() string
 
+	// Title returns the service name in title case
+	Title() string
+
 	// URL returns the url for a service
 	URL(serviceName string) string
 }
