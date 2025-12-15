@@ -250,6 +250,11 @@ func (s *RedisService) ServiceType() string {
 	return "redis"
 }
 
+// Title returns the service name in title case
+func (s *RedisService) Title() string {
+	return "Redis"
+}
+
 // URL gets the url for a service
 func (s *RedisService) URL(serviceName string) string {
 	return fmt.Sprintf("redis://%s:%d", DNSHostname(s, serviceName), s.Properties().Ports[0])
