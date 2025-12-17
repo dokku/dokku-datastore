@@ -212,6 +212,7 @@ func (c *DestroyCommand) Run(args []string) int {
 		})
 		return 1
 	}
+	logger.Header2(fmt.Sprintf("%s container deleted: %s", datastore.Title(), serviceName)) //nolint:errcheck
 
 	return 0
 }
