@@ -220,16 +220,18 @@ func (c *CreateCommand) Run(args []string) int {
 	}
 
 	err = internal.CreateService(ctx, internal.CreateServiceInput{
-		ConfigOptions:  updatedFlags.ConfigOptions,
-		CustomEnv:      updatedFlags.CustomEnv,
-		Datastore:      datastore,
-		Image:          updatedFlags.Image,
-		ImageVersion:   updatedFlags.ImageVersion,
-		InitialNetwork: c.initialNetwork,
-		Memory:         c.memory,
-		Password:       c.password,
-		ServiceName:    serviceName,
-		ShmSize:        c.shmSize,
+		ConfigOptions:      updatedFlags.ConfigOptions,
+		CustomEnv:          updatedFlags.CustomEnv,
+		Datastore:          datastore,
+		Image:              updatedFlags.Image,
+		ImageVersion:       updatedFlags.ImageVersion,
+		InitialNetwork:     c.initialNetwork,
+		Memory:             c.memory,
+		Password:           c.password,
+		PostCreateNetworks: c.postCreateNetwork,
+		PostStartNetworks:  c.postStartNetwork,
+		ServiceName:        serviceName,
+		ShmSize:            c.shmSize,
 	})
 	if err != nil {
 		logger.Error(internal.ErrorInput{

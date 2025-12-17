@@ -28,11 +28,11 @@ type CreateServiceInput struct {
 	// ImageVersion is the image version to use for the service
 	ImageVersion string
 
-	// Memory is the memory limit to use for the service
-	Memory int
-
 	// InitialNetwork is the initial network to use for the service
 	InitialNetwork string
+
+	// Memory is the memory limit to use for the service
+	Memory int
 
 	// Password is the password to use for the service
 	Password string
