@@ -253,7 +253,7 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 		"config-dir":          serviceFolders.Config,
 		"config-options":      ConfigOptions(input.Datastore, input.ServiceName),
 		"data-dir":            serviceFolders.Data,
-		"dsn":                 input.Datastore.URL(input.ServiceName),
+		"dsn":                 input.Datastore.URL(input.ServiceName, ""),
 		"exposed-ports":       ExposedPorts(input.Datastore, input.ServiceName),
 		"id":                  containerID,
 		"internal-ip":         ContainerIP(ctx, ContainerIPInput{ContainerID: containerID}),
