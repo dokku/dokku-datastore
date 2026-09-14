@@ -64,7 +64,7 @@ func (c *ListCommand) AutocompleteArgs() complete.Predictor {
 
 // ParsedArguments parses the arguments for the command
 func (c *ListCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
-	return command.ParseArguments(args, c.Arguments())
+	return internal.ParseArguments(args, c.Arguments())
 }
 
 // FlagSet returns the flag set for the command
