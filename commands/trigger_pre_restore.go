@@ -60,6 +60,12 @@ func (c *TriggerPreRestoreCommand) Arguments() []command.Argument {
 		Optional:    true,
 		Type:        command.ArgumentString,
 	})
+	args = append(args, command.Argument{
+		Name:        "additional-arguments",
+		Description: "arguments dokku passes that this trigger does not use",
+		Optional:    true,
+		Type:        command.ArgumentList,
+	})
 	return args
 }
 
