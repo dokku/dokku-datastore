@@ -17,7 +17,6 @@ type RedisService struct{}
 // CreateService creates a new service
 func (s *RedisService) CreateService(ctx context.Context, serviceName string) error {
 	serviceFolders := Folders(s, serviceName)
-	serviceRoot := serviceFolders.Root
 	redisServiceConfig := filepath.Join(serviceFolders.Config, "redis.conf")
 
 	redisConfigPath := os.Getenv("REDIS_CONFIG_PATH")
@@ -50,13 +49,13 @@ func (s *RedisService) CreateService(ctx context.Context, serviceName string) er
 	if password != "" {
 		err := common.WriteStringToFile(common.WriteStringToFileInput{
 			Content:   password,
-			Filename:  filepath.Join(serviceRoot, "PASSWORD"),
+			Filename:  Files(s, serviceName).Password,
 			GroupName: SystemGroup(),
 			Mode:      0640,
 			Username:  SystemUser(),
 		})
 		if err != nil {
-			return fmt.Errorf("unable to write password to %s: %w", filepath.Join(serviceRoot, "PASSWORD"), err)
+			return fmt.Errorf("unable to write password to %s: %w", Files(s, serviceName).Password, err)
 		}
 	}
 
@@ -263,5 +262,5 @@ func (s *RedisService) URL(serviceName string, schemeOverride string) string {
 	if schemeOverride != "" {
 		scheme = schemeOverride
 	}
-	return fmt.Sprintf("%s://%s:%d", scheme, DNSHostname(s, serviceName), s.Properties().Ports[0])
+	return fmt.Sprintf("%s://:%s@%s:%d", scheme, Password(s, serviceName), DNSHostname(s, serviceName), s.Properties().Ports[0])
 }
