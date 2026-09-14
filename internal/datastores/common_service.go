@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/dokku/dokku/plugins/common"
@@ -330,6 +331,49 @@ func LinkedApps(ctx context.Context, input LinkedAppsInput) []string {
 		return []string{}
 	}
 	return lines
+}
+
+// writeLinkedApps writes the links file for a service, deduplicated and sorted,
+// matching what the bash datastore plugins produce
+func writeLinkedApps(s Datastore, serviceName string, apps []string) error {
+	slices.Sort(apps)
+	apps = slices.Compact(apps)
+
+	return common.WriteSliceToFile(common.WriteSliceToFileInput{
+		Filename:  Files(s, serviceName).Links,
+		GroupName: SystemGroup(),
+		Lines:     apps,
+		Mode:      0644,
+		Username:  SystemUser(),
+	})
+}
+
+// AddLinkedApp records an app as linked to a service
+func AddLinkedApp(ctx context.Context, input LinkedAppsInput, appName string) error {
+	apps := LinkedApps(ctx, input)
+	if slices.Contains(apps, appName) {
+		return nil
+	}
+
+	return writeLinkedApps(input.Datastore, input.ServiceName, append(apps, appName))
+}
+
+// RemoveLinkedApp drops an app from the set of apps linked to a service
+func RemoveLinkedApp(ctx context.Context, input LinkedAppsInput, appName string) error {
+	linksFile := Files(input.Datastore, input.ServiceName).Links
+	if !common.FileExists(linksFile) {
+		return nil
+	}
+
+	apps := LinkedApps(ctx, input)
+	remaining := []string{}
+	for _, app := range apps {
+		if app != appName {
+			remaining = append(remaining, app)
+		}
+	}
+
+	return writeLinkedApps(input.Datastore, input.ServiceName, remaining)
 }
 
 // LiveContainerIDInput is the input for the LiveContainerID function

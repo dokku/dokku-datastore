@@ -234,7 +234,9 @@ func (s *RedisService) Properties() ServiceStruct {
 	return ServiceStruct{
 		CommandPrefix:       "redis",
 		ConfigSuffix:        "config",
+		AltAlias:            "DOKKU_REDIS",
 		ConfigVariable:      "REDIS_CONFIG_OPTIONS",
+		DefaultAlias:        "REDIS",
 		DefaultImage:        "redis",
 		DefaultImageVersion: "latest",
 		EnvVariable:         "REDIS_CUSTOM_ENV",

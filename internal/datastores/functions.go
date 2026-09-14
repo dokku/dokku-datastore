@@ -508,6 +508,13 @@ const MissingServiceNameMessage = "Please specify a valid name for the service"
 // unsupported characters. It matches the message the bash datastore plugins emit.
 const InvalidServiceNameMessage = MissingServiceNameMessage + ". Valid characters are: [A-Za-z0-9_]+"
 
+// MissingAppNameMessage is the message emitted when an app name is not
+// specified. It matches the message the bash datastore plugins emit.
+const MissingAppNameMessage = "Please specify an app to run the command on"
+
+// ErrMissingAppName is returned when an app name is not specified
+var ErrMissingAppName = errors.New(MissingAppNameMessage)
+
 // ErrMissingServiceName is returned when a service name is not specified
 var ErrMissingServiceName = errors.New(MissingServiceNameMessage)
 

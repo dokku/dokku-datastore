@@ -8,8 +8,16 @@ import (
 
 // ServiceStruct is the structure for a service
 type ServiceStruct struct {
+	// AltAlias is the prefix used to generate an alternate config url alias when
+	// the default alias is already in use
+	AltAlias string
+
 	// CommandPrefix is the command prefix for a service
 	CommandPrefix string
+
+	// DefaultAlias is the prefix of the config variable a linked app receives the
+	// service url on
+	DefaultAlias string
 
 	// ConfigVariable is the configuration variable for a service
 	ConfigVariable string

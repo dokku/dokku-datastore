@@ -3,6 +3,7 @@ package datastores
 import (
 	"context"
 	"os"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -14,6 +15,19 @@ import (
 // environment, which means these tests cannot run in parallel.
 func withServiceRoot(t *testing.T, s Datastore, serviceName string) string {
 	t.Helper()
+
+	// the service files are chowned to the dokku user, which does not exist on a
+	// development machine or a CI runner, so point that at whoever is running
+	current, err := user.Current()
+	if err != nil {
+		t.Fatalf("failed to look up the current user: %v", err)
+	}
+	group, err := user.LookupGroupId(current.Gid)
+	if err != nil {
+		t.Fatalf("failed to look up the current group: %v", err)
+	}
+	t.Setenv("DOKKU_SYSTEM_USER", current.Username)
+	t.Setenv("DOKKU_SYSTEM_GROUP", group.Name)
 
 	previous := DokkuLibRoot
 	DokkuLibRoot = t.TempDir()
@@ -198,4 +212,67 @@ func TestExposedPorts(t *testing.T) {
 
 func ptr(s string) *string {
 	return &s
+}
+
+func TestAddAndRemoveLinkedApp(t *testing.T) {
+	datastore := Datastores["redis"]
+	ctx := context.Background()
+	input := LinkedAppsInput{Datastore: datastore, ServiceName: "lollipop"}
+
+	withServiceRoot(t, datastore, "lollipop")
+
+	// adding to a service with no links file at all
+	if err := AddLinkedApp(ctx, input, "my-app"); err != nil {
+		t.Fatalf("failed to add a linked app: %v", err)
+	}
+	if actual := LinkedApps(ctx, input); !slices.Equal(actual, []string{"my-app"}) {
+		t.Fatalf("expected [my-app], got %v", actual)
+	}
+
+	// a second app, kept sorted
+	if err := AddLinkedApp(ctx, input, "another-app"); err != nil {
+		t.Fatalf("failed to add a second linked app: %v", err)
+	}
+	if actual := LinkedApps(ctx, input); !slices.Equal(actual, []string{"another-app", "my-app"}) {
+		t.Fatalf("expected [another-app my-app], got %v", actual)
+	}
+
+	// adding the same app again does not duplicate it
+	if err := AddLinkedApp(ctx, input, "my-app"); err != nil {
+		t.Fatalf("failed to re-add a linked app: %v", err)
+	}
+	if actual := LinkedApps(ctx, input); !slices.Equal(actual, []string{"another-app", "my-app"}) {
+		t.Fatalf("expected [another-app my-app], got %v", actual)
+	}
+
+	// removing leaves the rest alone
+	if err := RemoveLinkedApp(ctx, input, "my-app"); err != nil {
+		t.Fatalf("failed to remove a linked app: %v", err)
+	}
+	if actual := LinkedApps(ctx, input); !slices.Equal(actual, []string{"another-app"}) {
+		t.Fatalf("expected [another-app], got %v", actual)
+	}
+
+	// removing an app that was never linked is not an error
+	if err := RemoveLinkedApp(ctx, input, "never-linked"); err != nil {
+		t.Fatalf("expected removing an unlinked app to succeed, got: %v", err)
+	}
+
+	// removing the last app empties the file rather than leaving a stale entry
+	if err := RemoveLinkedApp(ctx, input, "another-app"); err != nil {
+		t.Fatalf("failed to remove the last linked app: %v", err)
+	}
+	if actual := LinkedApps(ctx, input); len(actual) != 0 {
+		t.Fatalf("expected no linked apps, got %v", actual)
+	}
+}
+
+func TestRemoveLinkedAppWithoutALinksFile(t *testing.T) {
+	datastore := Datastores["redis"]
+	withServiceRoot(t, datastore, "lollipop")
+
+	err := RemoveLinkedApp(context.Background(), LinkedAppsInput{Datastore: datastore, ServiceName: "lollipop"}, "my-app")
+	if err != nil {
+		t.Errorf("expected removing from a missing links file to succeed, got: %v", err)
+	}
 }

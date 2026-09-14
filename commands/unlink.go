@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"slices"
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
@@ -17,89 +16,95 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
-// LinkedCommand is the command for checking if a service is linked to an app
-type LinkedCommand struct {
+// UnlinkCommand is the command for checking if a service is linked to an app
+type UnlinkCommand struct {
 	// Meta is the command meta
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+	// noRestart is whether to skip restarting the app
+	noRestart bool
 }
 
 // Name returns the name of the command
-func (c *LinkedCommand) Name() string {
-	return "linked"
+func (c *UnlinkCommand) Name() string {
+	return "unlink"
 }
 
 // Synopsis returns the synopsis of the command
-func (c *LinkedCommand) Synopsis() string {
-	return "Checks if a service is linked to an app"
+func (c *UnlinkCommand) Synopsis() string {
+	return "Unlinks a service from an app"
 }
 
 // Help returns the help text for the command
-func (c *LinkedCommand) Help() string {
+func (c *UnlinkCommand) Help() string {
 	return command.CommandHelp(c)
 }
 
 // Examples returns the examples for the command
-func (c *LinkedCommand) Examples() map[string]string {
+func (c *UnlinkCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Checks if a redis service named test is linked to the app test-app": fmt.Sprintf("%s %s redis test test-app", appName, c.Name()),
+		"Links a redis service named test to the app test-app": fmt.Sprintf("%s %s redis test test-app", appName, c.Name()),
+		"Links it as BLUE_URL instead of the default alias":    fmt.Sprintf("%s %s redis test test-app --alias BLUE", appName, c.Name()),
 	}
 }
 
 // Arguments returns the arguments for the command
-func (c *LinkedCommand) Arguments() []command.Argument {
+func (c *UnlinkCommand) Arguments() []command.Argument {
 	args := []command.Argument{}
 	args = append(args, command.Argument{
 		Name:        "datastore-type",
-		Description: "the type of datastore to check if the service is linked to an app",
+		Description: "the type of datastore to unlink",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
 	args = append(args, command.Argument{
 		Name:        "service-name",
-		Description: "the name of the service to check if it is linked to an app",
+		Description: "the name of the service to unlink",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
 	args = append(args, command.Argument{
 		Name:        "app-name",
-		Description: "the name of the app to check if the service is linked to",
-		Optional:    false,
+		Description: "the name of the app to unlink the service from",
+		Optional:    true,
 		Type:        command.ArgumentString,
 	})
 	return args
 }
 
 // AutocompleteArgs returns the autocomplete arguments for the command
-func (c *LinkedCommand) AutocompleteArgs() complete.Predictor {
+func (c *UnlinkCommand) AutocompleteArgs() complete.Predictor {
 	return complete.PredictSet("redis")
 }
 
 // ParsedArguments parses the arguments for the command
-func (c *LinkedCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
+func (c *UnlinkCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
 	return internal.ParseArguments(args, c.Arguments())
 }
 
 // FlagSet returns the flag set for the command
-func (c *LinkedCommand) FlagSet() *flag.FlagSet {
+func (c *UnlinkCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.BoolVarP(&c.noRestart, "no-restart", "n", false, "whether to skip restarting the app")
 	return f
 }
 
 // AutocompleteFlags returns the autocomplete flags for the command
-func (c *LinkedCommand) AutocompleteFlags() complete.Flags {
+func (c *UnlinkCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--no-restart": complete.PredictNothing,
+		},
 	)
 }
 
 // Run runs the command
-func (c *LinkedCommand) Run(args []string) int {
+func (c *UnlinkCommand) Run(args []string) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGHUP,
@@ -196,22 +201,18 @@ func (c *LinkedCommand) Run(args []string) int {
 		return 1
 	}
 
-	linkedServices, err := internal.LinkedServices(ctx, internal.LinkedServicesInput{
-		AppName:   appName,
-		Datastore: datastore,
-	})
-	if err != nil {
-		logger.Error(internal.ErrorInput{
-			Error: err,
-		})
-		return 1
+	if c.noRestart {
+		logger.Info(internal.SkippingRestartMessage)
 	}
 
-	if slices.Contains(linkedServices, serviceName) {
-		logger.Info(fmt.Sprintf("Service %s is linked to app %s", serviceName, appName))
-	} else {
+	if err := internal.UnlinkService(ctx, internal.UnlinkServiceInput{
+		AppName:     appName,
+		Datastore:   datastore,
+		NoRestart:   c.noRestart,
+		ServiceName: serviceName,
+	}); err != nil {
 		logger.Error(internal.ErrorInput{
-			Error: fmt.Errorf("service %s is not linked to app %s", serviceName, appName),
+			Error: err,
 		})
 		return 1
 	}
