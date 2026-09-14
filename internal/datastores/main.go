@@ -134,6 +134,9 @@ var Datastores = map[string]Datastore{}
 // PluginAmbassadorImage is the ambassador image
 var PluginAmbassadorImage = "dokku/ambassador:0.8.2"
 
+// PluginS3BackupImage is the image used to ship backups to s3
+var PluginS3BackupImage = "dokku/s3backup:0.18.0"
+
 // PluginBusyboxImage is the busybox image
 var PluginBusyboxImage = "busybox:1.37.0-uclibc"
 
