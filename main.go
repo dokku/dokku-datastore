@@ -74,6 +74,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"backup-unset-public-key-encryption": func() (cli.Command, error) {
 			return &commands.BackupUnsetPublicKeyEncryptionCommand{Meta: meta}, nil
 		},
+		"clone": func() (cli.Command, error) {
+			return &commands.CloneCommand{Meta: meta}, nil
+		},
 		"create": func() (cli.Command, error) {
 			return &commands.CreateCommand{Meta: meta}, nil
 		},
