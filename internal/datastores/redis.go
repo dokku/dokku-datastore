@@ -294,56 +294,30 @@ func (s *RedisService) CreateServiceContainer(ctx context.Context, input CreateS
 		return fmt.Errorf("unable to remove ID file from %s: %w", cidFilename, err)
 	}
 
-	dockerCreateArgs := []string{
-		"container",
-		"create",
-		"--cidfile=" + cidFilename,
-		"--env-file=" + serviceFiles.Env,
-		"--hostname=" + containerName,
-		"--label=dokku.service=" + serviceProperties.CommandPrefix,
-		"--label=dokku=service",
-		"--name=" + containerName,
-		"--restart=always",
-		"--volume=" + serviceFolders.HostConfig + ":/usr/local/etc/redis",
-		"--volume=" + serviceFolders.HostData + ":/data",
-	}
-
-	memory := common.ReadFirstLine(serviceFiles.Memory)
-	if memory != "" {
-		dockerCreateArgs = append(dockerCreateArgs, "--memory="+memory+"m")
-	}
-
-	shmSize := common.ReadFirstLine(serviceFiles.ShmSize)
-	if shmSize != "" {
-		dockerCreateArgs = append(dockerCreateArgs, "--shm-size="+shmSize)
-	}
-
 	networkAlias := DNSHostname(input.Datastore, input.ServiceName)
-	initialNetwork := InitialNetwork(input.Datastore, input.ServiceName)
-	if err != nil {
-		return fmt.Errorf("failed to get initial network: %w", err)
-	}
-	if initialNetwork != "" {
-		dockerCreateArgs = append(dockerCreateArgs, "--network="+initialNetwork)
-		dockerCreateArgs = append(dockerCreateArgs, "--network-alias="+networkAlias)
-	}
 
 	taggedImage := input.TaggedImage
 	if taggedImage == "" {
 		taggedImage = s.taggedImage(input.ServiceName)
 	}
 
-	dockerCreateArgs = append(dockerCreateArgs, taggedImage)
-	dockerCreateArgs = append(dockerCreateArgs, "redis-server")
-	dockerCreateArgs = append(dockerCreateArgs, "/usr/local/etc/redis/redis.conf")
-	dockerCreateArgs = append(dockerCreateArgs, []string{"--bind", "0.0.0.0"}...)
-	for _, arg := range startArgsToAppend {
-		if arg == "" {
-			continue
-		}
-
-		dockerCreateArgs = append(dockerCreateArgs, arg)
-	}
+	dockerCreateArgs := ContainerArgs(ContainerArgsInput{
+		CommandPrefix:  serviceProperties.CommandPrefix,
+		Command:        []string{"redis-server", "/usr/local/etc/redis/redis.conf", "--bind", "0.0.0.0"},
+		ConfigOptions:  startArgsToAppend,
+		ContainerName:  containerName,
+		EnvFile:        serviceFiles.Env,
+		IDFile:         cidFilename,
+		InitialNetwork: InitialNetwork(input.Datastore, input.ServiceName),
+		Memory:         common.ReadFirstLine(serviceFiles.Memory),
+		NetworkAlias:   networkAlias,
+		ShmSize:        common.ReadFirstLine(serviceFiles.ShmSize),
+		TaggedImage:    taggedImage,
+		Volumes: []string{
+			serviceFolders.HostConfig + ":/usr/local/etc/redis",
+			serviceFolders.HostData + ":/data",
+		},
+	})
 
 	// create the container
 	_, err = CallExecCommandWithContext(ctx, common.ExecCommandInput{
