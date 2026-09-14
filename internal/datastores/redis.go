@@ -108,6 +108,32 @@ func (s *RedisService) taggedImage(serviceName string) string {
 	return fmt.Sprintf("%s:%s", image, imageVersion)
 }
 
+// ConnectToService opens an interactive redis-cli session against a service
+func (s *RedisService) ConnectToService(ctx context.Context, input ConnectToServiceInput) error {
+	args := []string{"container", "exec", "--env=LANG=C.UTF-8", "--env=LC_ALL=C.UTF-8", "-i"}
+
+	// only ask docker for a tty when there is one to give it, otherwise the
+	// exec fails outright rather than simply being non interactive
+	if stat, err := os.Stdin.Stat(); err == nil && stat.Mode()&os.ModeCharDevice != 0 {
+		args = append(args, "-t")
+	}
+
+	args = append(args, ContainerName(s, input.ServiceName), "redis-cli", "--no-auth-warning", "-a", Password(s, input.ServiceName))
+
+	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		Command:      common.DockerBin(),
+		Args:         args,
+		Stdin:        os.Stdin,
+		StdoutWriter: os.Stdout,
+		StderrWriter: os.Stderr,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to connect to the service: %w", err)
+	}
+
+	return nil
+}
+
 // exportTimeoutSeconds bounds the wait for a background save to finish
 const exportTimeoutSeconds = 120
 

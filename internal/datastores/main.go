@@ -63,6 +63,15 @@ type CreateServiceContainerInput struct {
 	TaggedImage string
 }
 
+// ConnectToServiceInput is the input for the ConnectToService function
+type ConnectToServiceInput struct {
+	// Datastore is the service to connect to
+	Datastore Datastore
+
+	// ServiceName is the name of the service to connect to
+	ServiceName string
+}
+
 // ExportServiceInput is the input for the ExportService function
 type ExportServiceInput struct {
 	// Datastore is the service to export
@@ -94,6 +103,9 @@ type Datastore interface {
 
 	// CreateServiceContainer creates a new service container
 	CreateServiceContainer(ctx context.Context, input CreateServiceContainerInput) error
+
+	// ConnectToService opens an interactive session against a service
+	ConnectToService(ctx context.Context, input ConnectToServiceInput) error
 
 	// ExportService writes a dump of the service's data to a writer
 	ExportService(ctx context.Context, input ExportServiceInput) error
