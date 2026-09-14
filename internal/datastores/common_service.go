@@ -125,6 +125,11 @@ func Exists(ctx context.Context, s Datastore, serviceName string) bool {
 	return common.DirectoryExists(serviceFolders.Root)
 }
 
+// Password gets the password for a service, or an empty string when it has none
+func Password(s Datastore, serviceName string) string {
+	return common.ReadFirstLine(Files(s, serviceName).Password)
+}
+
 // ExposedHostPorts gets the host ports a service is exposed on. The port file
 // holds them whitespace delimited, in the same order as the datastore's own
 // ports, which is the format the bash datastore plugins write.
@@ -198,6 +203,9 @@ type ServiceFiles struct {
 	// Memory is the memory file for the service
 	Memory string
 
+	// Password is the password file for the service
+	Password string
+
 	// Port is the port file for the service
 	Port string
 
@@ -218,6 +226,7 @@ func Files(s Datastore, serviceName string) ServiceFiles {
 		Image:         filepath.Join(folders.Root, "IMAGE"),
 		ImageVersion:  filepath.Join(folders.Root, "IMAGE_VERSION"),
 		Memory:        filepath.Join(folders.Root, "MEMORY"),
+		Password:      filepath.Join(folders.Root, "PASSWORD"),
 		Port:          filepath.Join(folders.Root, "PORT"),
 		ShmSize:       filepath.Join(folders.Root, "SHM_SIZE"),
 	}
