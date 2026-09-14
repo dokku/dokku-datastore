@@ -447,12 +447,12 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		return nil
 	}
 
-	portContents, err := common.FileToSlice(portFile)
-	if err != nil {
-		return fmt.Errorf("failed to read port file %s: %w", portFile, err)
-	}
-	if len(portContents) == 0 {
+	hostPorts := ExposedHostPorts(input.Datastore, input.ServiceName)
+	if len(hostPorts) == 0 {
 		return fmt.Errorf("port file %s is empty", portFile)
+	}
+	if len(hostPorts) != len(serviceProperties.Ports) {
+		return fmt.Errorf("port file %s holds %d ports, expected %d", portFile, len(hostPorts), len(serviceProperties.Ports))
 	}
 
 	dockerRunOptions := []string{
@@ -466,13 +466,13 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		"--label=dokku.ambassador=" + serviceProperties.CommandPrefix,
 	}
 
-	for _, port := range portContents {
-		dockerRunOptions = append(dockerRunOptions, "--publish="+port)
+	for i, hostPort := range hostPorts {
+		dockerRunOptions = append(dockerRunOptions, fmt.Sprintf("--publish=%s:%d", hostPort, serviceProperties.Ports[i]))
 	}
 
 	dockerRunOptions = append(dockerRunOptions, PluginAmbassadorImage)
 
-	_, err = CallExecCommandWithContext(ctx, common.ExecCommandInput{
+	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    dockerRunOptions,
 	})
