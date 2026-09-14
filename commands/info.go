@@ -293,7 +293,16 @@ func (c *InfoCommand) Run(args []string) int {
 		if c.format == "text" {
 			c.format = "stdout"
 		}
-		err = common.ReportSingleApp(datastoreType, serviceName, infoFlag, flags, flagKeys, c.format, trimPrefix, uppercaseFirstCharacter)
+		err = common.ReportSingleApp(common.ReportSingleAppInput{
+			ReportType:              datastoreType,
+			AppName:                 serviceName,
+			InfoFlag:                infoFlag,
+			InfoFlags:               flags,
+			InfoFlagKeys:            flagKeys,
+			Format:                  c.format,
+			TrimPrefix:              trimPrefix,
+			UppercaseFirstCharacter: uppercaseFirstCharacter,
+		})
 		if err != nil {
 			logger.Error(internal.ErrorInput{
 				Error: err,
