@@ -70,3 +70,27 @@ func TestGlobalFlagsDefaults(t *testing.T) {
 		})
 	}
 }
+
+func TestReportFormat(t *testing.T) {
+	// the report helper rejects anything but these two, and the flag's default
+	// is text, so the mapping has to happen for every caller
+	tests := []struct {
+		name     string
+		format   string
+		expected string
+	}{
+		{name: "the flag default", format: "text", expected: "stdout"},
+		{name: "json is passed through", format: "json", expected: "json"},
+		{name: "an unset format", format: "", expected: "stdout"},
+		{name: "anything unrecognised falls back to stdout", format: "table", expected: "stdout"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c := &GlobalFlagCommand{format: test.format}
+			if actual := c.ReportFormat(); actual != test.expected {
+				t.Errorf("expected %q, got %q", test.expected, actual)
+			}
+		})
+	}
+}

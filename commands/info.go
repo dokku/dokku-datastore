@@ -290,16 +290,13 @@ func (c *InfoCommand) Run(args []string) int {
 		}
 		trimPrefix := false
 		uppercaseFirstCharacter := true
-		if c.format == "text" {
-			c.format = "stdout"
-		}
 		err = common.ReportSingleApp(common.ReportSingleAppInput{
 			ReportType:              datastoreType,
 			AppName:                 serviceName,
 			InfoFlag:                infoFlag,
 			InfoFlags:               flags,
 			InfoFlagKeys:            flagKeys,
-			Format:                  c.format,
+			Format:                  c.ReportFormat(),
 			TrimPrefix:              trimPrefix,
 			UppercaseFirstCharacter: uppercaseFirstCharacter,
 		})

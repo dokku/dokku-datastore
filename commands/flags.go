@@ -27,6 +27,16 @@ func (c *GlobalFlagCommand) GlobalFlags(f *flag.FlagSet) {
 	f.BoolVar(&c.trace, "trace", os.Getenv("DOKKU_TRACE") != "", "enable trace output")
 }
 
+// ReportFormat maps the format flag onto what the report helper accepts. The
+// flag's own vocabulary is text or json, the helper's is stdout or json.
+func (c *GlobalFlagCommand) ReportFormat() string {
+	if c.format == "json" {
+		return "json"
+	}
+
+	return "stdout"
+}
+
 // AutocompleteGlobalFlags returns the autocomplete global flags
 func (c *GlobalFlagCommand) AutocompleteGlobalFlags() complete.Flags {
 	return complete.Flags{
