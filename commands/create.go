@@ -307,7 +307,7 @@ func (c *CreateCommand) Run(args []string) int {
 			AppName:                 serviceName,
 			InfoFlags:               flags,
 			InfoFlagKeys:            flagKeys,
-			Format:                  c.format,
+			Format:                  c.ReportFormat(),
 			TrimPrefix:              trimPrefix,
 			UppercaseFirstCharacter: uppercaseFirstCharacter,
 		})
