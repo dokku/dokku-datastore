@@ -11,6 +11,33 @@ import (
 	"github.com/dokku/dokku/plugins/common"
 )
 
+// ServiceFolderMode is the mode the service folders are created with. The data
+// folder is handed to the datastore container, whose entrypoint takes ownership
+// of it, so the group has to keep write access for later commands such as
+// import to be able to write into it.
+const ServiceFolderMode = 0775
+
+// CreateServiceFolders creates the folders for a service. The mode is applied
+// explicitly because MkdirAll is subject to the umask.
+func CreateServiceFolders(folders []string, username string, groupName string) error {
+	for _, folder := range folders {
+		if err := os.MkdirAll(folder, ServiceFolderMode); err != nil {
+			return fmt.Errorf("failed to create service folder %s: %w", folder, err)
+		}
+
+		if err := common.SetPermissions(common.SetPermissionInput{
+			Filename:  folder,
+			GroupName: groupName,
+			Mode:      ServiceFolderMode,
+			Username:  username,
+		}); err != nil {
+			return fmt.Errorf("failed to set permissions on service folder %s: %w", folder, err)
+		}
+	}
+
+	return nil
+}
+
 // CreateServiceInput is the input for the CreateService function
 type CreateServiceInput struct {
 	// ConfigOptions is the configuration options to use for the service
@@ -107,11 +134,8 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		serviceFolders.Data,
 	}
 
-	// create the service folders
-	for _, folder := range allServiceFolders {
-		if err := os.MkdirAll(folder, 0755); err != nil {
-			return fmt.Errorf("failed to create service folder %s: %w", folder, err)
-		}
+	if err := CreateServiceFolders(allServiceFolders, datastores.SystemUser(), datastores.SystemGroup()); err != nil {
+		return err
 	}
 
 	// create the service links file
