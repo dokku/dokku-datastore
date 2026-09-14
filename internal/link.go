@@ -2,14 +2,15 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/datastores"
 	"github.com/dokku/dokku/plugins/common"
-	"github.com/dokku/dokku/plugins/config"
 )
 
 // alternateAliasColors are the suffixes tried, in order, when the default alias
@@ -22,27 +23,86 @@ var alternateAliasColors = []string{
 // SkippingRestartMessage is logged when an app is not restarted after a link change
 const SkippingRestartMessage = "Skipping restart of linked app"
 
-// AppEnvironment returns the environment variables set on an app. It is not
-// merged with the global environment, matching what the bash plugins read.
-func AppEnvironment(appName string) (map[string]string, error) {
-	env, err := config.LoadAppEnv(appName)
+// AppEnvironment returns the environment variables set on an app. The installed
+// dokku is asked rather than reading the files directly, because where those
+// live has changed between dokku releases and this binary has to work against
+// whichever one is present. It is not merged with the global environment,
+// matching what the bash plugins read.
+func AppEnvironment(ctx context.Context, appName string) (map[string]string, error) {
+	// the flags have to precede the app name, the subcommand stops parsing them
+	// at the first positional argument
+	result, err := common.CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		Command: "dokku",
+		Args:    []string{"config:export", "--format", "json", appName},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("unable to read the config for app %s: %w", appName, err)
 	}
 
-	return env.Map(), nil
+	environment := map[string]string{}
+	contents := result.StdoutContents()
+	if contents == "" {
+		return environment, nil
+	}
+
+	if err := json.Unmarshal([]byte(contents), &environment); err != nil {
+		return nil, fmt.Errorf("unable to parse the config for app %s: %w", appName, err)
+	}
+
+	return environment, nil
 }
 
 // SchemeForApp returns the scheme to build a service url with, honoring the
 // per-app override the datastore exposes
-func SchemeForApp(s datastores.Datastore, appName string) string {
-	variable := fmt.Sprintf("%s_DATABASE_SCHEME", s.Properties().PluginVariable)
-	scheme, ok := config.Get(appName, variable)
-	if !ok {
-		return ""
+func SchemeForApp(s datastores.Datastore, environment map[string]string) string {
+	return environment[fmt.Sprintf("%s_DATABASE_SCHEME", s.Properties().PluginVariable)]
+}
+
+// SetAppConfig sets config variables on an app through the installed dokku
+func SetAppConfig(ctx context.Context, appName string, entries map[string]string, restart bool) error {
+	args := []string{"config:set"}
+	if !restart {
+		args = append(args, "--no-restart")
+	}
+	args = append(args, appName)
+
+	for _, key := range slices.Sorted(maps.Keys(entries)) {
+		args = append(args, fmt.Sprintf("%s=%s", key, entries[key]))
 	}
 
-	return scheme
+	_, err := common.CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		Command:      "dokku",
+		Args:         args,
+		StreamStderr: true,
+		StreamStdout: true,
+	})
+	if err != nil {
+		return fmt.Errorf("unable to set the config for app %s: %w", appName, err)
+	}
+
+	return nil
+}
+
+// UnsetAppConfig removes config variables from an app through the installed dokku
+func UnsetAppConfig(ctx context.Context, appName string, keys []string, restart bool) error {
+	args := []string{"config:unset"}
+	if !restart {
+		args = append(args, "--no-restart")
+	}
+	args = append(args, appName)
+	args = append(args, keys...)
+
+	_, err := common.CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		Command:      "dokku",
+		Args:         args,
+		StreamStderr: true,
+		StreamStdout: true,
+	})
+	if err != nil {
+		return fmt.Errorf("unable to unset the config for app %s: %w", appName, err)
+	}
+
+	return nil
 }
 
 // ConfigKeysForURL returns the config keys on an app whose value points at the
@@ -95,12 +155,12 @@ type LinkServiceInput struct {
 
 // LinkService links a service to an app
 func LinkService(ctx context.Context, input LinkServiceInput) error {
-	environment, err := AppEnvironment(input.AppName)
+	environment, err := AppEnvironment(ctx, input.AppName)
 	if err != nil {
 		return err
 	}
 
-	serviceURL := input.Datastore.URL(input.ServiceName, SchemeForApp(input.Datastore, input.AppName))
+	serviceURL := input.Datastore.URL(input.ServiceName, SchemeForApp(input.Datastore, environment))
 	linkedKeys := ConfigKeysForURL(environment, serviceURL)
 
 	alias := input.Datastore.Properties().DefaultAlias
@@ -146,10 +206,10 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 		return err
 	}
 
-	if err := config.SetMany(input.AppName, map[string]string{
+	if err := SetAppConfig(ctx, input.AppName, map[string]string{
 		fmt.Sprintf("%s_URL", alias): serviceURL,
-	}, false, !input.NoRestart); err != nil {
-		return fmt.Errorf("unable to set the config for app %s: %w", input.AppName, err)
+	}, !input.NoRestart); err != nil {
+		return err
 	}
 
 	return callServiceAction(ctx, input.Datastore, "post-link-complete", input.ServiceName, input.AppName)
@@ -172,12 +232,12 @@ type UnlinkServiceInput struct {
 
 // UnlinkService unlinks a service from an app
 func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
-	environment, err := AppEnvironment(input.AppName)
+	environment, err := AppEnvironment(ctx, input.AppName)
 	if err != nil {
 		return err
 	}
 
-	serviceURL := input.Datastore.URL(input.ServiceName, SchemeForApp(input.Datastore, input.AppName))
+	serviceURL := input.Datastore.URL(input.ServiceName, SchemeForApp(input.Datastore, environment))
 	linkedKeys := ConfigKeysForURL(environment, serviceURL)
 
 	if err := callServiceAction(ctx, input.Datastore, "pre-unlink", input.ServiceName, input.AppName); err != nil {
@@ -205,8 +265,8 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 		return err
 	}
 
-	if err := config.UnsetMany(input.AppName, linkedKeys, !input.NoRestart); err != nil {
-		return fmt.Errorf("unable to unset the config for app %s: %w", input.AppName, err)
+	if err := UnsetAppConfig(ctx, input.AppName, linkedKeys, !input.NoRestart); err != nil {
+		return err
 	}
 
 	return callServiceAction(ctx, input.Datastore, "post-unlink-complete", input.ServiceName, input.AppName)

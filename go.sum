@@ -21,8 +21,6 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dokku/dokku/plugins/common v0.0.0-20251203045541-cc46c5ae9cb6 h1:eKFXCnG5LOeNwjmUW03MEbT/CnBxDUZg6ocbkyGwNkA=
 github.com/dokku/dokku/plugins/common v0.0.0-20251203045541-cc46c5ae9cb6/go.mod h1:/lyZi54xREG2+T63TfaEQGP/3af5fr33VleDai9sTyM=
-github.com/dokku/dokku/plugins/config v0.0.0-20251203045541-cc46c5ae9cb6 h1:NgiIAzJgsjNHv/xdF3eE3fpkze9LIqUvuZNKpK1VpZ4=
-github.com/dokku/dokku/plugins/config v0.0.0-20251203045541-cc46c5ae9cb6/go.mod h1:YIcuWZR/0I4KS+0BFEH65xOfICJcx+FZJZyBegT8nNg=
 github.com/fatih/color v1.7.0/go.mod h1:Zm6kSWBoL9eyXnKyktHP6abPY2pDugNf5KwzbycvMj4=
 github.com/fatih/color v1.18.0 h1:S8gINlzdQ840/4pfAwic/ZE0djQEH3wM94VfqLTZcOM=
 github.com/fatih/color v1.18.0/go.mod h1:4FelSpRwEGDpQ12mAdzqdOukCy4u8WUtOY6lkT/6HfU=
@@ -47,8 +45,6 @@ github.com/huandu/xstrings v1.3.2/go.mod h1:y5/lhBue+AyNmUVz9RLU9xbLR0o4KIIExikq
 github.com/huandu/xstrings v1.5.0 h1:2ag3IFq9ZDANvthTwTiqSSZLjDc+BedvHPAp5tJy2TI=
 github.com/huandu/xstrings v1.5.0/go.mod h1:y5/lhBue+AyNmUVz9RLU9xbLR0o4KIIExikq4ovT0aE=
 github.com/imdario/mergo v0.3.11/go.mod h1:jmQim1M+e3UYxmgPu/WyfjB3N3VflVyUjjjwH0dnCYA=
-github.com/joho/godotenv v1.2.0 h1:vGTvz69FzUFp+X4/bAkb0j5BoLC+9bpqTWY8mjhA9pc=
-github.com/joho/godotenv v1.2.0/go.mod h1:7hK45KPybAkOC6peb+G5yklZfMxEjkZhHbwpqxOKXbg=
 github.com/josegonzalez/cli-skeleton v0.25.0 h1:pxBBuAIO7ALvfXrhnvmaTvo1cWv34RKONccEpw+2UN4=
 github.com/josegonzalez/cli-skeleton v0.25.0/go.mod h1:eFc5CRWq4w3NwRRt4pJw85IEV/Bp4H+aIFQ50e6sYFY=
 github.com/kr/fs v0.1.0 h1:Jskdu9ieNAYnjxsi0LbQp1ulIKZV1LAFgK1tWhpZgl8=

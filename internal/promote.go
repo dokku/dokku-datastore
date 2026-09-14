@@ -7,7 +7,6 @@ import (
 	"slices"
 
 	"github.com/dokku/dokku-datastore/internal/datastores"
-	"github.com/dokku/dokku/plugins/config"
 )
 
 // PromoteServiceInput is the input for the PromoteService function
@@ -64,20 +63,16 @@ func PromotionEntries(input PromoteServiceInput, environment map[string]string, 
 // PromoteService makes a linked service the one exposed on the default config
 // variable for an app
 func PromoteService(ctx context.Context, input PromoteServiceInput) error {
-	environment, err := AppEnvironment(input.AppName)
+	environment, err := AppEnvironment(ctx, input.AppName)
 	if err != nil {
 		return err
 	}
 
-	serviceURL := input.Datastore.URL(input.ServiceName, SchemeForApp(input.Datastore, input.AppName))
+	serviceURL := input.Datastore.URL(input.ServiceName, SchemeForApp(input.Datastore, environment))
 	entries, err := PromotionEntries(input, environment, serviceURL)
 	if err != nil {
 		return err
 	}
 
-	if err := config.SetMany(input.AppName, entries, false, true); err != nil {
-		return fmt.Errorf("unable to set the config for app %s: %w", input.AppName, err)
-	}
-
-	return nil
+	return SetAppConfig(ctx, input.AppName, entries, true)
 }
