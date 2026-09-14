@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -83,7 +82,7 @@ func (c *DestroyCommand) ParsedArguments(args []string) (map[string]command.Argu
 func (c *DestroyCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
-	f.BoolVar(&c.force, "force", false, "force the destruction of the service")
+	f.BoolVarP(&c.force, "force", "f", false, "force the destruction of the service")
 	return f
 }
 
@@ -181,7 +180,7 @@ func (c *DestroyCommand) Run(args []string) int {
 	})
 	if len(linkedApps) > 0 {
 		logger.Error(internal.ErrorInput{
-			Error: errors.New("cannot delete linked service"),
+			Error: internal.ErrLinkedService,
 		})
 		return 1
 	}
