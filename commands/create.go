@@ -302,7 +302,15 @@ func (c *CreateCommand) Run(args []string) int {
 		}
 		trimPrefix := false
 		uppercaseFirstCharacter := true
-		err = common.ReportSingleApp(datastoreType, serviceName, "", flags, flagKeys, c.format, trimPrefix, uppercaseFirstCharacter)
+		err = common.ReportSingleApp(common.ReportSingleAppInput{
+			ReportType:              datastoreType,
+			AppName:                 serviceName,
+			InfoFlags:               flags,
+			InfoFlagKeys:            flagKeys,
+			Format:                  c.format,
+			TrimPrefix:              trimPrefix,
+			UppercaseFirstCharacter: uppercaseFirstCharacter,
+		})
 		if err != nil {
 			logger.Error(internal.ErrorInput{
 				Error: err,
