@@ -114,7 +114,7 @@ func (c *CloneCommand) FlagSet() *flag.FlagSet {
 	f.StringSliceVar(&c.postCreateNetwork, "post-create-network", []string{}, "a comma-separated list of networks to attach the service container to after service creation")
 	f.StringVar(&c.rootPassword, "root-password", "", "override the root-level service password")
 	f.StringSliceVar(&c.postStartNetwork, "post-start-network", []string{}, "a comma-separated list of networks to attach the service container to after service start")
-	f.StringVar(&c.shmSize, "shm-size", "", "override shared memory size for $PLUGIN_COMMAND_PREFIX docker container")
+	f.StringVar(&c.shmSize, "shm-size", "", "override shared memory size for the service docker container")
 	return f
 }
 

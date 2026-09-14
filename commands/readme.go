@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
 	"github.com/dokku/dokku-datastore/internal/datastores"
@@ -15,49 +13,47 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
-// ExportCommand is the command for unexposing a service
-type ExportCommand struct {
+// ReadmeCommand is the command for generating a datastore plugin's readme
+type ReadmeCommand struct {
 	// Meta is the command meta
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+	// CommandFunc is the registry of every command this binary implements
+	CommandFunc command.CommandFunc
+	// pluginDir is the plugin checkout to generate the readme for
+	pluginDir string
 }
 
 // Name returns the name of the command
-func (c *ExportCommand) Name() string {
-	return "export"
+func (c *ReadmeCommand) Name() string {
+	return "readme"
 }
 
 // Synopsis returns the synopsis of the command
-func (c *ExportCommand) Synopsis() string {
-	return "Exports a service's data to stdout"
+func (c *ReadmeCommand) Synopsis() string {
+	return "Writes a datastore plugin's readme to stdout"
 }
 
 // Help returns the help text for the command
-func (c *ExportCommand) Help() string {
+func (c *ReadmeCommand) Help() string {
 	return command.CommandHelp(c)
 }
 
 // Examples returns the examples for the command
-func (c *ExportCommand) Examples() map[string]string {
+func (c *ReadmeCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Exports a redis service named test": fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Generates the readme for the redis plugin": fmt.Sprintf("%s %s redis", appName, c.Name()),
 	}
 }
 
 // Arguments returns the arguments for the command
-func (c *ExportCommand) Arguments() []command.Argument {
+func (c *ReadmeCommand) Arguments() []command.Argument {
 	args := []command.Argument{}
 	args = append(args, command.Argument{
 		Name:        "datastore-type",
-		Description: "the type of datastore to export",
-		Optional:    false,
-		Type:        command.ArgumentString,
-	})
-	args = append(args, command.Argument{
-		Name:        "service-name",
-		Description: "the name of the service to export",
+		Description: "the type of datastore to generate the readme for",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
@@ -65,44 +61,36 @@ func (c *ExportCommand) Arguments() []command.Argument {
 }
 
 // AutocompleteArgs returns the autocomplete arguments for the command
-func (c *ExportCommand) AutocompleteArgs() complete.Predictor {
+func (c *ReadmeCommand) AutocompleteArgs() complete.Predictor {
 	return complete.PredictSet("redis")
 }
 
 // ParsedArguments parses the arguments for the command
-func (c *ExportCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
+func (c *ReadmeCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
 	return internal.ParseArguments(args, c.Arguments())
 }
 
 // FlagSet returns the flag set for the command
-func (c *ExportCommand) FlagSet() *flag.FlagSet {
+func (c *ReadmeCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.StringVar(&c.pluginDir, "plugin-dir", ".", "the plugin checkout to generate the readme for")
 	return f
 }
 
 // AutocompleteFlags returns the autocomplete flags for the command
-func (c *ExportCommand) AutocompleteFlags() complete.Flags {
+func (c *ReadmeCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--plugin-dir": complete.PredictDirs("*"),
+		},
 	)
 }
 
 // Run runs the command
-func (c *ExportCommand) Run(args []string) int {
-	ctx, cancel := context.WithCancel(context.Background())
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGQUIT,
-		syscall.SIGTERM)
-	go func() {
-		<-signals
-		cancel()
-	}()
-
+func (c *ReadmeCommand) Run(args []string) int {
 	logger := internal.Ui{Ui: c.Ui}
 	flags := c.FlagSet()
 	flags.Usage = func() {
@@ -116,13 +104,6 @@ func (c *ExportCommand) Run(args []string) int {
 		return 1
 	}
 
-	logger = internal.Ui{
-		Ui:     c.Ui,
-		Format: c.format,
-		Quiet:  c.quiet,
-		Trace:  c.trace,
-	}
-
 	arguments, err := c.ParsedArguments(flags.Args())
 	if err != nil {
 		logger.Error(internal.ErrorInput{
@@ -133,14 +114,6 @@ func (c *ExportCommand) Run(args []string) int {
 	}
 
 	datastoreType := arguments["datastore-type"].StringValue()
-	if datastoreType == "" {
-		logger.Error(internal.ErrorInput{
-			Message: command.CommandErrorText(c),
-			Error:   fmt.Errorf("datastore type is required"),
-		})
-		return 1
-	}
-
 	datastore, ok := datastores.Datastores[datastoreType]
 	if !ok {
 		logger.Error(internal.ErrorInput{
@@ -149,37 +122,26 @@ func (c *ExportCommand) Run(args []string) int {
 		return 1
 	}
 
-	serviceName := arguments["service-name"].StringValue()
-	if serviceName == "" {
-		logger.Error(internal.ErrorInput{
-			Message: command.CommandErrorText(c),
-			Error:   datastores.ErrMissingServiceName,
-		})
-		return 1
-	}
-
-	if err := datastores.ValidateServiceName(serviceName); err != nil {
-		logger.Error(internal.ErrorInput{
-			Error: err,
-		})
-		return 1
-	}
-
-	if !datastores.Exists(ctx, datastore, serviceName) {
-		logger.Error(internal.ErrorInput{
-			Error: fmt.Errorf("service %s does not exist", serviceName),
-		})
-		return 1
-	}
-
-	if err := datastore.ExportService(ctx, datastores.ExportServiceInput{
-		Datastore:   datastore,
-		ServiceName: serviceName,
-		Writer:      os.Stdout,
-	}); err != nil {
+	sponsors, err := internal.PluginSponsors(c.pluginDir)
+	if err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}
 
+	readme, err := internal.Readme(internal.ReadmeInput{
+		Commands: pluginCommands(context.Background(), c.Meta, c.CommandFunc),
+		Data: internal.NewDocumentationData(internal.DocumentationDataInput{
+			Datastore: datastore,
+			PluginDir: c.pluginDir,
+		}),
+		PluginDir: c.pluginDir,
+		Sponsors:  sponsors,
+	})
+	if err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
+	}
+
+	fmt.Print(readme)
 	return 0
 }
