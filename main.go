@@ -134,6 +134,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"stop": func() (cli.Command, error) {
 			return &commands.StopCommand{Meta: meta}, nil
 		},
+		"trigger-install": func() (cli.Command, error) {
+			return &commands.TriggerInstallCommand{Meta: meta}, nil
+		},
 		"trigger-post-app-clone-setup": func() (cli.Command, error) {
 			return &commands.TriggerPostAppCloneSetupCommand{Meta: meta}, nil
 		},
