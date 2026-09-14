@@ -125,20 +125,45 @@ func Exists(ctx context.Context, s Datastore, serviceName string) bool {
 	return common.DirectoryExists(serviceFolders.Root)
 }
 
-// ExposedPorts gets the exposed ports for a service
-func ExposedPorts(s Datastore, serviceName string) string {
+// ExposedHostPorts gets the host ports a service is exposed on. The port file
+// holds them whitespace delimited, in the same order as the datastore's own
+// ports, which is the format the bash datastore plugins write.
+func ExposedHostPorts(s Datastore, serviceName string) []string {
 	serviceFiles := Files(s, serviceName)
 	portFile := serviceFiles.Port
 
-	if !common.FileExists(portFile) || common.ReadFirstLine(portFile) == "" {
+	if !common.FileExists(portFile) {
+		return []string{}
+	}
+
+	lines, err := common.FileToSlice(portFile)
+	if err != nil {
+		return []string{}
+	}
+
+	ports := []string{}
+	for _, line := range lines {
+		ports = append(ports, strings.Fields(line)...)
+	}
+
+	return ports
+}
+
+// ExposedPorts gets the exposed ports for a service
+func ExposedPorts(s Datastore, serviceName string) string {
+	hostPorts := ExposedHostPorts(s, serviceName)
+	if len(hostPorts) == 0 {
 		return "-"
 	}
 
 	datastorePorts := s.Properties().Ports
-	ports := strings.Split(common.ReadFirstLine(portFile), ",")
 	output := []string{}
-	for i := range ports {
-		output = append(output, fmt.Sprintf("%d->%s", datastorePorts[i], ports[i]))
+	for i, hostPort := range hostPorts {
+		if i >= len(datastorePorts) {
+			break
+		}
+
+		output = append(output, fmt.Sprintf("%d->%s", datastorePorts[i], hostPort))
 	}
 
 	return strings.Join(output, " ")

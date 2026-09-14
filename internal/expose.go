@@ -11,22 +11,14 @@ import (
 
 // IsExposed checks if a service is exposed
 func IsExposed(s datastores.Datastore, serviceName string) bool {
-	serviceFiles := datastores.Files(s, serviceName)
-	portFile := serviceFiles.Port
-	return common.FileExists(portFile) && common.ReadFirstLine(portFile) != ""
+	return len(datastores.ExposedHostPorts(s, serviceName)) > 0
 }
 
-// ConfiguredPorts returns the host ports a service is exposed on, as stored in
-// its port file. Unlike datastores.ExposedPorts this is the raw port list rather
-// than a container to host mapping.
+// ConfiguredPorts returns the host ports a service is exposed on. Unlike
+// datastores.ExposedPorts this is the raw port list rather than a container to
+// host mapping.
 func ConfiguredPorts(s datastores.Datastore, serviceName string) string {
-	serviceFiles := datastores.Files(s, serviceName)
-	portFile := serviceFiles.Port
-	if !common.FileExists(portFile) {
-		return ""
-	}
-
-	return common.ReadFirstLine(portFile)
+	return strings.Join(datastores.ExposedHostPorts(s, serviceName), " ")
 }
 
 // AlreadyExposedError returns the error reported when exposing a service that is
