@@ -2,6 +2,7 @@ package datastores
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -62,6 +63,30 @@ type CreateServiceContainerInput struct {
 	TaggedImage string
 }
 
+// ExportServiceInput is the input for the ExportService function
+type ExportServiceInput struct {
+	// Datastore is the service to export
+	Datastore Datastore
+
+	// ServiceName is the name of the service to export
+	ServiceName string
+
+	// Writer receives the exported data
+	Writer io.Writer
+}
+
+// ImportServiceInput is the input for the ImportService function
+type ImportServiceInput struct {
+	// Datastore is the service to import into
+	Datastore Datastore
+
+	// Reader supplies the data to import
+	Reader io.Reader
+
+	// ServiceName is the name of the service to import into
+	ServiceName string
+}
+
 // Datastore is the interface for a service
 type Datastore interface {
 	// CreateService creates a new service
@@ -69,6 +94,12 @@ type Datastore interface {
 
 	// CreateServiceContainer creates a new service container
 	CreateServiceContainer(ctx context.Context, input CreateServiceContainerInput) error
+
+	// ExportService writes a dump of the service's data to a writer
+	ExportService(ctx context.Context, input ExportServiceInput) error
+
+	// ImportService replaces the service's data with what is read from a reader
+	ImportService(ctx context.Context, input ImportServiceInput) error
 
 	// Properties returns the properties of a service
 	Properties() ServiceStruct
