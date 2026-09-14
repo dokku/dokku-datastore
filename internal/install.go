@@ -28,6 +28,19 @@ func SudoersContents(s datastores.Datastore) string {
 	return fmt.Sprintf(sudoersTemplate, commandPrefix, filepath.Join(datastores.PluginDataRoot, commandPrefix))
 }
 
+// SudoersFile describes the sudoers file a datastore plugin installs. It has to
+// belong to root: sudo refuses a file writable by anyone else, and the dokku
+// user must not be able to rewrite the privileges it is being granted.
+func SudoersFile(s datastores.Datastore) common.WriteStringToFileInput {
+	return common.WriteStringToFileInput{
+		Content:   SudoersContents(s),
+		Filename:  filepath.Join("/etc/sudoers.d", fmt.Sprintf("dokku-%s", s.Properties().CommandPrefix)),
+		GroupName: "root",
+		Mode:      0440,
+		Username:  "root",
+	}
+}
+
 // InstallInput is the input for the Install function
 type InstallInput struct {
 	// Datastore is the datastore being installed
@@ -81,13 +94,9 @@ func Install(ctx context.Context, input InstallInput) error {
 		return err
 	}
 
-	sudoersFile := filepath.Join("/etc/sudoers.d", fmt.Sprintf("dokku-%s", commandPrefix))
-	if err := common.WriteStringToFile(common.WriteStringToFileInput{
-		Content:  SudoersContents(input.Datastore),
-		Filename: sudoersFile,
-		Mode:     0440,
-	}); err != nil {
-		return fmt.Errorf("unable to write %s: %w", sudoersFile, err)
+	sudoersFile := SudoersFile(input.Datastore)
+	if err := common.WriteStringToFile(sudoersFile); err != nil {
+		return fmt.Errorf("unable to write %s: %w", sudoersFile.Filename, err)
 	}
 
 	return migrateServices(ctx, input)
