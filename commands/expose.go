@@ -179,18 +179,10 @@ func (c *ExposeCommand) Run(args []string) int {
 	}
 
 	if internal.IsExposed(datastore, serviceName) {
-		logger.Header2(fmt.Sprintf("Service %s is already exposed", serviceName)) //nolint:errcheck
-		err = datastores.ServicePortReconcileStatus(ctx, datastores.ServicePortReconcileStatusInput{
-			Datastore:   datastore,
-			ServiceName: serviceName,
+		logger.Error(internal.ErrorInput{
+			Error: internal.AlreadyExposedError(datastore, serviceName),
 		})
-		if err != nil {
-			logger.Error(internal.ErrorInput{
-				Error: err,
-			})
-			return 1
-		}
-		return 0
+		return 1
 	}
 
 	ambassadorContainerName := datastores.AmbassadorContainerName(datastore, serviceName)
@@ -200,12 +192,11 @@ func (c *ExposeCommand) Run(args []string) int {
 		})
 		err = internal.RemoveAmbassadorContainer(ctx, datastore, serviceName)
 		if err != nil {
-			logger.Warn(internal.WarnInput{
-				Warning: err.Error(),
+			logger.Error(internal.ErrorInput{
+				Error: err,
 			})
 			return 1
 		}
-		return 1
 	}
 
 	err = internal.ExposeService(ctx, internal.ExposeServiceInput{

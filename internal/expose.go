@@ -16,6 +16,25 @@ func IsExposed(s datastores.Datastore, serviceName string) bool {
 	return common.FileExists(portFile) && common.ReadFirstLine(portFile) != ""
 }
 
+// ConfiguredPorts returns the host ports a service is exposed on, as stored in
+// its port file. Unlike datastores.ExposedPorts this is the raw port list rather
+// than a container to host mapping.
+func ConfiguredPorts(s datastores.Datastore, serviceName string) string {
+	serviceFiles := datastores.Files(s, serviceName)
+	portFile := serviceFiles.Port
+	if !common.FileExists(portFile) {
+		return ""
+	}
+
+	return common.ReadFirstLine(portFile)
+}
+
+// AlreadyExposedError returns the error reported when exposing a service that is
+// already exposed
+func AlreadyExposedError(s datastores.Datastore, serviceName string) error {
+	return fmt.Errorf("Service %s already exposed on port(s) %s", serviceName, ConfiguredPorts(s, serviceName)) //nolint:staticcheck // matches the bash datastore plugins
+}
+
 // ExposeServiceInput is the input for the ExposeService function
 type ExposeServiceInput struct {
 	// Datastore is the service to expose
