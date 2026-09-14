@@ -2,12 +2,17 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/dokku/dokku-datastore/internal/datastores"
 	"github.com/dokku/dokku/plugins/common"
 )
+
+// ErrLinkedService is returned when a service still has linked apps. The
+// capitalization is deliberate and matches the bash datastore plugins.
+var ErrLinkedService = errors.New("Cannot delete linked service")
 
 // DestroyServiceInput is the input for the DestroyService function
 type DestroyServiceInput struct {
