@@ -500,14 +500,28 @@ func SystemUser() string {
 	return systemUser
 }
 
+// MissingServiceNameMessage is the message emitted when a service name is not
+// specified. It matches the message the bash datastore plugins emit.
+const MissingServiceNameMessage = "Please specify a valid name for the service"
+
+// InvalidServiceNameMessage is the message emitted when a service name contains
+// unsupported characters. It matches the message the bash datastore plugins emit.
+const InvalidServiceNameMessage = MissingServiceNameMessage + ". Valid characters are: [A-Za-z0-9_]+"
+
+// ErrMissingServiceName is returned when a service name is not specified
+var ErrMissingServiceName = errors.New(MissingServiceNameMessage)
+
+// ErrInvalidServiceName is returned when a service name contains unsupported characters
+var ErrInvalidServiceName = errors.New(InvalidServiceNameMessage)
+
 // ValidateServiceName validates a service name
 func ValidateServiceName(serviceName string) error {
 	if serviceName == "" {
-		return fmt.Errorf("service name is required")
+		return ErrMissingServiceName
 	}
 
 	if !regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(serviceName) {
-		return fmt.Errorf("service name must contain only letters, numbers, underscores, and hyphens")
+		return ErrInvalidServiceName
 	}
 
 	return nil

@@ -79,7 +79,7 @@ func (c *LinkedCommand) AutocompleteArgs() complete.Predictor {
 
 // ParsedArguments parses the arguments for the command
 func (c *LinkedCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
-	return command.ParseArguments(args, c.Arguments())
+	return internal.ParseArguments(args, c.Arguments())
 }
 
 // FlagSet returns the flag set for the command
@@ -161,7 +161,7 @@ func (c *LinkedCommand) Run(args []string) int {
 	if serviceName == "" {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
-			Error:   fmt.Errorf("service name is required"),
+			Error:   datastores.ErrMissingServiceName,
 		})
 		return 1
 	}
