@@ -240,7 +240,9 @@ func (s *RedisService) Properties() ServiceStruct {
 		DefaultImageVersion: "latest",
 		EnvVariable:         "REDIS_CUSTOM_ENV",
 		ImagePullVariable:   "REDIS_DISABLE_PULL",
+		PluginVariable:      "REDIS",
 		Ports:               []int{6379},
+		Scheme:              "redis",
 		WaitPort:            6379,
 	}
 }
@@ -256,6 +258,10 @@ func (s *RedisService) Title() string {
 }
 
 // URL gets the url for a service
-func (s *RedisService) URL(serviceName string) string {
-	return fmt.Sprintf("redis://%s:%d", DNSHostname(s, serviceName), s.Properties().Ports[0])
+func (s *RedisService) URL(serviceName string, schemeOverride string) string {
+	scheme := s.Properties().Scheme
+	if schemeOverride != "" {
+		scheme = schemeOverride
+	}
+	return fmt.Sprintf("%s://%s:%d", scheme, DNSHostname(s, serviceName), s.Properties().Ports[0])
 }

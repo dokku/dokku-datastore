@@ -29,8 +29,14 @@ type ServiceStruct struct {
 	// ImagePullVariable is the image pull variable for a service
 	ImagePullVariable string
 
+	// PluginVariable is the plugin variable for a service
+	PluginVariable string
+
 	// Ports is the ports for a service
 	Ports []int
+
+	// Scheme is the scheme for a service
+	Scheme string
 
 	// WaitPort is the port to wait for a service to be ready
 	WaitPort int
@@ -66,7 +72,7 @@ type Datastore interface {
 	Title() string
 
 	// URL returns the url for a service
-	URL(serviceName string) string
+	URL(serviceName string, schemeOverride string) string
 }
 
 var (
