@@ -131,6 +131,24 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"stop": func() (cli.Command, error) {
 			return &commands.StopCommand{Meta: meta}, nil
 		},
+		"trigger-post-app-clone-setup": func() (cli.Command, error) {
+			return &commands.TriggerPostAppCloneSetupCommand{Meta: meta}, nil
+		},
+		"trigger-post-app-rename-setup": func() (cli.Command, error) {
+			return &commands.TriggerPostAppRenameSetupCommand{Meta: meta}, nil
+		},
+		"trigger-pre-delete": func() (cli.Command, error) {
+			return &commands.TriggerPreDeleteCommand{Meta: meta}, nil
+		},
+		"trigger-pre-restore": func() (cli.Command, error) {
+			return &commands.TriggerPreRestoreCommand{Meta: meta}, nil
+		},
+		"trigger-pre-start": func() (cli.Command, error) {
+			return &commands.TriggerPreStartCommand{Meta: meta}, nil
+		},
+		"trigger-service-list": func() (cli.Command, error) {
+			return &commands.TriggerServiceListCommand{Meta: meta}, nil
+		},
 		"unexpose": func() (cli.Command, error) {
 			return &commands.UnexposeCommand{Meta: meta}, nil
 		},
