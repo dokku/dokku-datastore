@@ -3,9 +3,11 @@ package datastores
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/dokku/dokku/plugins/common"
 	"mvdan.cc/sh/v3/shell"
@@ -87,6 +89,161 @@ func (s *RedisService) CreateService(ctx context.Context, serviceName string) er
 	return nil
 }
 
+// taggedImage returns the image a service runs, falling back to the datastore
+// default when the service has not pinned one
+func (s *RedisService) taggedImage(serviceName string) string {
+	serviceFiles := Files(s, serviceName)
+	serviceProperties := s.Properties()
+
+	image := common.ReadFirstLine(serviceFiles.Image)
+	if image == "" {
+		image = serviceProperties.DefaultImage
+	}
+
+	imageVersion := common.ReadFirstLine(serviceFiles.ImageVersion)
+	if imageVersion == "" {
+		imageVersion = serviceProperties.DefaultImageVersion
+	}
+
+	return fmt.Sprintf("%s:%s", image, imageVersion)
+}
+
+// exportTimeoutSeconds bounds the wait for a background save to finish
+const exportTimeoutSeconds = 120
+
+// persistenceField reads a single field out of the redis persistence info section
+func (s *RedisService) persistenceField(ctx context.Context, serviceName string, field string) string {
+	result, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		Command: common.DockerBin(),
+		Args: []string{
+			"container", "exec", ContainerName(s, serviceName),
+			"redis-cli", "--no-auth-warning", "-a", Password(s, serviceName),
+			"INFO", "persistence",
+		},
+	})
+	if err != nil {
+		return ""
+	}
+
+	return persistenceFieldFrom(result.Stdout, field)
+}
+
+// persistenceFieldFrom pulls a single field out of a redis INFO section. The
+// section is CRLF delimited and carries comment lines starting with a #.
+func persistenceFieldFrom(info string, field string) string {
+	for _, line := range strings.Split(info, "\n") {
+		name, value, found := strings.Cut(strings.TrimSpace(line), ":")
+		if found && name == field {
+			return value
+		}
+	}
+
+	return ""
+}
+
+// ExportService writes a dump of the service's data to a writer
+func (s *RedisService) ExportService(ctx context.Context, input ExportServiceInput) error {
+	containerName := ContainerName(s, input.ServiceName)
+	password := Password(s, input.ServiceName)
+
+	// redis-cli exits zero even when the server rejects the command, so the reply
+	// has to be inspected rather than just the exit status
+	result, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		Command: common.DockerBin(),
+		Args: []string{
+			"container", "exec", containerName,
+			"redis-cli", "--no-auth-warning", "-a", password, "BGSAVE",
+		},
+	})
+	if err != nil || !strings.Contains(result.Stdout, "Background saving") {
+		return fmt.Errorf("unable to start a background save: %s", strings.TrimSpace(result.Stdout+result.Stderr))
+	}
+
+	// BGSAVE returns as soon as the child is forked, so wait on the completion
+	// flag rather than on LASTSAVE. LASTSAVE only has second resolution and is
+	// seeded with the server start time, so a save that finishes in the same
+	// second the container started is indistinguishable from no save at all.
+	for waited := 0; s.persistenceField(ctx, input.ServiceName, "rdb_bgsave_in_progress") == "1"; waited++ {
+		if waited >= exportTimeoutSeconds {
+			return fmt.Errorf("background save did not complete within %d seconds", exportTimeoutSeconds)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+
+	if s.persistenceField(ctx, input.ServiceName, "rdb_last_bgsave_status") != "ok" {
+		return fmt.Errorf("background save failed, check the %s service logs", s.Title())
+	}
+
+	dump, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		Command: common.DockerBin(),
+		Args:    []string{"container", "exec", containerName, "cat", "/data/dump.rdb"},
+	})
+	if err != nil {
+		return fmt.Errorf("unable to read the dump file: %w", err)
+	}
+
+	if _, err := io.WriteString(input.Writer, dump.Stdout); err != nil {
+		return fmt.Errorf("unable to write the dump: %w", err)
+	}
+
+	return nil
+}
+
+// ImportService replaces the service's data with what is read from a reader
+func (s *RedisService) ImportService(ctx context.Context, input ImportServiceInput) error {
+	serviceFolders := Folders(s, input.ServiceName)
+	taggedImage := s.taggedImage(input.ServiceName)
+	volume := fmt.Sprintf("%s:/data", serviceFolders.HostData)
+
+	if err := RemoveServiceContainer(ctx, RemoveServiceContainerInput{
+		Datastore:   s,
+		ServiceName: input.ServiceName,
+	}); err != nil {
+		return err
+	}
+
+	// the dump belongs to the datastore user inside the container, so it is
+	// removed and later chowned from a container rather than from the host
+	if _, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		Command: common.DockerBin(),
+		Args:    []string{"container", "run", "--rm", "--volume", volume, taggedImage, "bash", "-c", "rm -f /data/dump.rdb"},
+	}); err != nil {
+		return fmt.Errorf("unable to remove the existing dump file: %w", err)
+	}
+
+	dumpFile := filepath.Join(serviceFolders.Data, "dump.rdb")
+	handle, err := os.Create(dumpFile)
+	if err != nil {
+		return fmt.Errorf("unable to create %s: %w", dumpFile, err)
+	}
+
+	if _, err := io.Copy(handle, input.Reader); err != nil {
+		handle.Close()
+		return fmt.Errorf("unable to write %s: %w", dumpFile, err)
+	}
+
+	if err := handle.Close(); err != nil {
+		return fmt.Errorf("unable to close %s: %w", dumpFile, err)
+	}
+
+	if _, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		Command: common.DockerBin(),
+		Args:    []string{"container", "run", "--rm", "--volume", volume, taggedImage, "bash", "-c", "chown redis: /data/dump.rdb"},
+	}); err != nil {
+		return fmt.Errorf("unable to take ownership of the dump file: %w", err)
+	}
+
+	return Start(ctx, StartInput{
+		Datastore:   s,
+		ServiceName: input.ServiceName,
+	})
+}
+
 // CreateServiceContainer creates a new service container
 func (s *RedisService) CreateServiceContainer(ctx context.Context, input CreateServiceContainerInput) error {
 	serviceProperties := s.Properties()
@@ -147,16 +304,7 @@ func (s *RedisService) CreateServiceContainer(ctx context.Context, input CreateS
 
 	taggedImage := input.TaggedImage
 	if taggedImage == "" {
-		image := common.ReadFirstLine(serviceFiles.Image)
-		if image == "" {
-			image = serviceProperties.DefaultImage
-		}
-
-		imageVersion := common.ReadFirstLine(serviceFiles.ImageVersion)
-		if imageVersion == "" {
-			imageVersion = serviceProperties.DefaultImageVersion
-		}
-		taggedImage = fmt.Sprintf("%s:%s", image, imageVersion)
+		taggedImage = s.taggedImage(input.ServiceName)
 	}
 
 	dockerCreateArgs = append(dockerCreateArgs, taggedImage)
