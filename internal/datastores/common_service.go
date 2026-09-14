@@ -241,6 +241,12 @@ type ServiceFolders struct {
 	// Config is the config folder for the service
 	Config string
 
+	// Backup is the folder holding the service's backup credentials
+	Backup string
+
+	// BackupEncryption is the folder holding the service's backup encryption settings
+	BackupEncryption string
+
 	// Data is the data folder for the service
 	Data string
 
@@ -258,12 +264,14 @@ type ServiceFolders struct {
 func Folders(s Datastore, serviceName string) ServiceFolders {
 	serviceRoot := filepath.Join(DokkuLibRoot, "services", s.Properties().CommandPrefix, serviceName)
 	return ServiceFolders{
-		Root:       serviceRoot,
-		Config:     filepath.Join(serviceRoot, "config"),
-		Data:       filepath.Join(serviceRoot, "data"),
-		HostRoot:   filepath.Join(DokkuLibHostRoot, "services", s.Properties().CommandPrefix, serviceName),
-		HostConfig: filepath.Join(DokkuLibHostRoot, "services", s.Properties().CommandPrefix, serviceName, "config"),
-		HostData:   filepath.Join(DokkuLibHostRoot, "services", s.Properties().CommandPrefix, serviceName, "data"),
+		Root:             serviceRoot,
+		Backup:           filepath.Join(serviceRoot, "backup"),
+		BackupEncryption: filepath.Join(serviceRoot, "backup-encryption"),
+		Config:           filepath.Join(serviceRoot, "config"),
+		Data:             filepath.Join(serviceRoot, "data"),
+		HostRoot:         filepath.Join(DokkuLibHostRoot, "services", s.Properties().CommandPrefix, serviceName),
+		HostConfig:       filepath.Join(DokkuLibHostRoot, "services", s.Properties().CommandPrefix, serviceName, "config"),
+		HostData:         filepath.Join(DokkuLibHostRoot, "services", s.Properties().CommandPrefix, serviceName, "data"),
 	}
 }
 

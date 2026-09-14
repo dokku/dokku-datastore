@@ -44,6 +44,36 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"app-links": func() (cli.Command, error) {
 			return &commands.AppLinksCommand{Meta: meta}, nil
 		},
+		"backup": func() (cli.Command, error) {
+			return &commands.BackupCommand{Meta: meta}, nil
+		},
+		"backup-auth": func() (cli.Command, error) {
+			return &commands.BackupAuthCommand{Meta: meta}, nil
+		},
+		"backup-deauth": func() (cli.Command, error) {
+			return &commands.BackupDeauthCommand{Meta: meta}, nil
+		},
+		"backup-schedule": func() (cli.Command, error) {
+			return &commands.BackupScheduleCommand{Meta: meta}, nil
+		},
+		"backup-schedule-cat": func() (cli.Command, error) {
+			return &commands.BackupScheduleCatCommand{Meta: meta}, nil
+		},
+		"backup-set-encryption": func() (cli.Command, error) {
+			return &commands.BackupSetEncryptionCommand{Meta: meta}, nil
+		},
+		"backup-set-public-key-encryption": func() (cli.Command, error) {
+			return &commands.BackupSetPublicKeyEncryptionCommand{Meta: meta}, nil
+		},
+		"backup-unschedule": func() (cli.Command, error) {
+			return &commands.BackupUnscheduleCommand{Meta: meta}, nil
+		},
+		"backup-unset-encryption": func() (cli.Command, error) {
+			return &commands.BackupUnsetEncryptionCommand{Meta: meta}, nil
+		},
+		"backup-unset-public-key-encryption": func() (cli.Command, error) {
+			return &commands.BackupUnsetPublicKeyEncryptionCommand{Meta: meta}, nil
+		},
 		"create": func() (cli.Command, error) {
 			return &commands.CreateCommand{Meta: meta}, nil
 		},
