@@ -54,13 +54,13 @@ func (c *BackupCommand) Arguments() []command.Argument {
 	args := []command.Argument{}
 	args = append(args, command.Argument{
 		Name:        "datastore-type",
-		Description: "the type of datastore to expose",
+		Description: "the type of datastore to back up",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
 	args = append(args, command.Argument{
 		Name:        "service-name",
-		Description: "the name of the service to expose",
+		Description: "the name of the service to back up",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
@@ -87,7 +87,7 @@ func (c *BackupCommand) ParsedArguments(args []string) (map[string]command.Argum
 func (c *BackupCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
-	f.BoolVarP(&c.useIAM, "use-iam", "u", false, "use the iam profile associated with the current server")
+	f.BoolVarP(&c.useIAM, "use-iam", "u", false, "use the IAM profile associated with the current server")
 	return f
 }
 

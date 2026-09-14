@@ -26,6 +26,8 @@ Available commands are:
     backup-unschedule                     Removes the backup schedule for a service
     backup-unset-encryption               Removes the backup passphrase for a service
     backup-unset-public-key-encryption    Removes the backup public key for a service
+    clone                                 Clones a service onto a new one
+    connect                               Connects to a service with its native client
     create                                Creates a new datastore service
     destroy                               Destroys a datastore service
     enter                                 Enters a service
@@ -41,10 +43,34 @@ Available commands are:
     logs                                  Gets the logs of a service
     pause                                 Pauses a service
     promote                               Promotes a linked service to the default config variable for an app
+    readme                                Writes a datastore plugin's readme to stdout
     restart                               Restarts a service
+    set                                   Sets or clears a property for a service
     start                                 Starts a service
     stop                                  Stops a service and removes the container
+    trigger-help                          Prints the help a dokku plugin's commands script is asked for
+    trigger-install                       Prepares the host for a datastore plugin
+    trigger-post-app-clone-setup          Copies an app's service links onto its clone
+    trigger-post-app-rename-setup         Carries an app's service links across a rename
+    trigger-pre-delete                    Unlinks an app from every service before it is deleted
+    trigger-pre-restore                   Starts the services an app is linked to before it is restored
+    trigger-pre-start                     Starts the services an app is linked to before it starts
+    trigger-service-list                  Lists the services other dokku plugins can see
     unexpose                              Unexposes a service
     unlink                                Unlinks a service from an app
+    upgrade                               Upgrades a service to a different image version
     version                               Return the version of the binary
+```
+
+## Plugin documentation
+
+`trigger-help` and `readme` render the documentation a dokku datastore plugin ships, so that the plugin help and its readme cannot drift apart. Both read the description, argument sketch, long form prose and readme section that every command declares, alongside the arguments and flags the command already accepts.
+
+```shell
+# the help a plugin's commands script is asked for
+dokku-datastore trigger-help redis redis:help
+dokku-datastore trigger-help redis redis:help create
+
+# the plugin readme, generated from the plugin checkout in the working directory
+dokku-datastore readme redis
 ```

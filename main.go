@@ -27,7 +27,7 @@ func Run(args []string) int {
 	commandMeta := command.SetupRun(ctx, AppName, Version, args)
 	commandMeta.Ui = command.HumanZerologUiWithFields(commandMeta.Ui, make(map[string]interface{}, 0))
 	c := cli.NewCLI(AppName, Version)
-	c.Args = os.Args[1:]
+	c.Args = args
 	c.Commands = command.Commands(ctx, commandMeta, Commands)
 	exitCode, err := c.Run()
 	if err != nil {
@@ -119,6 +119,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"promote": func() (cli.Command, error) {
 			return &commands.PromoteCommand{Meta: meta}, nil
 		},
+		"readme": func() (cli.Command, error) {
+			return &commands.ReadmeCommand{Meta: meta, CommandFunc: Commands}, nil
+		},
 		"restart": func() (cli.Command, error) {
 			return &commands.RestartCommand{Meta: meta}, nil
 		},
@@ -133,6 +136,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		},
 		"stop": func() (cli.Command, error) {
 			return &commands.StopCommand{Meta: meta}, nil
+		},
+		"trigger-help": func() (cli.Command, error) {
+			return &commands.TriggerHelpCommand{Meta: meta, CommandFunc: Commands}, nil
 		},
 		"trigger-install": func() (cli.Command, error) {
 			return &commands.TriggerInstallCommand{Meta: meta}, nil

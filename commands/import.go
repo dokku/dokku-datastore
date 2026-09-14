@@ -52,13 +52,13 @@ func (c *ImportCommand) Arguments() []command.Argument {
 	args := []command.Argument{}
 	args = append(args, command.Argument{
 		Name:        "datastore-type",
-		Description: "the type of datastore to expose",
+		Description: "the type of datastore to import into",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
 	args = append(args, command.Argument{
 		Name:        "service-name",
-		Description: "the name of the service to expose",
+		Description: "the name of the service to import into",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
