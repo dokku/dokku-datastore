@@ -65,11 +65,17 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"list": func() (cli.Command, error) {
 			return &commands.ListCommand{Meta: meta}, nil
 		},
+		"link": func() (cli.Command, error) {
+			return &commands.LinkCommand{Meta: meta}, nil
+		},
 		"linked": func() (cli.Command, error) {
 			return &commands.LinkedCommand{Meta: meta}, nil
 		},
 		"links": func() (cli.Command, error) {
 			return &commands.LinksCommand{Meta: meta}, nil
+		},
+		"unlink": func() (cli.Command, error) {
+			return &commands.UnlinkCommand{Meta: meta}, nil
 		},
 		"restart": func() (cli.Command, error) {
 			return &commands.RestartCommand{Meta: meta}, nil

@@ -154,7 +154,7 @@ func (c *AppLinksCommand) Run(args []string) int {
 	if appName == "" {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
-			Error:   fmt.Errorf("app name is required"),
+			Error:   datastores.ErrMissingAppName,
 		})
 		return 1
 	}

@@ -4,6 +4,7 @@ go 1.25.1
 
 require (
 	github.com/dokku/dokku/plugins/common v0.0.0-20251203045541-cc46c5ae9cb6
+	github.com/dokku/dokku/plugins/config v0.0.0-20251203045541-cc46c5ae9cb6
 	github.com/josegonzalez/cli-skeleton v0.25.0
 	github.com/mitchellh/cli v1.1.5
 	github.com/posener/complete v1.2.3
@@ -24,6 +25,7 @@ require (
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/huandu/xstrings v1.5.0 // indirect
+	github.com/joho/godotenv v1.2.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
