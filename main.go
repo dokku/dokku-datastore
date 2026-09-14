@@ -134,6 +134,15 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"unexpose": func() (cli.Command, error) {
 			return &commands.UnexposeCommand{Meta: meta}, nil
 		},
+		"connect": func() (cli.Command, error) {
+			return &commands.ConnectCommand{Meta: meta}, nil
+		},
+		"set": func() (cli.Command, error) {
+			return &commands.SetCommand{Meta: meta}, nil
+		},
+		"upgrade": func() (cli.Command, error) {
+			return &commands.UpgradeCommand{Meta: meta}, nil
+		},
 		"version": func() (cli.Command, error) {
 			return &command.VersionCommand{Meta: meta}, nil
 		},
