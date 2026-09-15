@@ -66,9 +66,11 @@ func TestCronHelperIsOwnedByRoot(t *testing.T) {
 		t.Errorf("expected the helper to validate the service name, got:\n%s", file.Content)
 	}
 
-	// it may only move the one staged path, not whatever it is handed
-	if !strings.Contains(file.Content, `STAGED_CRON_FILE="/var/lib/dokku/services/redis/.TMP_CRON_FILE"`) {
-		t.Errorf("expected the helper to name the staged cron file, got:\n%s", file.Content)
+	// the staged path is derived from the validated service name, and sits
+	// inside the service rather than beside it where listing the services would
+	// report it as a service of its own
+	if !strings.Contains(file.Content, `DATA_ROOT="/var/lib/dokku/services/redis"`) {
+		t.Errorf("expected the helper to name the data root, got:\n%s", file.Content)
 	}
 }
 

@@ -36,7 +36,7 @@ func TestSudoersNamesOnlyItsOwnHelper(t *testing.T) {
 }
 
 func TestHelperValidatesItsInput(t *testing.T) {
-	contents := HelperContents("redis", "/var/lib/dokku/services/redis/.TMP_CRON_FILE")
+	contents := HelperContents("redis", "/var/lib/dokku/services/redis")
 
 	// the helper is granted without an argument constraint, because sudo can no
 	// longer express one, so it has to apply the rule itself
@@ -50,9 +50,15 @@ func TestHelperValidatesItsInput(t *testing.T) {
 		t.Error("the service name is validated inside a command substitution, where exiting does not stop the script")
 	}
 
-	// it moves one fixed path rather than whatever it is handed
-	if !strings.Contains(contents, `STAGED_CRON_FILE="/var/lib/dokku/services/redis/.TMP_CRON_FILE"`) {
-		t.Errorf("expected the helper to name the staged cron file:\n%s", contents)
+	// the staged path is derived from the validated name, so it is still not
+	// something the caller can choose, and it sits inside the service rather
+	// than beside it where listing the services would report it as one
+	if !strings.Contains(contents, `DATA_ROOT="/var/lib/dokku/services/redis"`) {
+		t.Errorf("expected the helper to name the data root:\n%s", contents)
+	}
+
+	if !strings.Contains(contents, `staged_cron_file="${DATA_ROOT}/${service}/.TMP_CRON_FILE"`) {
+		t.Errorf("expected the staged path to be inside the service:\n%s", contents)
 	}
 
 	if !strings.Contains(contents, "set -eo pipefail") {
@@ -63,7 +69,7 @@ func TestHelperValidatesItsInput(t *testing.T) {
 func TestHelperFileIsOwnedByRoot(t *testing.T) {
 	// the dokku group may run this as root, so being able to rewrite it would be
 	// a way to run anything as root
-	file := HelperFile("redis", "/tmp/staged")
+	file := HelperFile("redis", "/var/lib/dokku/services/redis")
 
 	if file.Username != "root" || file.GroupName != "root" {
 		t.Errorf("expected root:root, got %s:%s", file.Username, file.GroupName)

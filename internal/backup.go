@@ -169,9 +169,9 @@ type ScheduleBackupInput struct {
 // ScheduleBackup writes the cron entry that backs a service up on a schedule
 func ScheduleBackup(ctx context.Context, input ScheduleBackupInput) error {
 	commandPrefix := input.Datastore.Properties().CommandPrefix
-	// the helper only moves this exact path, which is rooted at the plugin's own
-	// data directory rather than the shared one
-	tmpCronFile := StagedCronFile(input.Datastore)
+	// staged inside the service, so that an interrupted schedule cannot leave a
+	// file the service listing mistakes for a service
+	tmpCronFile := StagedCronFile(input.Datastore, input.ServiceName)
 
 	dokkuBin, err := exec.LookPath("dokku")
 	if err != nil {
