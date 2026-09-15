@@ -1,0 +1,55 @@
+---
+services:
+  redis:
+    image: "{{ .Image }}:{{ .ImageVersion }}"
+
+    command:
+      - redis-server
+      - /usr/local/etc/redis/redis.conf
+      - --bind
+      - 0.0.0.0
+
+    volumes:
+      - type: bind
+        source: "{{ .HostRoot }}/config"
+        target: /usr/local/etc/redis
+      - type: bind
+        source: "{{ .HostRoot }}/data"
+        target: /data
+
+    ports:
+      - name: native
+        target: 6379
+        primary: true
+
+x-dokku:
+  plugin: redis
+  title: Redis
+  scheme: redis
+  alias: REDIS
+  dsn: "{{ .Scheme }}://:{{ .Secret.password }}@{{ .Host }}:{{ .Port.native }}"
+
+  # the redis image ships no probe whose exit status can be trusted without the
+  # password, so readiness stays on the dokku/wait sidecar that every datastore
+  # uses today rather than on a compose healthcheck
+  wait: native
+
+  secrets:
+    password:
+      file: PASSWORD
+      length: 64
+      env: SERVICE_PASSWORD
+
+  commands:
+    connect:
+      exec: ["redis-cli", "--no-auth-warning"]
+      env:
+        REDISCLI_AUTH: "{{ .Secret.password }}"
+        LANG: C.UTF-8
+        LC_ALL: C.UTF-8
+
+  # export and import are deliberately absent until the vendored dump script is
+  # baked into the image. Adding them before that exists would declare a verb
+  # that cannot run; leaving them out reports them unimplemented, which is at
+  # least true of this definition. The Go implementation still serves them until
+  # redis is switched over.

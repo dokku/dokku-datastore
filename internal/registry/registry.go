@@ -1,0 +1,261 @@
+// Package registry resolves datastore types to the definitions implementing them,
+// from the tree embedded in the binary and from a plugin checkout that may
+// override it.
+package registry
+
+import (
+	"embed"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/dokku/dokku-datastore/internal/definition"
+)
+
+//go:embed all:definitions
+var embedded embed.FS
+
+// overrideDir is where a plugin checkout puts its own definitions. It is named
+// rather than sitting at the repo root because a datastore split by major version
+// has more than one definition and the root cannot say which.
+const overrideDir = "datastore"
+
+// Registry is every datastore this binary knows about.
+type Registry struct {
+	// definitions are keyed by definition name, e.g. "postgres-18".
+	definitions map[string]definition.Definition
+
+	// byPlugin groups definition names by command prefix, so that postgres-17
+	// and postgres-18 are both reachable as "postgres".
+	byPlugin map[string][]string
+}
+
+// LoadInput is the input for Load.
+type LoadInput struct {
+	// PluginDir is a plugin checkout. A definition present in both the plugin and
+	// the embedded tree is taken from the plugin whole; the two are never merged,
+	// because a half merged definition is a container nobody wrote down.
+	PluginDir string
+}
+
+// Load resolves every definition. A malformed definition in a plugin checkout is
+// an error rather than a silent fall back to the embedded one, since falling back
+// would quietly run something other than what the operator asked for.
+func Load(input LoadInput) (*Registry, error) {
+	registry := &Registry{
+		definitions: map[string]definition.Definition{},
+		byPlugin:    map[string][]string{},
+	}
+
+	names, err := fs.ReadDir(embedded, "definitions")
+	if err != nil {
+		return nil, fmt.Errorf("unable to read the embedded definitions: %w", err)
+	}
+
+	for _, entry := range names {
+		if !entry.IsDir() {
+			continue
+		}
+
+		parsed, err := parseEmbedded(entry.Name())
+		if err != nil {
+			return nil, err
+		}
+
+		registry.add(parsed)
+	}
+
+	if input.PluginDir != "" {
+		overrides, err := parseOverrides(filepath.Join(input.PluginDir, overrideDir))
+		if err != nil {
+			return nil, err
+		}
+
+		for _, parsed := range overrides {
+			registry.add(parsed)
+		}
+	}
+
+	return registry, nil
+}
+
+// add records a definition, replacing any of the same name.
+func (r *Registry) add(parsed definition.Definition) {
+	if _, exists := r.definitions[parsed.Name]; !exists {
+		r.byPlugin[parsed.Dokku.Plugin] = append(r.byPlugin[parsed.Dokku.Plugin], parsed.Name)
+		sort.Strings(r.byPlugin[parsed.Dokku.Plugin])
+	}
+
+	r.definitions[parsed.Name] = parsed
+}
+
+// parseEmbedded reads one definition out of the tree compiled into the binary.
+func parseEmbedded(name string) (definition.Definition, error) {
+	read := func(path string) ([]byte, error) {
+		return embedded.ReadFile(filepath.Join("definitions", name, path))
+	}
+
+	compose, err := read("docker-compose.yml")
+	if err != nil {
+		return definition.Definition{}, fmt.Errorf("%s: unable to read docker-compose.yml: %w", name, err)
+	}
+
+	dockerfile, err := read("Dockerfile")
+	if err != nil {
+		return definition.Definition{}, fmt.Errorf("%s: unable to read Dockerfile: %w", name, err)
+	}
+
+	scripts := map[string][]byte{}
+	entries, err := fs.ReadDir(embedded, filepath.Join("definitions", name, "bin"))
+	if err == nil {
+		for _, entry := range entries {
+			contents, err := read(filepath.Join("bin", entry.Name()))
+			if err != nil {
+				return definition.Definition{}, fmt.Errorf("%s: unable to read bin/%s: %w", name, entry.Name(), err)
+			}
+
+			scripts[entry.Name()] = contents
+		}
+	}
+
+	return definition.Parse(definition.ParseInput{
+		Name:       name,
+		Compose:    compose,
+		Dockerfile: dockerfile,
+		Scripts:    scripts,
+		Embedded:   true,
+	})
+}
+
+// parseOverrides reads every definition a plugin checkout supplies.
+func parseOverrides(root string) ([]definition.Definition, error) {
+	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("unable to read %s: %w", root, err)
+	}
+
+	parsed := []definition.Definition{}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		compose, err := os.ReadFile(filepath.Join(root, name, "docker-compose.yml"))
+		if os.IsNotExist(err) {
+			continue
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("%s: unable to read docker-compose.yml: %w", name, err)
+		}
+
+		dockerfile, err := os.ReadFile(filepath.Join(root, name, "Dockerfile"))
+		if err != nil {
+			return nil, fmt.Errorf("%s: unable to read Dockerfile: %w", name, err)
+		}
+
+		scripts := map[string][]byte{}
+		binEntries, err := os.ReadDir(filepath.Join(root, name, "bin"))
+		if err == nil {
+			for _, binEntry := range binEntries {
+				contents, err := os.ReadFile(filepath.Join(root, name, "bin", binEntry.Name()))
+				if err != nil {
+					return nil, fmt.Errorf("%s: unable to read bin/%s: %w", name, binEntry.Name(), err)
+				}
+
+				scripts[binEntry.Name()] = contents
+			}
+		}
+
+		one, err := definition.Parse(definition.ParseInput{
+			Name:       name,
+			Compose:    compose,
+			Dockerfile: dockerfile,
+			Scripts:    scripts,
+			Embedded:   false,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		parsed = append(parsed, one)
+	}
+
+	return parsed, nil
+}
+
+// Definition returns a definition by name.
+func (r *Registry) Definition(name string) (definition.Definition, bool) {
+	found, ok := r.definitions[name]
+	return found, ok
+}
+
+// For returns the definition a service of a given datastore type runs. Where a
+// datastore is split by major version the imageVersion selects between them; a
+// service with no recorded version, which is what a service whose container is
+// gone looks like, gets the newest rather than an error.
+func (r *Registry) For(plugin string, imageVersion string) (definition.Definition, error) {
+	names, ok := r.byPlugin[plugin]
+	if !ok {
+		return definition.Definition{}, fmt.Errorf("datastore type %s is not supported", plugin)
+	}
+
+	if len(names) == 1 {
+		return r.definitions[names[0]], nil
+	}
+
+	major := majorVersion(imageVersion)
+	if major != "" {
+		if found, ok := r.definitions[plugin+"-"+major]; ok {
+			return found, nil
+		}
+	}
+
+	// byPlugin is sorted, so the last entry is the newest major
+	return r.definitions[names[len(names)-1]], nil
+}
+
+// Plugins returns every datastore type, sorted.
+func (r *Registry) Plugins() []string {
+	plugins := make([]string, 0, len(r.byPlugin))
+	for plugin := range r.byPlugin {
+		plugins = append(plugins, plugin)
+	}
+
+	sort.Strings(plugins)
+	return plugins
+}
+
+// Names returns every definition name, sorted.
+func (r *Registry) Names() []string {
+	names := make([]string, 0, len(r.definitions))
+	for name := range r.definitions {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+	return names
+}
+
+// majorVersion returns the leading numeric component of an image tag, so that
+// 18.4 selects postgres-18 and v1.45.0 selects nothing in particular.
+func majorVersion(imageVersion string) string {
+	digits := strings.Builder{}
+	for _, char := range strings.TrimPrefix(imageVersion, "v") {
+		if char < '0' || char > '9' {
+			break
+		}
+
+		digits.WriteRune(char)
+	}
+
+	return digits.String()
+}
