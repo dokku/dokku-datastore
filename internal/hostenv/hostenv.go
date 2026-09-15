@@ -85,3 +85,10 @@ func SystemGroup() string {
 
 	return defaultSystemUser
 }
+
+// PluginBasePath is the plugin checkout dokku is running this binary from. A
+// definition found there overrides the one compiled into the binary, which is
+// how a plugin ships a datastore this binary does not know about.
+func PluginBasePath() string {
+	return os.Getenv("PLUGIN_BASE_PATH")
+}

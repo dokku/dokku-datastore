@@ -1,7 +1,15 @@
-// Package image builds the images definitions need. Most definitions do not
-// need one: a Dockerfile that only declares its base is a no-op the loader
-// detects, and the upstream image is pulled exactly as every datastore is
-// today. Only a definition that bakes tooling into the image is built.
+// Package image builds the image a definition needs when it needs one.
+//
+// No definition shipped today does. A definition that vendors a script mounts
+// it into the container instead, which keeps every datastore on the pull path:
+// building would turn each trigger-install into a build, slower and failing
+// differently on a host with a constrained builder.
+//
+// This is deliberately kept for the payload a mount cannot deliver: a compiled
+// tool, a package the base image lacks, or anything needing an interpreter that
+// is not already there. A Dockerfile that only declares its base is detected as
+// a no-op and pulled, so adding that payload is a Dockerfile change rather than
+// a Go one.
 package image
 
 import (
@@ -9,10 +17,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/execx"
@@ -20,12 +26,7 @@ import (
 	"github.com/dokku/dokku/plugins/common"
 )
 
-// executableMode is the mode a file below a bin directory is written with.
-// An embedded file loses its executable bit, and a vendored script arriving in
-// the image unable to run is a failure at export time rather than at build time.
-const executableMode fs.FileMode = 0755
-
-// fileMode is the mode every other file in the build context is written with.
+// fileMode is the mode the Dockerfile is written with in the build context.
 const fileMode fs.FileMode = 0644
 
 // Tag is the image a definition builds to. It is keyed on the definition name
@@ -148,17 +149,10 @@ func WriteContext(subject definition.Definition, directory string) error {
 	return nil
 }
 
-// ModeFor is the mode a rootfs file is written with. A file below a bin
-// directory is executable, because that is what a bin directory means and
-// because an embedded file has no mode of its own to carry.
+// ModeFor is the mode a rootfs file is written with. The rule lives on the
+// definition, because the mount path needs exactly the same answer.
 func ModeFor(name string) fs.FileMode {
-	for _, segment := range strings.Split(path.Dir(path.Clean(name)), "/") {
-		if segment == "bin" || segment == "sbin" {
-			return executableMode
-		}
-	}
-
-	return fileMode
+	return definition.RootfsMode(name)
 }
 
 // Exists reports whether an image is already present, so a build that would

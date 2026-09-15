@@ -252,9 +252,9 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		switch command.Mode {
 		case "", ModeService, ModeOffline:
 		case ModeSidecar:
-			if command.Image == "" {
-				return fail("command %q runs in a sidecar and so needs an image", name)
-			}
+			// an image is optional: a sidecar that needs a tool the datastore
+			// image lacks names one, and a sidecar that only needs to run
+			// beside the service uses the service's own
 		case ModeHost:
 			if !input.Embedded {
 				return fail("command %q runs on the host, which is only allowed for definitions shipped in the binary", name)

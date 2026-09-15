@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/dokku/dokku-datastore/internal/hostenv"
+	"github.com/dokku/dokku-datastore/internal/registry"
 )
 
 // ServiceStruct is the structure for a service
@@ -162,5 +163,20 @@ func init() {
 	PluginPath = hostenv.PluginPath()
 	PluginDataRoot = hostenv.DataRoot()
 
-	Datastores["redis"] = &RedisService{}
+	loaded, err := registry.Load(registry.LoadInput{PluginDir: hostenv.PluginBasePath()})
+	if err != nil {
+		// a definition that does not parse is a datastore that cannot be
+		// operated, and continuing would report it as an unsupported type
+		// rather than as the broken definition it is
+		panic(err)
+	}
+
+	for _, name := range loaded.Plugins() {
+		found, err := loaded.For(name, "")
+		if err != nil {
+			panic(err)
+		}
+
+		Datastores[name] = &DefinitionService{Definition: found}
+	}
 }

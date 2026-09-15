@@ -61,10 +61,16 @@ x-dokku:
         LANG: C.UTF-8
         LC_ALL: C.UTF-8
 
-    # both dump verbs are vendored into the image by the Dockerfile rather than
-    # driven from the host, which is what lets the dump stream instead of being
-    # buffered through the tool as a string
+    # both dump verbs are vendored scripts, mounted into the container from the
+    # service directory rather than baked into an image. Mounting keeps this
+    # definition on the pull path, and the dump still streams rather than being
+    # buffered through the tool as a string.
     export:
+      # runs beside the service rather than inside it, sharing its network
+      # namespace. The script is mounted into the sidecar, so a service whose
+      # container was created before the script existed, or by the bash plugin,
+      # can still be exported without being recreated first.
+      mode: sidecar
       exec: ["dokku-redis-export"]
       env:
         REDISCLI_AUTH: "{{ .Secret.password }}"

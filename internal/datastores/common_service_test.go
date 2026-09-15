@@ -92,14 +92,14 @@ func TestLinkedApps(t *testing.T) {
 	}
 }
 
-// multiPortDatastore is a redis service with a second port, covering the multi
-// port paths that no real datastore exercises yet
+// multiPortDatastore is the redis datastore with a second port, covering the
+// multi port paths that no real datastore exercises yet
 type multiPortDatastore struct {
-	RedisService
+	Datastore
 }
 
 func (m *multiPortDatastore) Properties() ServiceStruct {
-	properties := m.RedisService.Properties()
+	properties := m.Datastore.Properties()
 	properties.Ports = []int{6379, 6380}
 	return properties
 }
@@ -182,7 +182,7 @@ func TestExposedPorts(t *testing.T) {
 		},
 		{
 			name:      "several ports on one line",
-			datastore: &multiPortDatastore{},
+			datastore: &multiPortDatastore{Datastore: Datastores["redis"]},
 			portFile:  ptr("33201 33202\n"),
 			expected:  "6379->33201 6380->33202",
 		},

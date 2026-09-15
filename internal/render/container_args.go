@@ -1,4 +1,4 @@
-package datastores
+package render
 
 // ContainerArgsInput is the input for ContainerArgs. Every value a container's
 // argv depends on appears here, so that the emitted command is a function of its
@@ -44,10 +44,10 @@ type ContainerArgsInput struct {
 	Volumes []string
 }
 
-// ContainerArgs builds the argv for `docker container create`. It is pure, so the
+// DockerCreateArgs builds the argv for `docker container create`. It is pure, so the
 // exact command a service is created with can be pinned by a test that needs
 // neither a filesystem nor a docker daemon.
-func ContainerArgs(input ContainerArgsInput) []string {
+func DockerCreateArgs(input ContainerArgsInput) []string {
 	args := []string{
 		"container",
 		"create",

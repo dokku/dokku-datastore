@@ -75,7 +75,10 @@ func TestReadme(t *testing.T) {
 		expected string
 	}{
 		{name: "the title", expected: "# dokku redis "},
-		{name: "the image it installs", expected: "Currently defaults to installing [redis latest](https://hub.docker.com/_/redis/)."},
+		// the version a real plugin checkout pins in its own Dockerfile wins, so
+		// this fixture falls back to the definition's, which is a pinned
+		// version rather than the floating latest the Go implementation used
+		{name: "the image it installs", expected: "Currently defaults to installing [redis 8.8.0](https://hub.docker.com/_/redis/)."},
 		{name: "the install command", expected: "sudo dokku plugin:install https://github.com/dokku/dokku-redis.git --name redis"},
 		{name: "the command list", expected: "redis:list                                         # list all Redis services"},
 		{name: "a usage section", expected: "### Basic Usage"},
