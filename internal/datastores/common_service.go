@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/backend"
+
 	"github.com/dokku/dokku/plugins/common"
 )
 
@@ -15,6 +17,15 @@ import (
 func AmbassadorContainerName(s Datastore, serviceName string) string {
 	commandPrefix := s.Properties().CommandPrefix
 	return fmt.Sprintf("dokku.%s.%s.ambassador", commandPrefix, serviceName)
+}
+
+// containerNames are the containers that make up a service, which is all the
+// backend needs to know about it.
+func containerNames(s Datastore, serviceName string) backend.Names {
+	return backend.Names{
+		Container:  ContainerName(s, serviceName),
+		Ambassador: AmbassadorContainerName(s, serviceName),
+	}
 }
 
 // ConfigOptions gets the config options for a service
@@ -25,14 +36,7 @@ func ConfigOptions(s Datastore, serviceName string) string {
 
 // ContainerExists checks to see if a container exists
 func ContainerExists(ctx context.Context, containerID string) bool {
-	result, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
-		Command: common.DockerBin(),
-		Args:    []string{"container", "inspect", containerID},
-	})
-	if err != nil {
-		return false
-	}
-	return result.ExitCode == 0
+	return backend.Exists(ctx, containerID)
 }
 
 // ContainerID gets the container ID for a service
@@ -62,8 +66,7 @@ func ContainerIP(ctx context.Context, input ContainerIPInput) string {
 		})
 	}
 
-	containerIP, _ := common.DockerInspect(input.ContainerID, "{{ .NetworkSettings.IPAddress }}")
-	return containerIP
+	return backend.IP(ctx, input.ContainerID)
 }
 
 // ContainerName gets the name of a service
@@ -397,26 +400,10 @@ type LiveContainerIDInput struct {
 
 // LiveContainerID gets the live container ID for a service, regardless of what is set in the ID file
 func LiveContainerID(ctx context.Context, input LiveContainerIDInput) string {
-	containerName := ContainerName(input.Datastore, input.ServiceName)
-	arguments := []string{"container", "ps", "-aq", "--no-trunc", "--filter", fmt.Sprintf("name=^/%s$", containerName)}
-	if input.Filter != "" {
-		arguments = append(arguments, "--filter", input.Filter)
-	}
-
-	result, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
-		Command: common.DockerBin(),
-		Args:    arguments,
+	return backend.LiveContainerID(ctx, backend.LiveContainerIDInput{
+		ContainerName: ContainerName(input.Datastore, input.ServiceName),
+		Filter:        input.Filter,
 	})
-	if err != nil {
-		return ""
-	}
-
-	id := result.StdoutContents()
-	if id == "true" {
-		return ""
-	}
-
-	return id
 }
 
 // PauseServiceContainerInput is the input for the PauseServiceContainer function
@@ -433,33 +420,10 @@ type PauseServiceContainerInput struct {
 
 // PauseServiceContainer pauses a service container
 func PauseServiceContainer(ctx context.Context, input PauseServiceContainerInput) error {
-	ambassadorContainerName := AmbassadorContainerName(input.Datastore, input.ServiceName)
-	if ContainerExists(ctx, ambassadorContainerName) {
-		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
-			Command: common.DockerBin(),
-			Args:    []string{"container", "stop", ambassadorContainerName},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to stop ambassador container: %w", err)
-		}
-	}
-
-	if input.ContainerID == "" {
-		input.ContainerID = LiveContainerID(ctx, LiveContainerIDInput{
-			Datastore:   input.Datastore,
-			ServiceName: input.ServiceName,
-		})
-	}
-
-	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
-		Command: common.DockerBin(),
-		Args:    []string{"container", "stop", input.ContainerID},
+	return backend.Pause(ctx, backend.PauseInput{
+		Names:       containerNames(input.Datastore, input.ServiceName),
+		ContainerID: input.ContainerID,
 	})
-	if err != nil {
-		return fmt.Errorf("failed to stop container: %w", err)
-	}
-
-	return nil
 }
 
 // PostCreateNetwork gets the post create network for a service
@@ -502,15 +466,7 @@ func RemoveBackupSchedule(ctx context.Context, input RemoveBackupScheduleInput) 
 
 // RemoveContainer removes a container
 func RemoveContainer(ctx context.Context, containerID string) error {
-	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
-		Command: common.DockerBin(),
-		Args:    []string{"container", "rm", "-f", containerID},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to remove container: %w", err)
-	}
-
-	return nil
+	return backend.Remove(ctx, containerID)
 }
 
 // RemoveServiceContainerInput is the input for the RemoveServiceContainer function
@@ -524,42 +480,7 @@ type RemoveServiceContainerInput struct {
 
 // RemoveServiceContainer removes the service container for a service
 func RemoveServiceContainer(ctx context.Context, input RemoveServiceContainerInput) error {
-	containerID := LiveContainerID(ctx, LiveContainerIDInput{
-		Datastore:   input.Datastore,
-		ServiceName: input.ServiceName,
-	})
-	if containerID == "" {
-		return nil
-	}
-
-	if err := PauseServiceContainer(ctx, PauseServiceContainerInput{
-		Datastore:   input.Datastore,
-		ServiceName: input.ServiceName,
-		ContainerID: containerID,
-	}); err != nil {
-		return err
-	}
-
-	ambassadorContainerName := AmbassadorContainerName(input.Datastore, input.ServiceName)
-	if ContainerExists(ctx, ambassadorContainerName) {
-		if err := RemoveContainer(ctx, ambassadorContainerName); err != nil {
-			return err
-		}
-	}
-
-	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
-		Command: common.DockerBin(),
-		Args:    []string{"container", "update", "--restart=no", containerID},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to update container restart policy: %w", err)
-	}
-
-	if err := RemoveContainer(ctx, containerID); err != nil {
-		return err
-	}
-
-	return nil
+	return backend.Down(ctx, containerNames(input.Datastore, input.ServiceName))
 }
 
 // StatusInput is the input for the Status function
@@ -583,12 +504,7 @@ func Status(ctx context.Context, input StatusInput) string {
 		})
 	}
 
-	containerStatus, _ := common.DockerInspect(input.ContainerID, "{{ .State.Status }}")
-	if containerStatus == "" {
-		return "missing"
-	}
-
-	return containerStatus
+	return backend.Status(ctx, input.ContainerID)
 }
 
 // StartInput is the input for the Start function
@@ -681,6 +597,5 @@ func Version(ctx context.Context, input VersionInput) string {
 		})
 	}
 
-	containerVersion, _ := common.DockerInspect(input.ContainerID, "{{ .Config.Image }}")
-	return containerVersion
+	return backend.Image(ctx, input.ContainerID)
 }
