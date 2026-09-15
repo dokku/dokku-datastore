@@ -232,50 +232,12 @@ func (c *CreateCommand) Run(args []string) int {
 		PostStartNetworks:  c.postStartNetwork,
 		ServiceName:        serviceName,
 		ShmSize:            c.shmSize,
+		Logger:             logger,
 	})
 	if err != nil {
 		logger.Error(internal.ErrorInput{
 			Error: err,
 		})
-		return 1
-	}
-
-	serviceProperties := datastore.Properties()
-	waitPort := serviceProperties.WaitPort
-	initialNetwork := datastores.InitialNetwork(datastore, serviceName)
-	networkAlias := datastores.DNSHostname(datastore, serviceName)
-	containerName := datastores.ContainerName(datastore, serviceName)
-
-	linkContainerDockerArgs := []string{
-		"container",
-		"run",
-		"--rm",
-		"--link=" + containerName + ":" + networkAlias,
-	}
-
-	if initialNetwork != "" {
-		linkContainerDockerArgs = append(linkContainerDockerArgs, "--network="+initialNetwork)
-	}
-
-	linkContainerDockerArgs = append(linkContainerDockerArgs, datastores.PluginWaitImage)
-	linkContainerDockerArgs = append(linkContainerDockerArgs, "-c", fmt.Sprintf("%s:%d", networkAlias, waitPort))
-
-	logger.Header1(fmt.Sprintf("Waiting for %s container to be ready", serviceName)) //nolint:errcheck
-	_, err = datastores.CallExecCommandWithContext(ctx, common.ExecCommandInput{
-		Command: common.DockerBin(),
-		Args:    linkContainerDockerArgs,
-	})
-	if err != nil {
-		logger.Error(internal.ErrorInput{
-			Error: err,
-		})
-		containerID := datastores.LiveContainerID(ctx, datastores.LiveContainerIDInput{
-			Datastore:   datastore,
-			ServiceName: serviceName,
-		})
-		logger.Header1(fmt.Sprintf("Start of %s container output", serviceName)) //nolint:errcheck
-		common.LogVerboseQuietContainerLogs(containerID)
-		logger.Header1(fmt.Sprintf("End of %s container output", serviceName)) //nolint:errcheck
 		return 1
 	}
 
