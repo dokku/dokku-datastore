@@ -156,6 +156,10 @@ func (c *BackupSetEncryptionCommand) Run(args []string) int {
 		return 1
 	}
 
+	if code, unimplemented := requireImplemented(datastore, "backup-set-encryption"); unimplemented {
+		return code
+	}
+
 	serviceName := arguments["service-name"].StringValue()
 	if serviceName == "" {
 		logger.Error(internal.ErrorInput{

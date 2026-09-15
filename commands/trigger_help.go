@@ -125,8 +125,17 @@ func (c *TriggerHelpCommand) Run(args []string) int {
 		PluginDir: hostenv.PluginBasePath(),
 	})
 
+	// the listing is filtered by the same rule the commands themselves apply,
+	// so a datastore never advertises something that would exit as not a command
+	implemented := []internal.PluginCommand{}
+	for _, pluginCommand := range pluginCommands(context.Background(), c.Meta, c.CommandFunc) {
+		if datastores.Implements(datastore, pluginCommand.Name()) {
+			implemented = append(implemented, pluginCommand)
+		}
+	}
+
 	input := internal.PluginHelpInput{
-		Commands: pluginCommands(context.Background(), c.Meta, c.CommandFunc),
+		Commands: implemented,
 		Data:     data,
 	}
 

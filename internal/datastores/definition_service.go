@@ -662,3 +662,17 @@ func cutTaggedImage(reference string) (string, string) {
 
 	return image, version
 }
+
+// Implements reports whether a datastore implements a subcommand.
+//
+// A datastore says what it can do by declaring the commands it has, and this is
+// the only statement of it: there is no list of what a datastore cannot do to
+// fall out of step with what it actually declares.
+func Implements(s Datastore, subcommand string) bool {
+	service, ok := s.(*DefinitionService)
+	if !ok {
+		return true
+	}
+
+	return service.Definition.Implements(subcommand)
+}

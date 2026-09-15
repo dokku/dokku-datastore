@@ -66,17 +66,19 @@ if [[ -x "$probe" ]]; then
 fi
 
 dump="$(mktemp)"
-if ! "$BIN" export "$PLUGIN" "$SERVICE" >"$dump" 2>"$dump.err"; then
-  # a datastore that declares no export verb reports it rather than failing
-  # part way through, and there is no round trip to make
-  if grep -q "does not implement" "$dump.err"; then
+status=0
+"$BIN" export "$PLUGIN" "$SERVICE" >"$dump" 2>"$dump.err" || status=$?
+if [[ "$status" -ne 0 ]]; then
+  # a datastore that declares no export exits the way dokku expects of a plugin
+  # that does not handle a command, and there is no round trip to make
+  if [[ "$status" -eq "${DOKKU_NOT_IMPLEMENTED_EXIT:-10}" ]]; then
     echo "    skipped: $PLUGIN does not implement export"
     rm -f "$dump" "$dump.err"
     exit 0
   fi
 
   cat "$dump.err" >&2
-  fail "export failed"
+  fail "export failed with status $status"
 fi
 
 [[ -s "$dump" ]] || fail "export produced nothing"
