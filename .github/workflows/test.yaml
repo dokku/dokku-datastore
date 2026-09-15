@@ -25,3 +25,39 @@ jobs:
           go-version-file: "go.mod"
       - run: go get .
       - run: go test -v ./...
+
+  definitions:
+    name: definitions
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      # read from the tree rather than listed here, so a new datastore is a
+      # definition directory and not also a workflow edit
+      - id: list
+        run: |
+          names="$(ls internal/registry/definitions)"
+          filter='split("\n") | map(select(length > 0))'
+          matrix="$(jq -R -s -c "$filter" <<<"$names")"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "$matrix"
+
+  docker-test:
+    name: "docker-test (${{ matrix.definition }})"
+    runs-on: ubuntu-24.04
+    needs: definitions
+    strategy:
+      # one broken datastore must not hide the state of the other twenty one
+      fail-fast: false
+      matrix:
+        definition: ${{ fromJSON(needs.definitions.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: "go.mod"
+      - run: go build -o dokku-datastore .
+      # no dokku: the binary needs a data root and a user to own what it writes,
+      # which keeps this a check of the definition rather than of dokku
+      - run: ./tests/definition.sh "${{ matrix.definition }}"
