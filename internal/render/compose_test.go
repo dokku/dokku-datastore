@@ -24,7 +24,9 @@ func TestComposeForRedis(t *testing.T) {
 		// published side would take an ephemeral host port, which a datastore
 		// container has never done
 		"expose:",
-		`- "6379"`,
+		// qualified, or it becomes a key of its own on some docker versions
+		// instead of merging with the one the image already declares
+		"- 6379/tcp",
 		// compose would otherwise invent a project network, and a service that
 		// was on the default bridge would quietly move
 		"network_mode: bridge",
