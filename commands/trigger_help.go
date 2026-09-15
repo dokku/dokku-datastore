@@ -8,6 +8,7 @@ import (
 
 	"github.com/dokku/dokku-datastore/internal"
 	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 
 	"github.com/josegonzalez/cli-skeleton/command"
 	"github.com/posener/complete"
@@ -121,7 +122,7 @@ func (c *TriggerHelpCommand) Run(args []string) int {
 
 	data := internal.NewDocumentationData(internal.DocumentationDataInput{
 		Datastore: datastore,
-		PluginDir: os.Getenv("PLUGIN_BASE_PATH"),
+		PluginDir: hostenv.PluginBasePath(),
 	})
 
 	input := internal.PluginHelpInput{

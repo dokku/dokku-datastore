@@ -620,5 +620,14 @@ func Version(ctx context.Context, input VersionInput) string {
 		})
 	}
 
-	return backend.Image(ctx, input.ContainerID)
+	running := backend.Image(ctx, input.ContainerID)
+
+	// a definition that bakes tooling into the image runs a tag dokku built,
+	// which is an implementation detail: asked for a version, an operator wants
+	// to know which redis is running, not which wrapper was built around it
+	if service, ok := input.Datastore.(*DefinitionService); ok {
+		return service.PinnedImage(input.ServiceName, running)
+	}
+
+	return running
 }

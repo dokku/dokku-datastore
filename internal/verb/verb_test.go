@@ -111,15 +111,59 @@ func TestResolveReportsAnUndeclaredVerb(t *testing.T) {
 	}
 }
 
-func TestResolveRedisExport(t *testing.T) {
-	resolved, err := Resolve(redisInput(t, "export"))
+// Export runs beside the service, sharing its network namespace, so a client
+// addressing localhost reaches the service exactly as it would from inside. A
+// service container created before the script was vendored has nothing to exec
+// but still has a namespace to join, which is what makes export work without
+// recreating it first.
+func TestResolveRedisExportRunsInASidecar(t *testing.T) {
+	redis := redisDefinition(t)
+
+	command, ok := redis.Dokku.Commands["export"]
+	if !ok {
+		t.Fatal("expected redis to declare export")
+	}
+
+	if command.Mode != definition.ModeSidecar {
+		t.Errorf("expected export to run in a sidecar, got mode %q", command.Mode)
+	}
+
+	input := redisInput(t, "export")
+	input.Image = "redis:8.8.0"
+	input.Volumes = []string{"/var/lib/dokku/services/redis/lollipop/data:/data"}
+
+	resolved, err := Resolve(input)
 	if err != nil {
 		t.Fatalf("unable to resolve export: %s", err)
 	}
 
-	expected := "container exec --env=REDISCLI_AUTH=hunter2 -i dokku.redis.lollipop dokku-redis-export"
-	if actual := strings.Join(backend.ExecArgs(resolved), " "); actual != expected {
+	expected := "container run --rm --env=REDISCLI_AUTH=hunter2 --network=container:dokku.redis.lollipop --volume=/var/lib/dokku/services/redis/lollipop/data:/data -i redis:8.8.0 dokku-redis-export"
+	actual := strings.Join(backend.RunArgs(backend.RunInput{
+		Image:   input.Image,
+		Argv:    resolved.Argv,
+		Env:     resolved.Env,
+		Volumes: input.Volumes,
+		Network: "container:" + input.Names.Container,
+	}), " ")
+
+	if actual != expected {
 		t.Errorf("expected:\n%s\ngot:\n%s", expected, actual)
+	}
+}
+
+func TestRunSidecarNeedsAnImage(t *testing.T) {
+	input := commandInput(definition.Command{
+		Exec: []string{"telnet", "localhost", "11211"},
+		Mode: definition.ModeSidecar,
+	}, definition.Scope{})
+
+	err := Run(t.Context(), input)
+	if err == nil {
+		t.Fatal("expected a sidecar with no image to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "image") {
+		t.Errorf("expected the error to mention the image, got %q", err)
 	}
 }
 
@@ -250,9 +294,9 @@ func TestResolveReportsATemplateError(t *testing.T) {
 }
 
 func TestRunRefusesAModeItCannotHonour(t *testing.T) {
-	// running a sidecar or host command in the service container would run it
-	// somewhere other than where the definition asked for
-	for _, mode := range []string{definition.ModeSidecar, definition.ModeHost} {
+	// running a host command in the service container would run it somewhere
+	// other than where the definition asked for
+	for _, mode := range []string{definition.ModeHost} {
 		t.Run(mode, func(t *testing.T) {
 			input := commandInput(definition.Command{
 				Exec: []string{"true"},

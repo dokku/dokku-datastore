@@ -116,10 +116,12 @@ func Run(ctx context.Context, input RunInput) error {
 	case "", definition.ModeService:
 	case definition.ModeOffline:
 		return runOffline(ctx, input)
+	case definition.ModeSidecar:
+		return runSidecar(ctx, input)
 	default:
-		// sidecar and host each need machinery that does not exist yet, and
-		// failing here is better than running the command somewhere other than
-		// where the definition asked for
+		// host mode needs machinery that does not exist yet, and failing here is
+		// better than running the command somewhere other than where the
+		// definition asked for
 		return fmt.Errorf("the %s command runs in mode %q, which is not supported yet", input.Name, command.Mode)
 	}
 
@@ -129,6 +131,47 @@ func Run(ctx context.Context, input RunInput) error {
 	}
 
 	return backend.Exec(ctx, exec)
+}
+
+// runSidecar runs a command beside a running service rather than inside it.
+//
+// It shares the service container's network namespace, so a client addressing
+// localhost reaches the service exactly as it would from inside, whatever
+// network the service is on. That is what makes a verb independent of how the
+// service container was built: a service created before its scripts were
+// vendored, or by the bash plugin, has nothing to exec, but it still has a
+// network namespace to join and data to read.
+func runSidecar(ctx context.Context, input RunInput) error {
+	exec, err := Resolve(input)
+	if err != nil {
+		return err
+	}
+
+	command := input.Definition.Dokku.Commands[input.Name]
+
+	// the command's own image when it names one, since a sidecar exists for a
+	// tool the datastore image does not ship; otherwise the service's own
+	image := command.Image
+	if image == "" {
+		image = input.Image
+	}
+
+	if image == "" {
+		return fmt.Errorf("the %s command runs in a sidecar and so needs an image", input.Name)
+	}
+
+	return backend.Run(ctx, backend.RunInput{
+		Image:   image,
+		Argv:    exec.Argv,
+		Env:     exec.Env,
+		Volumes: input.Volumes,
+		Network: "container:" + input.Names.Container,
+		User:    exec.User,
+		TTY:     input.TTY,
+		Stdin:   exec.Stdin,
+		Stdout:  exec.Stdout,
+		Stderr:  exec.Stderr,
+	})
 }
 
 // runOffline runs a command against a service's data with the service down.

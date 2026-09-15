@@ -8,7 +8,6 @@ package render
 import (
 	"fmt"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
 	"github.com/dokku/dokku-datastore/internal/definition"
 )
 
@@ -36,34 +35,40 @@ type Input struct {
 // builder. The memory limit, shared memory size and initial network are applied
 // here rather than declared by a definition, because they are dokku-level knobs
 // that every datastore takes identically.
-func ContainerArgs(input Input) (datastores.ContainerArgsInput, error) {
+func ContainerArgs(input Input) (ContainerArgsInput, error) {
 	service := input.Definition.Service
 
 	image, err := definition.Render(service.Image, input.Scope)
 	if err != nil {
-		return datastores.ContainerArgsInput{}, err
+		return ContainerArgsInput{}, err
 	}
 
 	command, err := definition.RenderAll(service.Command, input.Scope)
 	if err != nil {
-		return datastores.ContainerArgsInput{}, err
+		return ContainerArgsInput{}, err
 	}
 
 	volumes := make([]string, 0, len(service.Volumes))
 	for _, volume := range service.Volumes {
 		source, err := definition.Render(volume.Source, input.Scope)
 		if err != nil {
-			return datastores.ContainerArgsInput{}, err
+			return ContainerArgsInput{}, err
 		}
 
 		if source == "" {
-			return datastores.ContainerArgsInput{}, fmt.Errorf("volume for %s rendered an empty source", volume.Target)
+			return ContainerArgsInput{}, fmt.Errorf("volume for %s rendered an empty source", volume.Target)
 		}
 
 		volumes = append(volumes, source+":"+volume.Target)
 	}
 
-	return datastores.ContainerArgsInput{
+	// the payload is mounted rather than baked into an image, which is what
+	// keeps a definition that vendors a script on the pull path
+	for _, file := range RootfsFiles(input) {
+		volumes = append(volumes, file.Mount)
+	}
+
+	return ContainerArgsInput{
 		CommandPrefix:  input.Definition.Dokku.Plugin,
 		Command:        command,
 		ConfigOptions:  input.ConfigOptions,

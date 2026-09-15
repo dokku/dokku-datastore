@@ -93,7 +93,7 @@ func TestWriteContext(t *testing.T) {
 
 	// an embedded file loses its executable bit, and a vendored script arriving
 	// in the image unable to run fails at export time rather than at build time
-	if info.Mode().Perm() != executableMode {
+	if info.Mode().Perm() != 0755 {
 		t.Errorf("expected the script to be executable, got %v", info.Mode().Perm())
 	}
 
@@ -102,7 +102,7 @@ func TestWriteContext(t *testing.T) {
 		t.Fatalf("unable to stat the data file: %s", err)
 	}
 
-	if notes.Mode().Perm() != fileMode {
+	if notes.Mode().Perm() != 0644 {
 		t.Errorf("expected the data file to stay 0644, got %v", notes.Mode().Perm())
 	}
 }
@@ -113,11 +113,11 @@ func TestModeFor(t *testing.T) {
 		path     string
 		expected fs.FileMode
 	}{
-		{name: "usr local bin", path: "usr/local/bin/dokku-redis-export", expected: executableMode},
-		{name: "usr bin", path: "usr/bin/probe", expected: executableMode},
-		{name: "sbin", path: "usr/sbin/entrypoint", expected: executableMode},
-		{name: "a config file", path: "etc/redis/notes.txt", expected: fileMode},
-		{name: "a file named bin", path: "etc/bin", expected: fileMode},
+		{name: "usr local bin", path: "usr/local/bin/dokku-redis-export", expected: 0755},
+		{name: "usr bin", path: "usr/bin/probe", expected: 0755},
+		{name: "sbin", path: "usr/sbin/entrypoint", expected: 0755},
+		{name: "a config file", path: "etc/redis/notes.txt", expected: 0644},
+		{name: "a file named bin", path: "etc/bin", expected: 0644},
 	}
 
 	for _, test := range tests {
@@ -134,9 +134,10 @@ func TestModeFor(t *testing.T) {
 // and each one needs its own matrix leg. Building the definitions that only
 // declare a base would turn every trigger-install into a build for no gain.
 func TestWhichEmbeddedDefinitionsBuild(t *testing.T) {
-	// redis vendors its dump scripts into the image, so that the dump streams
-	// out of the container rather than being buffered through the tool
-	builds := map[string]bool{"redis": true}
+	// none: a definition that vendors a script mounts it into the container
+	// instead, which keeps every datastore on the pull path. Building stays for
+	// a payload a mount cannot deliver, such as a compiled tool or a package.
+	builds := map[string]bool{}
 
 	loaded, err := registry.Load(registry.LoadInput{})
 	if err != nil {
@@ -170,7 +171,7 @@ func TestEmbeddedRootfsScriptsAreExecutable(t *testing.T) {
 				continue
 			}
 
-			if ModeFor(file) != executableMode {
+			if ModeFor(file) != 0755 {
 				t.Errorf("%s: %s is not executable", name, file)
 			}
 		}

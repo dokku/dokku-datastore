@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/registry"
 )
@@ -13,7 +12,7 @@ import (
 // goldenContainerArgs is the file the previous implementation's emitted command
 // was pinned to. Reproducing it is the whole point of the declarative renderer:
 // it is the difference between believing the migration is faithful and knowing.
-const goldenContainerArgs = "../datastores/testdata/container_args.golden"
+const goldenContainerArgs = "testdata/container_args.golden"
 
 // redisScope is the state of a redis service named lollipop, matching the fixture
 // the golden file was generated from.
@@ -56,6 +55,15 @@ func redisInput(t *testing.T) Input {
 		EnvFile:    "/var/lib/dokku/services/redis/lollipop/ENV",
 		IDFile:     "/var/lib/dokku/services/redis/lollipop/ID",
 	}
+}
+
+// withoutPayload drops the vendored scripts, whose mounts are a deliberate
+// addition to what the previous implementation emitted. The golden file is the
+// proof that the renderer reproduces that implementation, so it is compared
+// against a definition carrying only what the old one had.
+func withoutPayload(input Input) Input {
+	input.Definition.Rootfs = nil
+	return input
 }
 
 // TestRendererReproducesTheGoldenArgs is the acceptance check for replacing the
@@ -117,7 +125,7 @@ func TestRendererReproducesTheGoldenArgs(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			input := redisInput(t)
+			input := withoutPayload(redisInput(t))
 			test.mutate(&input)
 
 			args, err := ContainerArgs(input)
@@ -126,7 +134,7 @@ func TestRendererReproducesTheGoldenArgs(t *testing.T) {
 			}
 
 			expected := goldenCase(t, string(golden), test.name)
-			actual := strings.Join(datastores.ContainerArgs(args), "\n")
+			actual := strings.Join(DockerCreateArgs(args), "\n")
 			if actual != expected {
 				t.Errorf("the definition does not reproduce the previous command.\nexpected:\n%s\ngot:\n%s", expected, actual)
 			}

@@ -1,4 +1,4 @@
-package datastores
+package render
 
 import (
 	"flag"
@@ -9,11 +9,6 @@ import (
 )
 
 var updateGolden = flag.Bool("update-golden", false, "rewrite the golden files instead of comparing against them")
-
-// goldenContainerArgs is the file pinning the exact command a service is created
-// with. It exists so that the declarative renderer replacing this code can be
-// held to reproducing it, rather than to a reading of the diff.
-const goldenContainerArgs = "testdata/container_args.golden"
 
 // redisContainerArgs is what internal/datastores/redis.go passes for a service
 // named lollipop, with everything the user can vary left at its default.
@@ -93,7 +88,7 @@ func TestContainerArgs(t *testing.T) {
 		test.mutate(&input)
 
 		rendered.WriteString("### " + test.name + "\n")
-		for _, arg := range ContainerArgs(input) {
+		for _, arg := range DockerCreateArgs(input) {
 			rendered.WriteString(arg + "\n")
 		}
 		rendered.WriteString("\n")
@@ -123,7 +118,7 @@ func TestContainerArgs(t *testing.T) {
 }
 
 func TestContainerArgsOmitsUnsetValues(t *testing.T) {
-	args := strings.Join(ContainerArgs(redisContainerArgs()), " ")
+	args := strings.Join(DockerCreateArgs(redisContainerArgs()), " ")
 
 	for _, absent := range []string{"--memory", "--shm-size", "--network", "--network-alias"} {
 		if strings.Contains(args, absent) {
