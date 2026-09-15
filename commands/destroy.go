@@ -173,8 +173,10 @@ func (c *DestroyCommand) Run(args []string) int {
 		return 1
 	}
 
-	// check if the service is linked to any apps
-	linkedApps := datastores.LinkedApps(ctx, datastores.LinkedAppsInput{
+	// check if the service is linked to any apps. A link naming an app that no
+	// longer exists is stale, and this guard is here to stop a datastore being
+	// deleted while an app is using it, so a stale one must not block.
+	linkedApps := datastores.LiveLinkedApps(ctx, datastores.LinkedAppsInput{
 		Datastore:   datastore,
 		ServiceName: serviceName,
 	})

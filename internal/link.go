@@ -172,6 +172,18 @@ type UnlinkServiceInput struct {
 
 // UnlinkService unlinks a service from an app
 func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
+	// an app that has been deleted has no config to unset, no docker options to
+	// remove and nothing to restart, but its name still has to come out of the
+	// links file or the service can never be destroyed. The service-action
+	// triggers are skipped too: they are handed an app name, and firing them
+	// for an app that is gone asks other plugins to act on nothing.
+	if !datastores.AppExists(input.AppName) {
+		return datastores.RemoveLinkedApp(ctx, datastores.LinkedAppsInput{
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+		}, input.AppName)
+	}
+
 	environment, err := AppEnvironment(input.AppName)
 	if err != nil {
 		return err
