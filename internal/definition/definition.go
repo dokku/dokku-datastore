@@ -33,8 +33,27 @@ type Definition struct {
 	// image, the way the bash plugins' config derives the image with awk.
 	Dockerfile []byte
 
-	// Scripts are the bin/ hook scripts, keyed by file name.
+	// DefaultImage and DefaultImageVersion are what the Dockerfile pins, which
+	// is what a service gets when it names no image of its own. They are not
+	// Service.Image, which is a template a service's own pin renders into.
+	DefaultImage        string
+	DefaultImageVersion string
+
+	// Builds reports whether the Dockerfile does anything beyond declaring its
+	// base. A definition that only declares one is pulled, exactly as every
+	// datastore is today; one that copies vendored tooling in has to be built,
+	// which is slower and fails differently on a host with a constrained
+	// builder, so the distinction is worth keeping.
+	Builds bool
+
+	// Scripts are the bin/ hook scripts, keyed by path relative to bin/.
 	Scripts map[string][]byte
+
+	// Rootfs is the image payload the Dockerfile copies in, keyed by path
+	// relative to rootfs/. It is kept apart from Scripts because the two are
+	// read by different things: bin/ runs on the host or in a throwaway
+	// container, rootfs/ is baked into the image.
+	Rootfs map[string][]byte
 }
 
 // Service is the compose service. Only the keys the renderer has an opinion about

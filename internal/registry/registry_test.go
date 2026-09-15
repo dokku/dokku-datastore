@@ -3,6 +3,7 @@ package registry
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
@@ -214,4 +215,86 @@ func TestMajorVersion(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOverrideReadsBinAndRootfsAsTrees(t *testing.T) {
+	pluginDir := t.TempDir()
+	definitionDir := filepath.Join(pluginDir, "datastore", "redis")
+
+	write := func(name string, contents string) {
+		t.Helper()
+
+		full := filepath.Join(definitionDir, name)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatalf("unable to create the directory for %s: %s", name, err)
+		}
+
+		if err := os.WriteFile(full, []byte(contents), 0644); err != nil {
+			t.Fatalf("unable to write %s: %s", name, err)
+		}
+	}
+
+	write("docker-compose.yml", `
+services:
+  redis:
+    image: "{{ .Image }}:{{ .ImageVersion }}"
+    volumes:
+      - type: bind
+        source: "{{ .HostRoot }}/data"
+        target: /data
+    ports:
+      - name: native
+        target: 6379
+        primary: true
+x-dokku:
+  plugin: redis
+  title: Redis
+  scheme: redis
+  alias: REDIS
+  dsn: "{{ .Scheme }}://{{ .Host }}:{{ .Port.native }}"
+  wait: native
+`)
+	write("Dockerfile", "ARG IMAGE=redis:8.8.0\nFROM ${IMAGE}\nCOPY rootfs/ /\n")
+	write("bin/pre-create", "#!/usr/bin/env bash\n")
+	// rootfs is a tree, not a flat list, so a walk is what lets a definition
+	// place a file anywhere in the image
+	write("rootfs/usr/local/bin/dokku-redis-export", "#!/usr/bin/env bash\n")
+
+	loaded, err := Load(LoadInput{PluginDir: pluginDir})
+	if err != nil {
+		t.Fatalf("unable to load with an override: %s", err)
+	}
+
+	redis, ok := loaded.Definition("redis")
+	if !ok {
+		t.Fatal("expected redis to resolve")
+	}
+
+	if _, ok := redis.Scripts["pre-create"]; !ok {
+		t.Errorf("expected bin/pre-create, got %v", keys(redis.Scripts))
+	}
+
+	if _, ok := redis.Rootfs["usr/local/bin/dokku-redis-export"]; !ok {
+		t.Errorf("expected the nested rootfs file, got %v", keys(redis.Rootfs))
+	}
+
+	// a Dockerfile that copies a payload in is a real build, unlike the
+	// eighteen that only declare a base
+	if !redis.Builds {
+		t.Error("expected a definition copying a payload in to build")
+	}
+
+	if redis.DefaultImage != "redis" || redis.DefaultImageVersion != "8.8.0" {
+		t.Errorf("expected redis:8.8.0, got %s:%s", redis.DefaultImage, redis.DefaultImageVersion)
+	}
+}
+
+func keys(files map[string][]byte) []string {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+	return names
 }

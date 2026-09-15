@@ -5,9 +5,11 @@ package registry
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -108,17 +110,14 @@ func parseEmbedded(name string) (definition.Definition, error) {
 		return definition.Definition{}, fmt.Errorf("%s: unable to read Dockerfile: %w", name, err)
 	}
 
-	scripts := map[string][]byte{}
-	entries, err := fs.ReadDir(embedded, filepath.Join("definitions", name, "bin"))
-	if err == nil {
-		for _, entry := range entries {
-			contents, err := read(filepath.Join("bin", entry.Name()))
-			if err != nil {
-				return definition.Definition{}, fmt.Errorf("%s: unable to read bin/%s: %w", name, entry.Name(), err)
-			}
+	scripts, err := readTree(embedded, path.Join("definitions", name, "bin"))
+	if err != nil {
+		return definition.Definition{}, fmt.Errorf("%s: %w", name, err)
+	}
 
-			scripts[entry.Name()] = contents
-		}
+	rootfs, err := readTree(embedded, path.Join("definitions", name, "rootfs"))
+	if err != nil {
+		return definition.Definition{}, fmt.Errorf("%s: %w", name, err)
 	}
 
 	return definition.Parse(definition.ParseInput{
@@ -126,8 +125,54 @@ func parseEmbedded(name string) (definition.Definition, error) {
 		Compose:    compose,
 		Dockerfile: dockerfile,
 		Scripts:    scripts,
+		Rootfs:     rootfs,
 		Embedded:   true,
 	})
+}
+
+// readTree reads every file below a directory, keyed by path relative to it. A
+// missing directory is not an error: most definitions ship neither bin/ nor
+// rootfs/. Rootfs is a tree rather than a flat list, so this walks rather than
+// listing one level, which is what lets a definition place a file anywhere in
+// the image.
+func readTree(fsys fs.FS, root string) (map[string][]byte, error) {
+	files := map[string][]byte{}
+
+	err := fs.WalkDir(fsys, root, func(current string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return fs.SkipAll
+			}
+
+			return err
+		}
+
+		if entry.IsDir() {
+			return nil
+		}
+
+		contents, err := fs.ReadFile(fsys, current)
+		if err != nil {
+			return fmt.Errorf("unable to read %s: %w", current, err)
+		}
+
+		relative, err := filepath.Rel(root, current)
+		if err != nil {
+			return err
+		}
+
+		files[filepath.ToSlash(relative)] = contents
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(files) == 0 {
+		return nil, nil
+	}
+
+	return files, nil
 }
 
 // parseOverrides reads every definition a plugin checkout supplies.
@@ -162,17 +207,16 @@ func parseOverrides(root string) ([]definition.Definition, error) {
 			return nil, fmt.Errorf("%s: unable to read Dockerfile: %w", name, err)
 		}
 
-		scripts := map[string][]byte{}
-		binEntries, err := os.ReadDir(filepath.Join(root, name, "bin"))
-		if err == nil {
-			for _, binEntry := range binEntries {
-				contents, err := os.ReadFile(filepath.Join(root, name, "bin", binEntry.Name()))
-				if err != nil {
-					return nil, fmt.Errorf("%s: unable to read bin/%s: %w", name, binEntry.Name(), err)
-				}
+		checkout := os.DirFS(filepath.Join(root, name))
 
-				scripts[binEntry.Name()] = contents
-			}
+		scripts, err := readTree(checkout, "bin")
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+
+		rootfs, err := readTree(checkout, "rootfs")
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
 		}
 
 		one, err := definition.Parse(definition.ParseInput{
@@ -180,6 +224,7 @@ func parseOverrides(root string) ([]definition.Definition, error) {
 			Compose:    compose,
 			Dockerfile: dockerfile,
 			Scripts:    scripts,
+			Rootfs:     rootfs,
 			Embedded:   false,
 		})
 		if err != nil {

@@ -39,8 +39,11 @@ type ParseInput struct {
 	// Dockerfile is the Dockerfile, whose FROM line supplies the default image.
 	Dockerfile []byte
 
-	// Scripts are the bin/ hook scripts, keyed by file name.
+	// Scripts are the bin/ hook scripts, keyed by path relative to bin/.
 	Scripts map[string][]byte
+
+	// Rootfs is the image payload, keyed by path relative to rootfs/.
+	Rootfs map[string][]byte
 
 	// Embedded records whether this definition came from the tree compiled into
 	// the binary. A host-mode command is accepted only from there, because a
@@ -68,13 +71,22 @@ func Parse(input ParseInput) (Definition, error) {
 		service = value
 	}
 
+	image, version, trivial, err := ImageFromDockerfile(input.Dockerfile)
+	if err != nil {
+		return Definition{}, fmt.Errorf("%s: unable to read the Dockerfile: %w", input.Name, err)
+	}
+
 	definition := Definition{
-		Name:       input.Name,
-		Service:    service.Service,
-		Configs:    file.Configs,
-		Dokku:      file.Dokku,
-		Dockerfile: input.Dockerfile,
-		Scripts:    input.Scripts,
+		Name:                input.Name,
+		Service:             service.Service,
+		Configs:             file.Configs,
+		Dokku:               file.Dokku,
+		Dockerfile:          input.Dockerfile,
+		DefaultImage:        image,
+		DefaultImageVersion: version,
+		Builds:              !trivial,
+		Scripts:             input.Scripts,
+		Rootfs:              input.Rootfs,
 	}
 
 	if definition.Dokku.Variable == "" {
