@@ -190,3 +190,65 @@ func TestVolumesCarryTheDataAndThePayload(t *testing.T) {
 		}
 	}
 }
+
+// A definition's hook scripts run on the host rather than in the container,
+// which is why they are written beside the service rather than mounted into it.
+// Redis ships none, so this uses one that does.
+func TestWriteScripts(t *testing.T) {
+	redis, ok := Datastores["redis"].(*DefinitionService)
+	if !ok {
+		t.Fatal("expected redis to be definition backed")
+	}
+
+	previous := DokkuLibRoot
+	DokkuLibRoot = t.TempDir()
+	t.Cleanup(func() {
+		DokkuLibRoot = previous
+	})
+
+	hooked := &DefinitionService{Definition: redis.Definition}
+	hooked.Definition.Scripts = map[string][]byte{"pre-create": []byte("#!/usr/bin/env bash\n")}
+
+	serviceRoot := Folders(hooked, "lollipop").Root
+	if err := os.MkdirAll(serviceRoot, 0755); err != nil {
+		t.Fatalf("unable to create the service root: %s", err)
+	}
+
+	if err := hooked.writeScripts("lollipop"); err != nil {
+		t.Fatalf("unable to write the scripts: %s", err)
+	}
+
+	script := filepath.Join(serviceRoot, "bin", "pre-create")
+	info, err := os.Stat(script)
+	if err != nil {
+		t.Fatalf("unable to stat the script: %s", err)
+	}
+
+	// a hook that cannot run is a create that fails, and an embedded file has
+	// no mode of its own to carry
+	if info.Mode().Perm() != 0755 {
+		t.Errorf("expected the hook to be executable, got %v", info.Mode().Perm())
+	}
+}
+
+// Redis ships no hooks, so nothing should appear for it.
+func TestWriteScriptsWritesNothingWithoutHooks(t *testing.T) {
+	redis, ok := Datastores["redis"].(*DefinitionService)
+	if !ok {
+		t.Fatal("expected redis to be definition backed")
+	}
+
+	previous := DokkuLibRoot
+	DokkuLibRoot = t.TempDir()
+	t.Cleanup(func() {
+		DokkuLibRoot = previous
+	})
+
+	if err := redis.writeScripts("lollipop"); err != nil {
+		t.Fatalf("unable to write the scripts: %s", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(Folders(redis, "lollipop").Root, "bin")); err == nil {
+		t.Error("expected no bin directory for a definition with no hooks")
+	}
+}
