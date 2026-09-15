@@ -29,6 +29,13 @@ x-dokku:
   wait: native
 `
 
+// withConfigEntry gives the service the supplied config entries and a top level
+// thing_conf to point at, so that each case breaks one thing and nothing else.
+func withConfigEntry(compose string, entries string) string {
+	compose = strings.Replace(compose, "    ports:", "    configs:\n"+entries+"    ports:", 1)
+	return compose + "\nconfigs:\n  thing_conf:\n    content: |\n      thing = {{ .ServiceName }}\n"
+}
+
 func parseCompose(t *testing.T, compose string, embedded bool) (Definition, error) {
 	t.Helper()
 
@@ -117,6 +124,38 @@ func TestParseRejects(t *testing.T) {
 			name:     "no readiness signal at all",
 			compose:  strings.Replace(validCompose, "  wait: native", "", 1),
 			expected: "either a healthcheck or x-dokku.wait",
+		},
+		{
+			name:     "a config with no content",
+			compose:  validCompose + "\nconfigs:\n  thing_conf:\n    file: ./thing.conf\n",
+			expected: "needs an inline content",
+		},
+		{
+			name:     "a config entry naming nothing",
+			compose:  withConfigEntry(validCompose, "      - source: missing\n        target: /data/thing.conf\n"),
+			expected: "which is not a top level config",
+		},
+		{
+			name:     "a config entry with no target",
+			compose:  withConfigEntry(validCompose, "      - source: thing_conf\n"),
+			expected: `config "thing_conf" needs a target`,
+		},
+		{
+			// a file written where nothing mounts it is a file the container
+			// never sees, and the container starting anyway is the worse outcome
+			name:     "a config outside every mount",
+			compose:  withConfigEntry(validCompose, "      - source: thing_conf\n        target: /etc/thing.conf\n"),
+			expected: "not inside any bind mount",
+		},
+		{
+			name:     "two configs seeded to the same path",
+			compose:  withConfigEntry(validCompose, "      - source: thing_conf\n        target: /data/thing.conf\n      - source: thing_conf\n        target: /data/thing.conf\n"),
+			expected: "two configs are seeded to",
+		},
+		{
+			name:     "a mode that is not octal",
+			compose:  withConfigEntry(validCompose, "      - source: thing_conf\n        target: /data/thing.conf\n        mode: \"0o644\"\n"),
+			expected: "not an octal file mode",
 		},
 		{
 			// host mode runs arbitrary code outside a container, so a plugin
@@ -273,5 +312,31 @@ func TestRenderAllDropsEmptyElements(t *testing.T) {
 
 	if strings.Join(rendered, " ") != "memcached -m" {
 		t.Errorf("expected the empty element to be dropped, got %v", rendered)
+	}
+}
+
+func TestParseReadsConfigs(t *testing.T) {
+	compose := withConfigEntry(validCompose, "      - source: thing_conf\n        target: /data/thing.conf\n        mode: \"0640\"\n        uid: \"1001\"\n        gid: \"1001\"\n")
+
+	parsed, err := parseCompose(t, compose, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if expected := "thing = {{ .ServiceName }}\n"; parsed.Configs["thing_conf"].Content != expected {
+		t.Errorf("expected content %q, got %q", expected, parsed.Configs["thing_conf"].Content)
+	}
+
+	if len(parsed.Service.Configs) != 1 {
+		t.Fatalf("expected one config entry, got %d", len(parsed.Service.Configs))
+	}
+
+	entry := parsed.Service.Configs[0]
+	if entry.Source != "thing_conf" || entry.Target != "/data/thing.conf" {
+		t.Errorf("expected thing_conf at /data/thing.conf, got %s at %s", entry.Source, entry.Target)
+	}
+
+	if entry.Mode != "0640" || entry.UID != "1001" || entry.GID != "1001" {
+		t.Errorf("expected 0640 1001:1001, got %s %s:%s", entry.Mode, entry.UID, entry.GID)
 	}
 }

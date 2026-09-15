@@ -17,10 +17,23 @@ services:
         source: "{{ .HostRoot }}/data"
         target: /data
 
+    configs:
+      - source: redis_conf
+        target: /usr/local/etc/redis/redis.conf
+
     ports:
       - name: native
         target: 6379
         primary: true
+
+configs:
+  # seeded once into the config directory and never rewritten, so an operator
+  # editing redis.conf keeps the edit. The Go implementation instead rewrites
+  # the requirepass line on every create, which means a file supplied through
+  # REDIS_CONFIG_PATH becomes the operator's responsibility for auth here.
+  redis_conf:
+    content: |
+      requirepass {{ .Secret.password }}
 
 x-dokku:
   plugin: redis
