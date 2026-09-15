@@ -10,6 +10,7 @@ import (
 
 	"github.com/dokku/dokku-datastore/internal/backend"
 	"github.com/dokku/dokku-datastore/internal/definition"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/image"
 	"github.com/dokku/dokku-datastore/internal/render"
 	"github.com/dokku/dokku-datastore/internal/seed"
@@ -154,10 +155,7 @@ func (s *DefinitionService) CreateServiceContainer(ctx context.Context, input Cr
 		return err
 	}
 
-	if _, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
-		Command: common.DockerBin(),
-		Args:    render.DockerCreateArgs(arguments),
-	}); err != nil {
+	if err := s.createContainer(ctx, input.ServiceName, arguments, cidFilename); err != nil {
 		return err
 	}
 
@@ -179,7 +177,7 @@ func (s *DefinitionService) CreateServiceContainer(ctx context.Context, input Cr
 		return fmt.Errorf("failed to read container ID from %s", cidFilename)
 	}
 
-	if err := backend.Start(ctx, containerID); err != nil {
+	if err := s.startContainer(ctx, input.ServiceName, containerID); err != nil {
 		return err
 	}
 
@@ -232,6 +230,93 @@ func (s *DefinitionService) writePayload(serviceName string) error {
 		if err := os.Chmod(file.Path, file.Mode); err != nil {
 			return fmt.Errorf("unable to set the mode on %s: %w", file.Path, err)
 		}
+	}
+
+	return nil
+}
+
+// backend reports which execution backend a service is driven with.
+func (s *DefinitionService) backend(serviceName string) string {
+	return backend.Select(backend.SelectInput{
+		Recorded: common.ReadFirstLine(Files(s, serviceName).Backend),
+		Default:  hostenv.Backend(),
+	})
+}
+
+// composeInput addresses a service's rendered compose file.
+func (s *DefinitionService) composeInput(serviceName string) backend.ComposeInput {
+	return backend.ComposeInput{
+		File:    Files(s, serviceName).Compose,
+		Project: fmt.Sprintf("dokku-%s-%s", s.Definition.Dokku.Plugin, serviceName),
+	}
+}
+
+// createContainer makes the service container with whichever backend the
+// service is driven by, and records which one that was.
+//
+// The two backends are handed the same resolved values: the argv and the
+// compose file are rendered together, so what they produce is the same
+// container addressed by the same name.
+func (s *DefinitionService) createContainer(ctx context.Context, serviceName string, arguments render.ContainerArgsInput, idFile string) error {
+	selected := s.backend(serviceName)
+
+	if err := s.recordBackend(serviceName, selected); err != nil {
+		return err
+	}
+
+	if selected != backend.Compose {
+		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+			Command: common.DockerBin(),
+			Args:    render.DockerCreateArgs(arguments),
+		})
+
+		return err
+	}
+
+	if err := backend.ComposeCreate(ctx, s.composeInput(serviceName)); err != nil {
+		return err
+	}
+
+	// compose writes no cidfile, so the id every read path reads is taken from
+	// the container it just made
+	containerID := backend.LiveContainerID(ctx, backend.LiveContainerIDInput{
+		ContainerName: arguments.ContainerName,
+	})
+	if containerID == "" {
+		return fmt.Errorf("failed to find the container compose created for %s", serviceName)
+	}
+
+	return common.WriteStringToFile(common.WriteStringToFileInput{
+		Content:   containerID,
+		Filename:  idFile,
+		GroupName: SystemGroup(),
+		Mode:      0644,
+		Username:  SystemUser(),
+	})
+}
+
+// startContainer starts the service container with the service's backend.
+func (s *DefinitionService) startContainer(ctx context.Context, serviceName string, containerID string) error {
+	if s.backend(serviceName) != backend.Compose {
+		return backend.Start(ctx, containerID)
+	}
+
+	return backend.ComposeStart(ctx, s.composeInput(serviceName))
+}
+
+// recordBackend writes which backend made a service, so that a later change to
+// the host default does not address it the other way.
+func (s *DefinitionService) recordBackend(serviceName string, selected string) error {
+	filename := Files(s, serviceName).Backend
+	err := common.WriteStringToFile(common.WriteStringToFileInput{
+		Content:   selected,
+		Filename:  filename,
+		GroupName: SystemGroup(),
+		Mode:      0644,
+		Username:  SystemUser(),
+	})
+	if err != nil {
+		return fmt.Errorf("unable to write %s: %w", filename, err)
 	}
 
 	return nil

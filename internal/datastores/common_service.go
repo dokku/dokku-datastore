@@ -216,6 +216,13 @@ type ServiceFiles struct {
 
 	// ShmSize is the shared memory size file for the service
 	ShmSize string
+
+	// Backend records which execution backend the service was created with, so
+	// that changing the host default does not move a service that already exists
+	Backend string
+
+	// Compose is the rendered compose file describing the service
+	Compose string
 }
 
 // Files returns the files for a service
@@ -234,6 +241,8 @@ func Files(s Datastore, serviceName string) ServiceFiles {
 		Password:      filepath.Join(folders.Root, "PASSWORD"),
 		Port:          filepath.Join(folders.Root, "PORT"),
 		ShmSize:       filepath.Join(folders.Root, "SHM_SIZE"),
+		Backend:       filepath.Join(folders.Root, "BACKEND"),
+		Compose:       filepath.Join(folders.Root, "docker-compose.yml"),
 	}
 }
 
