@@ -44,7 +44,7 @@ jobs:
           echo "$matrix"
 
   docker-test:
-    name: "docker-test (${{ matrix.definition }})"
+    name: "docker-test (${{ matrix.definition }}, ${{ matrix.backend }})"
     runs-on: ubuntu-24.04
     needs: definitions
     strategy:
@@ -52,6 +52,9 @@ jobs:
       fail-fast: false
       matrix:
         definition: ${{ fromJSON(needs.definitions.outputs.matrix) }}
+        # every definition is exercised through both execution backends, since
+        # the whole claim is that they produce the same container
+        backend: ["docker", "compose"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -61,3 +64,24 @@ jobs:
       # no dokku: the binary needs a data root and a user to own what it writes,
       # which keeps this a check of the definition rather than of dokku
       - run: ./tests/definition.sh "${{ matrix.definition }}"
+        env:
+          DOKKU_DATASTORE_BACKEND: ${{ matrix.backend }}
+
+  backend-agreement:
+    name: "backend-agreement (${{ matrix.definition }})"
+    runs-on: ubuntu-24.04
+    needs: definitions
+    strategy:
+      fail-fast: false
+      matrix:
+        definition: ${{ fromJSON(needs.definitions.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: "go.mod"
+      - run: go build -o dokku-datastore .
+      # the same definition through both backends, compared as docker sees it:
+      # a difference here is a bug in the renderer, since both are handed one
+      # set of resolved values
+      - run: ./tests/backends.sh "${{ matrix.definition }}"

@@ -105,12 +105,16 @@ func Compose(input Input) ([]byte, error) {
 	}
 
 	for _, port := range input.Definition.Service.Ports {
-		exposed := fmt.Sprintf("%d", port.Target)
-		if port.Protocol != "" && port.Protocol != "tcp" {
-			exposed = fmt.Sprintf("%d/%s", port.Target, port.Protocol)
+		// always qualified with the protocol. An unqualified port becomes a
+		// key of its own on some docker versions rather than merging with the
+		// one the image already declares, which leaves the container exposing
+		// both 6379 and 6379/tcp and disagreeing with the docker path.
+		protocol := port.Protocol
+		if protocol == "" {
+			protocol = "tcp"
 		}
 
-		service.Expose = append(service.Expose, exposed)
+		service.Expose = append(service.Expose, fmt.Sprintf("%d/%s", port.Target, protocol))
 	}
 
 	if arguments.Memory != "" {

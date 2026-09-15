@@ -92,3 +92,10 @@ func SystemGroup() string {
 func PluginBasePath() string {
 	return os.Getenv("PLUGIN_BASE_PATH")
 }
+
+// Backend is the execution backend new services are created with. A service
+// records the one it was made with, so this only decides for services that do
+// not exist yet.
+func Backend() string {
+	return os.Getenv("DOKKU_DATASTORE_BACKEND")
+}
