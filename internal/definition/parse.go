@@ -2,6 +2,7 @@ package definition
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -12,6 +13,7 @@ import (
 // rather than a surprise at create time.
 type composeFile struct {
 	Services map[string]composeService `yaml:"services"`
+	Configs  map[string]Config         `yaml:"configs"`
 	Dokku    Dokku                     `yaml:"x-dokku"`
 }
 
@@ -69,6 +71,7 @@ func Parse(input ParseInput) (Definition, error) {
 	definition := Definition{
 		Name:       input.Name,
 		Service:    service.Service,
+		Configs:    file.Configs,
 		Dokku:      file.Dokku,
 		Dockerfile: input.Dockerfile,
 		Scripts:    input.Scripts,
@@ -176,6 +179,47 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 
 	if definition.Service.Healthcheck == nil && definition.Dokku.Wait == "" && len(definition.Service.Ports) > 0 {
 		return fail("a definition needs either a healthcheck or x-dokku.wait, or nothing decides when the service is ready")
+	}
+
+	for name, config := range definition.Configs {
+		if config.Content == "" {
+			// compose can also source a config from a file or an external
+			// store; a definition cannot, because the only thing dokku has to
+			// seed from is the definition itself
+			return fail("config %q needs an inline content", name)
+		}
+	}
+
+	seenConfig := map[string]bool{}
+	for _, config := range definition.Service.Configs {
+		if config.Source == "" {
+			return fail("every config entry needs a source naming a top level config")
+		}
+
+		if _, ok := definition.Configs[config.Source]; !ok {
+			return fail("config entry names %q, which is not a top level config", config.Source)
+		}
+
+		if config.Target == "" {
+			return fail("config %q needs a target", config.Source)
+		}
+
+		if seenConfig[config.Target] {
+			return fail("two configs are seeded to %q", config.Target)
+		}
+		seenConfig[config.Target] = true
+
+		// a config outside every bind mount would be written where nothing
+		// mounts it, so the container would never see the file
+		if _, ok := definition.ServicePath(config.Target); !ok {
+			return fail("config %q targets %q, which is not inside any bind mount", config.Source, config.Target)
+		}
+
+		if config.Mode != "" {
+			if _, err := strconv.ParseUint(config.Mode, 8, 32); err != nil {
+				return fail("config %q has mode %q, which is not an octal file mode", config.Source, config.Mode)
+			}
+		}
 	}
 
 	for name, secret := range definition.Dokku.Secrets {

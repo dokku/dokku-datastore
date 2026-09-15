@@ -5,6 +5,11 @@
 // service's state is what produces something runnable.
 package definition
 
+import (
+	"path"
+	"strings"
+)
+
 // Definition is one datastore definition directory.
 type Definition struct {
 	// Name is the directory the definition was loaded from, e.g. "postgres-18".
@@ -19,6 +24,10 @@ type Definition struct {
 
 	// Dokku is the x-dokku block: everything compose has no vocabulary for.
 	Dokku Dokku
+
+	// Configs are the top level configs, keyed by the name a service config
+	// entry names in its source.
+	Configs map[string]Config
 
 	// Dockerfile is the definition's Dockerfile. Its FROM line is the default
 	// image, the way the bash plugins' config derives the image with awk.
@@ -58,6 +67,42 @@ type Service struct {
 	// A definition without one falls back to the dokku/wait sidecar against the
 	// port named by Dokku.Wait.
 	Healthcheck *Healthcheck `yaml:"healthcheck"`
+
+	// Configs are the files seeded into the service's config directory before
+	// the container starts. They replace the hand written config seeding every
+	// plugin does in bash.
+	Configs []ServiceConfig `yaml:"configs"`
+}
+
+// Config is a top level config: a file this definition supplies the content of.
+//
+// This deliberately means something other than what compose means. A docker
+// config is immutable and re-projected on every start, but an operator edits a
+// datastore's config file and expects the edit to survive a restart, so dokku
+// seeds the content once into the bind mounted config directory and never
+// clobbers it afterwards. The consequence is that a credential change would
+// leave a seeded file stale, which nothing needs today.
+type Config struct {
+	// Content is the file's body, templated against the service's state.
+	Content string `yaml:"content"`
+}
+
+// ServiceConfig mounts a top level config into the service.
+type ServiceConfig struct {
+	// Source is the key in the top level configs.
+	Source string `yaml:"source"`
+
+	// Target is the path inside the container, which must fall inside one of the
+	// service's bind mounts or nothing would ever put the file there.
+	Target string `yaml:"target"`
+
+	// UID and GID own the seeded file, for images running as a user that has to
+	// read it. Empty means the dokku user, as every datastore uses today.
+	UID string `yaml:"uid"`
+	GID string `yaml:"gid"`
+
+	// Mode is the octal file mode, defaulting to 0644.
+	Mode string `yaml:"mode"`
 }
 
 // Volume is a compose long-syntax bind mount.
@@ -268,4 +313,58 @@ func (d Definition) Implements(subcommand string) bool {
 	default:
 		return true
 	}
+}
+
+// HostRootTemplate is the prefix every bind mount source starts with. It is
+// matched literally rather than rendered, because the path the tool writes to is
+// ServiceRoot while the path in the source is HostRoot, and the two differ on a
+// docker in docker install.
+const HostRootTemplate = "{{ .HostRoot }}"
+
+// ServicePath maps a path inside the container back to a path relative to the
+// service root, by walking the bind mounts. It is what lets a config declare
+// where the file goes in the container and the tool work out where to write it.
+func (d Definition) ServicePath(target string) (string, bool) {
+	mount := ""
+	resolved := ""
+	found := false
+
+	for _, volume := range d.Service.Volumes {
+		relative, ok := under(volume.Target, target)
+		if !ok {
+			continue
+		}
+
+		// the longest matching mount wins, so a config under a nested mount is
+		// written through that mount rather than through its parent
+		if found && len(path.Clean(volume.Target)) <= len(mount) {
+			continue
+		}
+
+		mount = path.Clean(volume.Target)
+		resolved = path.Join(strings.TrimPrefix(volume.Source, HostRootTemplate), relative)
+		found = true
+	}
+
+	if !found {
+		return "", false
+	}
+
+	return strings.TrimPrefix(resolved, "/"), true
+}
+
+// under reports whether target sits at or below root, and where.
+func under(root string, target string) (string, bool) {
+	root = path.Clean(root)
+	target = path.Clean(target)
+
+	if root == target {
+		return "", true
+	}
+
+	if !strings.HasPrefix(target, root+"/") {
+		return "", false
+	}
+
+	return strings.TrimPrefix(target, root+"/"), true
 }
