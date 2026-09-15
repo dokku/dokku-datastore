@@ -25,8 +25,17 @@ type RunInput struct {
 	// Name is the verb to run: connect, export, import, or an extra subcommand
 	Name string
 
-	// Container is the service container to run in
-	Container string
+	// Names are the service's containers. A service command runs in the service
+	// container; an offline command stops both and runs beside them.
+	Names backend.Names
+
+	// Image is the service's resolved image, which an offline command runs a
+	// throwaway container on so that it sees the same data the service does.
+	Image string
+
+	// Volumes are the service's bind mounts as source:target, which an offline
+	// command needs for the same reason.
+	Volumes []string
 
 	// TTY asks docker for a terminal, which only connect wants and only when
 	// the caller has one to give
@@ -88,7 +97,7 @@ func Resolve(input RunInput) (backend.ExecInput, error) {
 	}
 
 	return backend.ExecInput{
-		Container: input.Container,
+		Container: input.Names.Container,
 		Argv:      argv,
 		Env:       env,
 		User:      command.User,
@@ -105,10 +114,12 @@ func Run(ctx context.Context, input RunInput) error {
 
 	switch command.Mode {
 	case "", definition.ModeService:
+	case definition.ModeOffline:
+		return runOffline(ctx, input)
 	default:
-		// offline, sidecar and host each need machinery that does not exist
-		// yet, and failing here is better than running the command somewhere
-		// other than where the definition asked for
+		// sidecar and host each need machinery that does not exist yet, and
+		// failing here is better than running the command somewhere other than
+		// where the definition asked for
 		return fmt.Errorf("the %s command runs in mode %q, which is not supported yet", input.Name, command.Mode)
 	}
 
@@ -118,4 +129,49 @@ func Run(ctx context.Context, input RunInput) error {
 	}
 
 	return backend.Exec(ctx, exec)
+}
+
+// runOffline runs a command against a service's data with the service down.
+// Redis's import is why this exists: redis reads its dump at boot and writes it
+// again on shutdown, so replacing the file underneath a running server would be
+// undone twice over.
+func runOffline(ctx context.Context, input RunInput) error {
+	exec, err := Resolve(input)
+	if err != nil {
+		return err
+	}
+
+	if input.Image == "" {
+		return fmt.Errorf("the %s command runs offline and so needs the service's image", input.Name)
+	}
+
+	if err := backend.Pause(ctx, backend.PauseInput{Names: input.Names}); err != nil {
+		return err
+	}
+
+	// the service is stopped rather than removed, so that bringing it back is a
+	// start: the container keeps its id, its mounts and its network attachments,
+	// and nothing has to be recreated from a definition that may have moved on
+	runErr := backend.Run(ctx, backend.RunInput{
+		Image:   input.Image,
+		Argv:    exec.Argv,
+		Env:     exec.Env,
+		Volumes: input.Volumes,
+		User:    exec.User,
+		Stdin:   exec.Stdin,
+		Stdout:  exec.Stdout,
+		Stderr:  exec.Stderr,
+	})
+
+	// the service comes back up either way: a datastore left down because an
+	// import failed is a worse outcome than the failed import
+	if err := backend.Resume(ctx, input.Names); err != nil {
+		if runErr != nil {
+			return runErr
+		}
+
+		return err
+	}
+
+	return runErr
 }

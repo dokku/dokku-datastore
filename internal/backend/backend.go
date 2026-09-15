@@ -123,6 +123,20 @@ func Stop(ctx context.Context, container string) error {
 	return nil
 }
 
+// Start starts a container that already exists. It is not create: a stopped
+// service is brought back by starting the container it already has, which is
+// what keeps its id, its mounts and its network attachments.
+func Start(ctx context.Context, container string) error {
+	if _, err := execx.Run(ctx, common.ExecCommandInput{
+		Command: common.DockerBin(),
+		Args:    []string{"container", "start", container},
+	}); err != nil {
+		return fmt.Errorf("failed to start container: %w", err)
+	}
+
+	return nil
+}
+
 // PauseInput is the input for Pause.
 type PauseInput struct {
 	// Names are the service's containers
@@ -148,6 +162,25 @@ func Pause(ctx context.Context, input PauseInput) error {
 	}
 
 	return Stop(ctx, containerID)
+}
+
+// Resume starts a paused service. The order is the reverse of Pause: the
+// datastore comes up before the ambassador starts forwarding to it, so a client
+// reaching the published port never lands on a datastore that is not there yet.
+func Resume(ctx context.Context, names Names) error {
+	if err := Start(ctx, names.Container); err != nil {
+		return err
+	}
+
+	if !Exists(ctx, names.Ambassador) {
+		return nil
+	}
+
+	if err := Start(ctx, names.Ambassador); err != nil {
+		return fmt.Errorf("failed to start ambassador container: %w", err)
+	}
+
+	return nil
 }
 
 // Down stops and removes a service's containers, leaving its data on the host.
