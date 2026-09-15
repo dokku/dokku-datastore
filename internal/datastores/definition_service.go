@@ -117,6 +117,10 @@ func (s *DefinitionService) CreateServiceContainer(ctx context.Context, input Cr
 		return err
 	}
 
+	if err := s.writeScripts(input.ServiceName); err != nil {
+		return err
+	}
+
 	scope := s.scope(input.ServiceName)
 	scope.InitialNetwork = InitialNetwork(input.Datastore, input.ServiceName)
 	if input.TaggedImage != "" {
@@ -143,6 +147,10 @@ func (s *DefinitionService) CreateServiceContainer(ctx context.Context, input Cr
 		IDFile:        cidFilename,
 	})
 	if err != nil {
+		return err
+	}
+
+	if err := s.writeCompose(input.ServiceName, scope, configOptions, serviceFiles.Env, cidFilename); err != nil {
 		return err
 	}
 
@@ -224,6 +232,79 @@ func (s *DefinitionService) writePayload(serviceName string) error {
 		if err := os.Chmod(file.Path, file.Mode); err != nil {
 			return fmt.Errorf("unable to set the mode on %s: %w", file.Path, err)
 		}
+	}
+
+	return nil
+}
+
+// writeScripts writes the definition's hook scripts into the service directory.
+// They run on the host rather than in the container, which is why they are kept
+// apart from the payload and are not mounted anywhere.
+func (s *DefinitionService) writeScripts(serviceName string) error {
+	if len(s.Definition.Scripts) == 0 {
+		return nil
+	}
+
+	root := filepath.Join(Folders(s, serviceName).Root, "bin")
+	if err := os.MkdirAll(root, 0755); err != nil {
+		return fmt.Errorf("unable to create %s: %w", root, err)
+	}
+
+	for name, contents := range s.Definition.Scripts {
+		target := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return fmt.Errorf("unable to create %s: %w", filepath.Dir(target), err)
+		}
+
+		if err := os.WriteFile(target, contents, 0755); err != nil {
+			return fmt.Errorf("unable to write %s: %w", target, err)
+		}
+
+		// applied explicitly, because WriteFile leaves the mode of a file that
+		// already exists alone and a hook that cannot run is a create that fails
+		if err := os.Chmod(target, 0755); err != nil {
+			return fmt.Errorf("unable to set the mode on %s: %w", target, err)
+		}
+	}
+
+	return nil
+}
+
+// writeCompose writes the compose file describing the container about to be
+// created.
+//
+// Nothing reads it yet. It is written here rather than whenever a property
+// changes so that it describes the container that exists rather than the one a
+// later create would make, and it is rendered from the same resolved values as
+// the argv beside it, which is what keeps the two from drifting.
+func (s *DefinitionService) writeCompose(serviceName string, scope definition.Scope, configOptions []string, envFile string, idFile string) error {
+	environment, err := common.FileToSlice(envFile)
+	if err != nil {
+		return fmt.Errorf("unable to read the custom environment from %s: %w", envFile, err)
+	}
+
+	rendered, err := render.Compose(render.Input{
+		Definition:    s.Definition,
+		Scope:         scope,
+		ConfigOptions: configOptions,
+		EnvFile:       envFile,
+		IDFile:        idFile,
+		Environment:   environment,
+	})
+	if err != nil {
+		return err
+	}
+
+	filename := filepath.Join(Folders(s, serviceName).Root, "docker-compose.yml")
+	err = common.WriteStringToFile(common.WriteStringToFileInput{
+		Content:   string(rendered),
+		Filename:  filename,
+		GroupName: SystemGroup(),
+		Mode:      0644,
+		Username:  SystemUser(),
+	})
+	if err != nil {
+		return fmt.Errorf("unable to write %s: %w", filename, err)
 	}
 
 	return nil

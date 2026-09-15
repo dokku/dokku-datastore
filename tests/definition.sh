@@ -54,6 +54,11 @@ dsn="$("$BIN" info "$PLUGIN" "$SERVICE" --dsn)"
 scheme="$(awk '/^  scheme:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose.yml")"
 [[ "$dsn" == "$scheme://"* ]] || fail "expected a $scheme connection string, got '$dsn'"
 
+echo "==> $DEFINITION: the rendered compose file is valid"
+compose="$DOKKU_LIB_ROOT/services/$PLUGIN/$SERVICE/docker-compose.yml"
+[[ -f "$compose" ]] || fail "no compose file was written"
+docker compose --file "$compose" config --quiet || fail "the rendered compose file is not valid"
+
 echo "==> $DEFINITION: export and import round trip"
 probe="tests/probes/$DEFINITION.sh"
 if [[ -x "$probe" ]]; then

@@ -29,6 +29,11 @@ type Input struct {
 	// id to and reads the custom environment from.
 	IDFile  string
 	EnvFile string
+
+	// Environment are the service's custom environment lines, as KEY=value.
+	// The docker path passes the file itself; the rendered compose file cannot,
+	// so it carries the values.
+	Environment []string
 }
 
 // ContainerArgs resolves a definition into the input for the container argv
@@ -76,10 +81,23 @@ func ContainerArgs(input Input) (ContainerArgsInput, error) {
 		EnvFile:        input.EnvFile,
 		IDFile:         input.IDFile,
 		InitialNetwork: input.Scope.InitialNetwork,
-		Memory:         input.Scope.Memory,
+		Memory:         memoryLimit(input.Scope.Memory),
 		NetworkAlias:   input.Scope.Host,
 		ShmSize:        input.Scope.ShmSize,
 		TaggedImage:    image,
 		Volumes:        volumes,
 	}, nil
+}
+
+// memoryLimit drops a limit of zero.
+//
+// The memory file holds "0" for a service that was never given a limit, which
+// docker reads as unlimited and so does compose. Emitting it says nothing, and
+// saying nothing is what a service without a limit should emit.
+func memoryLimit(memory string) string {
+	if memory == "0" {
+		return ""
+	}
+
+	return memory
 }
