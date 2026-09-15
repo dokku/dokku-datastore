@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/backend"
+	"github.com/dokku/dokku-datastore/internal/cron"
 
 	"github.com/dokku/dokku/plugins/common"
 )
@@ -452,16 +453,9 @@ func RemoveBackupSchedule(ctx context.Context, input RemoveBackupScheduleInput) 
 		return nil
 	}
 
-	// run with sudo
-	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
-		Command: "sudo",
-		Args:    []string{"rm", "-f", serviceFiles.CronFile},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to remove cron file: %w", err)
-	}
-
-	return nil
+	// the cron directory belongs to root, so the removal goes through the helper
+	// the plugin installs and the dokku group is granted
+	return cron.Remove(ctx, input.Datastore.Properties().CommandPrefix, input.ServiceName)
 }
 
 // RemoveContainer removes a container
