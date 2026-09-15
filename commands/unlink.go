@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
@@ -187,18 +188,32 @@ func (c *UnlinkCommand) Run(args []string) int {
 		return 1
 	}
 
-	if err := common.VerifyAppName(appName); err != nil {
-		logger.Error(internal.ErrorInput{
-			Error: err,
-		})
-		return 1
-	}
-
+	// the service is checked first, because whether a missing app is an error
+	// depends on whether this service is linked to it
 	if !datastores.Exists(ctx, datastore, serviceName) {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("service %s does not exist", serviceName),
 		})
 		return 1
+	}
+
+	if err := common.VerifyAppName(appName); err != nil {
+		// a link to an app that has been deleted still has to be removable, or
+		// the service can never be destroyed and its data never recovered: this
+		// is the only command that can take the name out of the links file. An
+		// app that was never linked stays an error, so a typo is not accepted
+		// silently.
+		linked := slices.Contains(datastores.LinkedApps(ctx, datastores.LinkedAppsInput{
+			Datastore:   datastore,
+			ServiceName: serviceName,
+		}), appName)
+
+		if !linked || datastores.AppExists(appName) {
+			logger.Error(internal.ErrorInput{
+				Error: err,
+			})
+			return 1
+		}
 	}
 
 	if c.noRestart {

@@ -345,6 +345,35 @@ func LinkedApps(ctx context.Context, input LinkedAppsInput) []string {
 	return lines
 }
 
+// AppExists reports whether an app is still on disk.
+//
+// Deliberately a directory check rather than common.VerifyAppName, which also
+// applies the user-auth filtering: an app the current user cannot see is still
+// an app, and treating it as gone would let one user destroy a datastore that
+// another user's app is using.
+func AppExists(appName string) bool {
+	return common.DirectoryExists(common.AppRoot(appName))
+}
+
+// LiveLinkedApps returns the linked apps that still exist.
+//
+// An app deleted while this plugin could not see it - because the plugin was
+// disabled, or because the app was removed outside dokku - leaves its name in
+// the links file. Counting that as a live link makes the service impossible to
+// destroy, since unlink refuses to act on an app that is not there and destroy
+// refuses while the file names one.
+func LiveLinkedApps(ctx context.Context, input LinkedAppsInput) []string {
+	linkedApps := LinkedApps(ctx, input)
+	live := make([]string, 0, len(linkedApps))
+	for _, appName := range linkedApps {
+		if AppExists(appName) {
+			live = append(live, appName)
+		}
+	}
+
+	return live
+}
+
 // writeLinkedApps writes the links file for a service, deduplicated and sorted,
 // matching what the bash datastore plugins produce
 func writeLinkedApps(s Datastore, serviceName string, apps []string) error {
