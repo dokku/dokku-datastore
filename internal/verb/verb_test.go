@@ -55,7 +55,7 @@ func redisInput(t *testing.T, name string) RunInput {
 		Definition: redisDefinition(t),
 		Scope:      redisScope(),
 		Name:       name,
-		Container:  "dokku.redis.lollipop",
+		Names:      backend.Names{Container: "dokku.redis.lollipop", Ambassador: "dokku.redis.lollipop.ambassador"},
 	}
 }
 
@@ -130,8 +130,8 @@ func TestResolveRendersTemplates(t *testing.T) {
 			Database:    "lollipop",
 			Secret:      map[string]string{"password": "hunter2"},
 		},
-		Name:      "connect",
-		Container: "dokku.postgres.lollipop",
+		Name:  "connect",
+		Names: backend.Names{Container: "dokku.postgres.lollipop"},
 	}
 
 	resolved, err := Resolve(input)
@@ -186,10 +186,9 @@ func TestResolveReportsATemplateError(t *testing.T) {
 }
 
 func TestRunRefusesAModeItCannotHonour(t *testing.T) {
-	// running an offline command in the service container would apply it to a
-	// running server, which for redis's import means writing a dump file the
-	// server has already read and will overwrite on shutdown
-	for _, mode := range []string{definition.ModeOffline, definition.ModeSidecar, definition.ModeHost} {
+	// running a sidecar or host command in the service container would run it
+	// somewhere other than where the definition asked for
+	for _, mode := range []string{definition.ModeSidecar, definition.ModeHost} {
 		t.Run(mode, func(t *testing.T) {
 			input := commandInput(definition.Command{
 				Exec: []string{"true"},
@@ -216,8 +215,26 @@ func commandInput(command definition.Command, scope definition.Scope) RunInput {
 				Commands: map[string]definition.Command{"connect": command},
 			},
 		},
-		Scope:     scope,
-		Name:      "connect",
-		Container: "dokku.example.lollipop",
+		Scope: scope,
+		Name:  "connect",
+		Names: backend.Names{Container: "dokku.example.lollipop"},
+	}
+}
+
+func TestRunOfflineNeedsTheServiceImage(t *testing.T) {
+	// without it there is nothing to run the command in, and finding that out
+	// after stopping the service would leave the datastore down for nothing
+	input := commandInput(definition.Command{
+		Exec: []string{"sh", "-c", "cat > /data/dump.rdb"},
+		Mode: definition.ModeOffline,
+	}, definition.Scope{})
+
+	err := Run(t.Context(), input)
+	if err == nil {
+		t.Fatal("expected an offline command with no image to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "image") {
+		t.Errorf("expected the error to mention the image, got %q", err)
 	}
 }
