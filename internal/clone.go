@@ -79,6 +79,7 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 		PostStartNetworks:  input.PostStartNetworks,
 		ServiceName:        input.NewServiceName,
 		ShmSize:            input.ShmSize,
+		Logger:             input.Logger,
 	}); err != nil {
 		return err
 	}

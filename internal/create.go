@@ -75,6 +75,9 @@ type CreateServiceInput struct {
 
 	// ShmSize is the shared memory size to use for the service
 	ShmSize string
+
+	// Logger reports what is being waited on once the container exists
+	Logger Ui
 }
 
 // CreateService creates a new service
@@ -210,5 +213,11 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return fmt.Errorf("failed to call service-action post-create-complete trigger: %w", err)
 	}
 
-	return nil
+	// waited on here rather than by the caller, so that every path which creates
+	// a service gets a service that answers rather than one that merely exists
+	return WaitForService(ctx, WaitForServiceInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		Logger:      input.Logger,
+	})
 }
