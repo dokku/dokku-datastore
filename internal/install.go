@@ -13,9 +13,12 @@ import (
 )
 
 // StagedCronFile is where a cron entry is written before the helper moves it
-// into the root owned cron directory.
-func StagedCronFile(s datastores.Datastore) string {
-	return filepath.Join(datastores.PluginDataRoot, s.Properties().CommandPrefix, ".TMP_CRON_FILE")
+// into the root owned cron directory. It lives inside the service rather than
+// beside it: the directory holding the services is enumerated to list them, so
+// a staged file there is reported as a service of its own, which is what an
+// interrupted schedule used to leave behind.
+func StagedCronFile(s datastores.Datastore, serviceName string) string {
+	return filepath.Join(datastores.Folders(s, serviceName).Root, ".TMP_CRON_FILE")
 }
 
 // SudoersContents returns the sudoers file a datastore plugin installs
@@ -30,7 +33,7 @@ func SudoersFile(s datastores.Datastore) common.WriteStringToFileInput {
 
 // CronHelperFile describes the helper script the sudoers file grants.
 func CronHelperFile(s datastores.Datastore) common.WriteStringToFileInput {
-	return cron.HelperFile(s.Properties().CommandPrefix, StagedCronFile(s))
+	return cron.HelperFile(s.Properties().CommandPrefix, filepath.Join(datastores.PluginDataRoot, s.Properties().CommandPrefix))
 }
 
 // InstallInput is the input for the Install function
@@ -108,6 +111,16 @@ func Install(ctx context.Context, input InstallInput) error {
 // migrateServices brings services created by older versions of the plugin up to
 // the layout the current one expects
 func migrateServices(ctx context.Context, input InstallInput) error {
+	// earlier versions staged a cron entry beside the services rather than
+	// inside one, where listing the services reported it as a service of its
+	// own. An interrupted schedule left one behind, so clear it.
+	strayCronFile := filepath.Join(datastores.PluginDataRoot, input.Datastore.Properties().CommandPrefix, ".TMP_CRON_FILE")
+	if common.FileExists(strayCronFile) {
+		if err := os.Remove(strayCronFile); err != nil {
+			return fmt.Errorf("unable to remove %s: %w", strayCronFile, err)
+		}
+	}
+
 	services, err := ListServices(ctx, ListServicesInput{Datastore: input.Datastore})
 	if err != nil {
 		return fmt.Errorf("failed to list services: %w", err)

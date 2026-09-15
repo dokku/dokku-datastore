@@ -50,7 +50,7 @@ set -eo pipefail
 # plugin install and update.
 
 PLUGIN=%[1]q
-STAGED_CRON_FILE=%[2]q
+DATA_ROOT=%[2]q
 
 usage() {
   echo "usage: $(basename "$0") install <service>" >&2
@@ -76,14 +76,18 @@ main() {
   validate_service "$service"
   declare cron_file="/etc/cron.d/dokku-${PLUGIN}-${service}"
 
+  # derived from the name that was just validated, so this is still a path the
+  # caller cannot choose
+  declare staged_cron_file="${DATA_ROOT}/${service}/.TMP_CRON_FILE"
+
   case "$action" in
     install)
-      if [[ ! -f "$STAGED_CRON_FILE" ]]; then
-        echo "no cron file staged at $STAGED_CRON_FILE" >&2
+      if [[ ! -f "$staged_cron_file" ]]; then
+        echo "no cron file staged at $staged_cron_file" >&2
         exit 1
       fi
 
-      mv "$STAGED_CRON_FILE" "$cron_file"
+      mv "$staged_cron_file" "$cron_file"
       chown root:root "$cron_file"
       chmod 644 "$cron_file"
       ;;
@@ -99,17 +103,19 @@ main() {
 main "$@"
 `
 
-// HelperContents returns the helper script for a datastore.
-func HelperContents(plugin string, stagedCronFile string) string {
-	return fmt.Sprintf(helperTemplate, plugin, stagedCronFile)
+// HelperContents returns the helper script for a datastore. The data root is
+// where that datastore's services live, so that the helper can derive a staged
+// path from the service name it validates rather than being handed one.
+func HelperContents(plugin string, dataRoot string) string {
+	return fmt.Sprintf(helperTemplate, plugin, dataRoot)
 }
 
 // HelperFile describes the helper script a datastore plugin installs. It belongs
 // to root and is not group writable, so that the group allowed to run it as root
 // cannot change what it does.
-func HelperFile(plugin string, stagedCronFile string) common.WriteStringToFileInput {
+func HelperFile(plugin string, dataRoot string) common.WriteStringToFileInput {
 	return common.WriteStringToFileInput{
-		Content:   HelperContents(plugin, stagedCronFile),
+		Content:   HelperContents(plugin, dataRoot),
 		Filename:  HelperPath(plugin),
 		GroupName: "root",
 		Mode:      0755,

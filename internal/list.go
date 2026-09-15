@@ -29,9 +29,17 @@ func ListServices(ctx context.Context, input ListServicesInput) ([]string, error
 		return nil, err
 	}
 
-	services := make([]string, len(subfolders))
-	for i, subfolder := range subfolders {
-		services[i] = subfolder.Name()
+	services := make([]string, 0, len(subfolders))
+	for _, subfolder := range subfolders {
+		// a service is a directory, so a stray file here is not one. Regular
+		// files are skipped rather than non directories, because a service root
+		// symlinked onto another disk is still a service and requiring IsDir
+		// would stop listing it.
+		if subfolder.Type().IsRegular() {
+			continue
+		}
+
+		services = append(services, subfolder.Name())
 	}
 
 	services, err = datastores.FilterServices(ctx, datastores.FilterServicesInput{

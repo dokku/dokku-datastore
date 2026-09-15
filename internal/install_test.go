@@ -66,9 +66,11 @@ func TestCronHelperIsOwnedByRoot(t *testing.T) {
 		t.Errorf("expected the helper to validate the service name, got:\n%s", file.Content)
 	}
 
-	// it may only move the one staged path, not whatever it is handed
-	if !strings.Contains(file.Content, `STAGED_CRON_FILE="/var/lib/dokku/services/redis/.TMP_CRON_FILE"`) {
-		t.Errorf("expected the helper to name the staged cron file, got:\n%s", file.Content)
+	// the staged path is derived from the validated service name, and sits
+	// inside the service rather than beside it where listing the services would
+	// report it as a service of its own
+	if !strings.Contains(file.Content, `DATA_ROOT="/var/lib/dokku/services/redis"`) {
+		t.Errorf("expected the helper to name the data root, got:\n%s", file.Content)
 	}
 }
 
@@ -85,5 +87,31 @@ func TestSudoersFileIsOwnedByRoot(t *testing.T) {
 	}
 	if file.Filename != "/etc/sudoers.d/dokku-redis" {
 		t.Errorf("expected /etc/sudoers.d/dokku-redis, got %s", file.Filename)
+	}
+}
+
+// The staged path is worked out twice, once in Go to write the file and once in
+// bash to move it, from two separately derived roots. They agree today, and if
+// they ever stop agreeing every backup-schedule fails with "no cron file staged
+// at", so the agreement is pinned by reading the path back out of the generated
+// helper rather than restating it.
+func TestTheHelperStagesWhereTheBinaryWrites(t *testing.T) {
+	datastore := datastores.Datastores["redis"]
+
+	dataRoot := ""
+	for _, line := range strings.Split(CronHelperFile(datastore).Content, "\n") {
+		if value, found := strings.CutPrefix(line, "DATA_ROOT="); found {
+			dataRoot = strings.Trim(value, `"`)
+			break
+		}
+	}
+
+	if dataRoot == "" {
+		t.Fatal("the helper does not set DATA_ROOT")
+	}
+
+	expected := dataRoot + "/lollipop/.TMP_CRON_FILE"
+	if actual := StagedCronFile(datastore, "lollipop"); actual != expected {
+		t.Errorf("the binary writes %s but the helper moves %s", actual, expected)
 	}
 }
