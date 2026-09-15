@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/execx"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku/plugins/common"
 )
 
@@ -44,22 +46,7 @@ func AttachNetworksToContainer(ctx context.Context, input AttachNetworksToContai
 
 // CallExecCommandWithContext calls a command with a context
 func CallExecCommandWithContext(ctx context.Context, input common.ExecCommandInput) (common.ExecCommandResponse, error) {
-	if os.Getenv("TRACE") != "" {
-		input.PrintCommand = true
-	}
-	result, err := common.CallExecCommandWithContext(ctx, input)
-	if err != nil {
-		return result, err
-	}
-	if result.ExitCode != 0 {
-		if input.StreamStderr {
-			return result, errors.New("command exited non-zero")
-		}
-
-		return result, fmt.Errorf("command exited non-zero: %s", result.StderrContents())
-	}
-
-	return result, nil
+	return execx.Run(ctx, input)
 }
 
 // CommitServiceConfigInput is the input for the CommitServiceConfig function
@@ -390,15 +377,9 @@ func FilterServices(ctx context.Context, input FilterServicesInput) ([]string, e
 	return filteredServices, nil
 }
 
-// CallPlugnTrigger calls a plugin trigger
+// CallPlugnTriggerWithContext calls a plugin trigger
 func CallPlugnTriggerWithContext(ctx context.Context, input common.PlugnTriggerInput) (common.ExecCommandResponse, error) {
-	if os.Getenv("PLUGIN_PATH") == "" {
-		return common.ExecCommandResponse{
-			ExitCode: 0,
-		}, nil
-	}
-
-	return common.CallPlugnTriggerWithContext(ctx, input)
+	return execx.PlugnTrigger(ctx, input)
 }
 
 // ServicePortReconcileStatusInput is the input for the ServicePortReconcileStatus function
@@ -484,20 +465,12 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 
 // SystemGroup returns the system group
 func SystemGroup() string {
-	systemGroup := os.Getenv("DOKKU_SYSTEM_GROUP")
-	if systemGroup == "" {
-		systemGroup = "dokku"
-	}
-	return systemGroup
+	return hostenv.SystemGroup()
 }
 
 // SystemUser returns the system user
 func SystemUser() string {
-	systemUser := os.Getenv("DOKKU_SYSTEM_USER")
-	if systemUser == "" {
-		systemUser = "dokku"
-	}
-	return systemUser
+	return hostenv.SystemUser()
 }
 
 // MissingServiceNameMessage is the message emitted when a service name is not

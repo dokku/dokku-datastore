@@ -3,8 +3,8 @@ package datastores
 import (
 	"context"
 	"io"
-	"os"
-	"path/filepath"
+
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 )
 
 // ServiceStruct is the structure for a service
@@ -144,31 +144,23 @@ var (
 var Datastores = map[string]Datastore{}
 
 // PluginAmbassadorImage is the ambassador image
-var PluginAmbassadorImage = "dokku/ambassador:0.8.2"
+var PluginAmbassadorImage = hostenv.AmbassadorImage
 
 // PluginS3BackupImage is the image used to ship backups to s3
-var PluginS3BackupImage = "dokku/s3backup:0.18.0"
+var PluginS3BackupImage = hostenv.S3BackupImage
 
 // PluginBusyboxImage is the busybox image
-var PluginBusyboxImage = "busybox:1.37.0-uclibc"
+var PluginBusyboxImage = hostenv.BusyboxImage
 
 // PluginWaitImage is the wait image
-var PluginWaitImage = "dokku/wait:0.9.3"
+var PluginWaitImage = hostenv.WaitImage
 
 // init initializes the services
 func init() {
-	DokkuLibRoot = os.Getenv("DOKKU_LIB_ROOT")
-	if DokkuLibRoot == "" {
-		DokkuLibRoot = "/var/lib/dokku"
-	}
-
-	DokkuLibHostRoot = os.Getenv("DOKKU_LIB_HOST_ROOT")
-	if DokkuLibHostRoot == "" {
-		DokkuLibHostRoot = DokkuLibRoot
-	}
-
-	PluginPath = filepath.Join(DokkuLibRoot, "plugins")
-	PluginDataRoot = filepath.Join(DokkuLibRoot, "services")
+	DokkuLibRoot = hostenv.LibRoot()
+	DokkuLibHostRoot = hostenv.LibHostRoot()
+	PluginPath = hostenv.PluginPath()
+	PluginDataRoot = hostenv.DataRoot()
 
 	Datastores["redis"] = &RedisService{}
 }
