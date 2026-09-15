@@ -129,10 +129,15 @@ func TestModeFor(t *testing.T) {
 	}
 }
 
-// Building eighteen definitions that only declare a base would turn every
-// trigger-install into a build, which is slower and fails differently on a host
-// with a constrained builder.
-func TestNoEmbeddedDefinitionBuildsYet(t *testing.T) {
+// Which definitions build is worth stating rather than discovering: a build is
+// slower than a pull and fails differently on a host with a constrained builder,
+// and each one needs its own matrix leg. Building the definitions that only
+// declare a base would turn every trigger-install into a build for no gain.
+func TestWhichEmbeddedDefinitionsBuild(t *testing.T) {
+	// redis vendors its dump scripts into the image, so that the dump streams
+	// out of the container rather than being buffered through the tool
+	builds := map[string]bool{"redis": true}
+
 	loaded, err := registry.Load(registry.LoadInput{})
 	if err != nil {
 		t.Fatalf("unable to load the registry: %s", err)
@@ -144,8 +149,30 @@ func TestNoEmbeddedDefinitionBuildsYet(t *testing.T) {
 			t.Fatalf("expected a definition named %s", name)
 		}
 
-		if found.Builds {
-			t.Errorf("%s builds, which needs its own matrix leg and a note in the pull path", name)
+		if found.Builds != builds[name] {
+			t.Errorf("%s builds=%v, which this test does not know about", name, found.Builds)
+		}
+	}
+}
+
+// A vendored script that arrives in the image unable to run fails at export
+// time, long after anyone would connect it to the Dockerfile.
+func TestEmbeddedRootfsScriptsAreExecutable(t *testing.T) {
+	loaded, err := registry.Load(registry.LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	for _, name := range loaded.Names() {
+		found, _ := loaded.Definition(name)
+		for file := range found.Rootfs {
+			if !strings.Contains(file, "/bin/") {
+				continue
+			}
+
+			if ModeFor(file) != executableMode {
+				t.Errorf("%s: %s is not executable", name, file)
+			}
 		}
 	}
 }

@@ -93,21 +93,85 @@ func TestResolveKeepsTheRedisPasswordOutOfArgv(t *testing.T) {
 }
 
 func TestResolveReportsAnUndeclaredVerb(t *testing.T) {
-	// redis declares no export until the dump script is baked into the image,
-	// which is what makes redis:export unimplemented rather than broken
-	_, err := Resolve(redisInput(t, "export"))
+	// connect-admin is mongo's, and redis declaring nothing by that name is
+	// what makes it unimplemented rather than broken
+	_, err := Resolve(redisInput(t, "connect-admin"))
 
 	notImplemented := ErrNotImplemented{}
 	if !errors.As(err, &notImplemented) {
 		t.Fatalf("expected an ErrNotImplemented, got %v", err)
 	}
 
-	if notImplemented.Plugin != "redis" || notImplemented.Name != "export" {
-		t.Errorf("expected redis/export, got %s/%s", notImplemented.Plugin, notImplemented.Name)
+	if notImplemented.Plugin != "redis" || notImplemented.Name != "connect-admin" {
+		t.Errorf("expected redis/connect-admin, got %s/%s", notImplemented.Plugin, notImplemented.Name)
 	}
 
-	if expected := "redis does not implement export"; err.Error() != expected {
+	if expected := "redis does not implement connect-admin"; err.Error() != expected {
 		t.Errorf("expected %q, got %q", expected, err.Error())
+	}
+}
+
+func TestResolveRedisExport(t *testing.T) {
+	resolved, err := Resolve(redisInput(t, "export"))
+	if err != nil {
+		t.Fatalf("unable to resolve export: %s", err)
+	}
+
+	expected := "container exec --env=REDISCLI_AUTH=hunter2 -i dokku.redis.lollipop dokku-redis-export"
+	if actual := strings.Join(backend.ExecArgs(resolved), " "); actual != expected {
+		t.Errorf("expected:\n%s\ngot:\n%s", expected, actual)
+	}
+}
+
+// The dump is replaced with the server down, so import runs in a throwaway
+// container on the service's own mounts rather than in the service container.
+func TestResolveRedisImportRunsOffline(t *testing.T) {
+	redis := redisDefinition(t)
+
+	command, ok := redis.Dokku.Commands["import"]
+	if !ok {
+		t.Fatal("expected redis to declare import")
+	}
+
+	if command.Mode != definition.ModeOffline {
+		t.Errorf("expected import to run offline, got mode %q", command.Mode)
+	}
+
+	if !command.Stdin {
+		t.Error("expected import to consume stdin")
+	}
+
+	input := redisInput(t, "import")
+	input.Image = "dokku/datastore-redis:8.8.0"
+	input.Volumes = []string{"/var/lib/dokku/services/redis/lollipop/data:/data"}
+
+	resolved, err := Resolve(input)
+	if err != nil {
+		t.Fatalf("unable to resolve import: %s", err)
+	}
+
+	expected := "container run --rm --volume=/var/lib/dokku/services/redis/lollipop/data:/data -i dokku/datastore-redis:8.8.0 dokku-redis-import"
+	actual := strings.Join(backend.RunArgs(backend.RunInput{
+		Image:   input.Image,
+		Argv:    resolved.Argv,
+		Env:     resolved.Env,
+		Volumes: input.Volumes,
+	}), " ")
+
+	if actual != expected {
+		t.Errorf("expected:\n%s\ngot:\n%s", expected, actual)
+	}
+}
+
+// Both come from export and import being declared, which is the only statement
+// of what a datastore can do.
+func TestRedisImplementsTheDumpFamily(t *testing.T) {
+	redis := redisDefinition(t)
+
+	for _, subcommand := range []string{"export", "import", "clone", "backup", "backup-schedule"} {
+		if !redis.Implements(subcommand) {
+			t.Errorf("expected redis to implement %s", subcommand)
+		}
 	}
 }
 
