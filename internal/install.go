@@ -7,38 +7,30 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/cron"
 	"github.com/dokku/dokku-datastore/internal/datastores"
 	"github.com/dokku/dokku/plugins/common"
 )
 
-// sudoersTemplate grants the dokku group the handful of root commands the
-// backup schedule needs. The cron directory belongs to root, so the file has to
-// be moved into place and given its ownership through sudo.
-const sudoersTemplate = `%%dokku ALL=(ALL) NOPASSWD:/bin/rm -f /etc/cron.d/dokku-%[1]s-*
-%%dokku ALL=(ALL) NOPASSWD:/bin/chown root\:root /etc/cron.d/dokku-%[1]s-*
-%%dokku ALL=(ALL) NOPASSWD:/bin/chmod 644 /etc/cron.d/dokku-%[1]s-*
-%%dokku ALL=(ALL) NOPASSWD:/bin/mv %[2]s/.TMP_CRON_FILE /etc/cron.d/dokku-%[1]s-*
-%%dokku ALL=(ALL) NOPASSWD:/bin/chown 8983 %[2]s/*
-%%dokku ALL=(ALL) NOPASSWD:/bin/chgrp 8983 %[2]s/*
-`
+// StagedCronFile is where a cron entry is written before the helper moves it
+// into the root owned cron directory.
+func StagedCronFile(s datastores.Datastore) string {
+	return filepath.Join(datastores.PluginDataRoot, s.Properties().CommandPrefix, ".TMP_CRON_FILE")
+}
 
 // SudoersContents returns the sudoers file a datastore plugin installs
 func SudoersContents(s datastores.Datastore) string {
-	commandPrefix := s.Properties().CommandPrefix
-	return fmt.Sprintf(sudoersTemplate, commandPrefix, filepath.Join(datastores.PluginDataRoot, commandPrefix))
+	return cron.SudoersContents(s.Properties().CommandPrefix)
 }
 
-// SudoersFile describes the sudoers file a datastore plugin installs. It has to
-// belong to root: sudo refuses a file writable by anyone else, and the dokku
-// user must not be able to rewrite the privileges it is being granted.
+// SudoersFile describes the sudoers file a datastore plugin installs.
 func SudoersFile(s datastores.Datastore) common.WriteStringToFileInput {
-	return common.WriteStringToFileInput{
-		Content:   SudoersContents(s),
-		Filename:  filepath.Join("/etc/sudoers.d", fmt.Sprintf("dokku-%s", s.Properties().CommandPrefix)),
-		GroupName: "root",
-		Mode:      0440,
-		Username:  "root",
-	}
+	return cron.SudoersFile(s.Properties().CommandPrefix)
+}
+
+// CronHelperFile describes the helper script the sudoers file grants.
+func CronHelperFile(s datastores.Datastore) common.WriteStringToFileInput {
+	return cron.HelperFile(s.Properties().CommandPrefix, StagedCronFile(s))
 }
 
 // InstallInput is the input for the Install function
@@ -92,6 +84,17 @@ func Install(ctx context.Context, input InstallInput) error {
 	}
 	if err := CreateServiceFolders(folders, datastores.SystemUser(), datastores.SystemGroup()); err != nil {
 		return err
+	}
+
+	helperFile := CronHelperFile(input.Datastore)
+	if err := os.MkdirAll(filepath.Dir(helperFile.Filename), 0755); err != nil {
+		return fmt.Errorf("unable to create %s: %w", filepath.Dir(helperFile.Filename), err)
+	}
+
+	// the helper goes in first, so the sudoers rule never names a script that is
+	// not there yet
+	if err := common.WriteStringToFile(helperFile); err != nil {
+		return fmt.Errorf("unable to write %s: %w", helperFile.Filename, err)
 	}
 
 	sudoersFile := SudoersFile(input.Datastore)

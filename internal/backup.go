@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/dokku/dokku-datastore/internal/cron"
 	"github.com/dokku/dokku-datastore/internal/datastores"
 	"github.com/dokku/dokku/plugins/common"
 )
@@ -168,10 +169,9 @@ type ScheduleBackupInput struct {
 // ScheduleBackup writes the cron entry that backs a service up on a schedule
 func ScheduleBackup(ctx context.Context, input ScheduleBackupInput) error {
 	commandPrefix := input.Datastore.Properties().CommandPrefix
-	cronFile := datastores.Files(input.Datastore, input.ServiceName).CronFile
-	// the sudoers rule the plugin installs only permits moving this exact path,
-	// which is rooted at the plugin's own data directory rather than the shared one
-	tmpCronFile := filepath.Join(datastores.PluginDataRoot, commandPrefix, ".TMP_CRON_FILE")
+	// the helper only moves this exact path, which is rooted at the plugin's own
+	// data directory rather than the shared one
+	tmpCronFile := StagedCronFile(input.Datastore)
 
 	dokkuBin, err := exec.LookPath("dokku")
 	if err != nil {
@@ -191,22 +191,9 @@ func ScheduleBackup(ctx context.Context, input ScheduleBackupInput) error {
 		return fmt.Errorf("unable to write %s: %w", tmpCronFile, err)
 	}
 
-	// the cron directory belongs to root, so the file is moved into place and
-	// given its final ownership through the sudoers entries the plugin installs
-	for _, args := range [][]string{
-		{"/bin/mv", tmpCronFile, cronFile},
-		{"/bin/chown", "root:root", cronFile},
-		{"/bin/chmod", "644", cronFile},
-	} {
-		if _, err := datastores.CallExecCommandWithContext(ctx, common.ExecCommandInput{
-			Command: "sudo",
-			Args:    args,
-		}); err != nil {
-			return fmt.Errorf("unable to install the cron file: %w", err)
-		}
-	}
-
-	return nil
+	// the cron directory belongs to root, so the staged file is moved into place
+	// by the helper the plugin installs and the dokku group is granted
+	return cron.Install(ctx, commandPrefix, input.ServiceName)
 }
 
 // BackupInput is the input for the Backup function
