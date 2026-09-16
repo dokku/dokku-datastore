@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
+	"strings"
 )
 
 // TestEveryEmbeddedDefinitionLoads is the check that stops a broken definition
@@ -335,5 +337,56 @@ func TestMemcachedImplementsOnlyWhatItCan(t *testing.T) {
 
 	if len(memcached.Service.Volumes) != 0 {
 		t.Errorf("expected no volumes, got %v", memcached.Service.Volumes)
+	}
+}
+
+// Couchdb's sidecar image is one dokku already ships, so it is pinned in two
+// places: here and in the tool. They have to be the same image, or a service
+// would reach for one that was never pulled.
+func TestCouchdbSidecarImageIsOnePluginShips(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	couchdb, ok := loaded.Definition("couchdb")
+	if !ok {
+		t.Fatal("expected a couchdb definition")
+	}
+
+	commands := map[string]definition.Command{
+		"export":            couchdb.Dokku.Commands["export"],
+		"import":            couchdb.Dokku.Commands["import"],
+		"hooks.post_create": *couchdb.Dokku.Hooks.PostCreate,
+	}
+
+	for name, command := range commands {
+		if command.Image != hostenv.S3BackupImage {
+			t.Errorf("%s runs in %q, which is not the image the plugin pulls (%q)", name, command.Image, hostenv.S3BackupImage)
+		}
+	}
+}
+
+// The bash plugin downloads a dump tool into the running container on every
+// export and import, from a branch rather than a tag.
+func TestCouchdbFetchesNothingAtRuntime(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	couchdb, _ := loaded.Definition("couchdb")
+	for name, command := range couchdb.Dokku.Commands {
+		for _, argument := range command.Exec {
+			if strings.Contains(argument, "http://") || strings.Contains(argument, "https://") {
+				t.Errorf("%s reaches out to %q", name, argument)
+			}
+		}
+	}
+
+	for path := range couchdb.Rootfs {
+		if strings.Contains(string(couchdb.Rootfs[path]), "githubusercontent") {
+			t.Errorf("%s fetches from github", path)
+		}
 	}
 }

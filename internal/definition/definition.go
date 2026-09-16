@@ -206,6 +206,11 @@ type Dokku struct {
 	// under the service root, keyed by the name templates refer to them by.
 	Secrets map[string]Secret `yaml:"secrets"`
 
+	// Hooks are the steps a datastore needs run around a service's lifecycle,
+	// which are commands in every respect except that they are not subcommands:
+	// a user does not invoke them, the tool does.
+	Hooks Hooks `yaml:"hooks"`
+
 	// CustomCommands are the operations this datastore adds, which the tool
 	// knows nothing about beyond how to run them. They are declared apart from
 	// Commands so that being custom is a fact about the definition rather than
@@ -265,6 +270,15 @@ type Command struct {
 	// command, and Group is the section it appears under.
 	Documentation string `yaml:"documentation"`
 	Group         string `yaml:"group"`
+}
+
+// Hooks are the steps run around a service's lifecycle.
+type Hooks struct {
+	// PostCreate runs once a newly created service is answering, which is when
+	// a datastore that cannot be set up by its image's own initialisation has
+	// to be set up by hand. Couchdb's database is made this way, because the
+	// image creates an admin account and nothing else.
+	PostCreate *Command `yaml:"post_create"`
 }
 
 // Argument is a positional argument of an extra subcommand.

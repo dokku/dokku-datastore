@@ -1,0 +1,2 @@
+ARG IMAGE=couchdb:3.5.1
+FROM ${IMAGE}

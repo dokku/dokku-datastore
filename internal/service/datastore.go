@@ -480,6 +480,25 @@ func (s *Datastore) ImportService(ctx context.Context, input ImportServiceInput)
 	})
 }
 
+// RunPostCreate runs the step a datastore needs once a newly created service is
+// answering.
+//
+// A datastore whose image sets itself up entirely has none. Couchdb does: its
+// image creates an admin account and no database, so the database is made here,
+// after the service is ready and before anything is told it exists.
+func (s *Datastore) RunPostCreate(ctx context.Context, serviceName string) error {
+	hook := s.Definition.Dokku.Hooks.PostCreate
+	if hook == nil {
+		return nil
+	}
+
+	return s.run(ctx, serviceName, "hooks.post_create", runOptions{
+		Command: hook,
+		Stdout:  os.Stderr,
+		Stderr:  os.Stderr,
+	})
+}
+
 // arguments pairs what the caller passed with the names the command declares
 // them under, so a template can read one by name rather than by position.
 func (s *Datastore) arguments(name string, values []string) map[string]string {
@@ -507,6 +526,10 @@ type runOptions struct {
 	// Arguments are the declared arguments a custom command was given
 	Arguments map[string]string
 
+	// Command runs this rather than the one the name resolves to, which is how
+	// a hook runs
+	Command *definition.Command
+
 	TTY    bool
 	Stdin  io.Reader
 	Stdout io.Writer
@@ -522,6 +545,7 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 		Definition: s.Definition,
 		Scope:      scope,
 		Name:       name,
+		Command:    options.Command,
 		Names: backend.Names{
 			Container:  ContainerName(s, serviceName),
 			Ambassador: AmbassadorContainerName(s, serviceName),
