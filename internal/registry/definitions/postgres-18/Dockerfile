@@ -1,0 +1,2 @@
+ARG IMAGE=postgres:18.4
+FROM ${IMAGE}
