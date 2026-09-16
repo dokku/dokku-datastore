@@ -1,5 +1,9 @@
 package render
 
+import (
+	"sort"
+)
+
 // ContainerArgsInput is the input for ContainerArgs. Every value a container's
 // argv depends on appears here, so that the emitted command is a function of its
 // input rather than of the filesystem.
@@ -16,6 +20,12 @@ type ContainerArgsInput struct {
 
 	// ContainerName is both the container name and its hostname
 	ContainerName string
+
+	// Env is the environment the definition declares, which is how a datastore
+	// is told its own database name and credentials. It is passed alongside the
+	// env file rather than merged into it: docker lets a named value win over a
+	// file, so what the definition needs cannot be unset by a custom env.
+	Env map[string]string
 
 	// EnvFile holds the custom environment the service was created with
 	EnvFile string
@@ -58,6 +68,17 @@ func DockerCreateArgs(input ContainerArgsInput) []string {
 		"--label=dokku=service",
 		"--name=" + input.ContainerName,
 		"--restart=always",
+	}
+
+	// sorted, because a map would otherwise emit a different command each run
+	names := make([]string, 0, len(input.Env))
+	for name := range input.Env {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		args = append(args, "--env="+name+"="+input.Env[name])
 	}
 
 	for _, volume := range input.Volumes {
