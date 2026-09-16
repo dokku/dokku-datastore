@@ -1,0 +1,2 @@
+ARG IMAGE=nats:2.14.0
+FROM ${IMAGE}

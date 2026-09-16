@@ -44,4 +44,15 @@ for service in viadocker viacompose; do
 done
 
 echo "==> $DEFINITION: the two containers agree"
-./tests/inspect-diff.sh "dokku.$PLUGIN.viadocker" "dokku.$PLUGIN.viacompose"
+
+# a generated secret differs between the two by design, and a datastore that
+# authenticates on its command line carries it into the container, so the values
+# are handed over to be replaced rather than compared
+secrets=()
+for service in viadocker viacompose; do
+  for file in "$DOKKU_LIB_ROOT/services/$PLUGIN/$service"/*PASSWORD; do
+    [[ -f "$file" ]] && secrets+=("$(cat "$file")")
+  done
+done
+
+./tests/inspect-diff.sh "dokku.$PLUGIN.viadocker" "dokku.$PLUGIN.viacompose" "${secrets[@]}"

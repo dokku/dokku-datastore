@@ -7,8 +7,10 @@
 # backend is suspected of drifting.
 set -eo pipefail
 
-LEFT="${1:?usage: $0 <container> <container>}"
-RIGHT="${2:?usage: $0 <container> <container>}"
+LEFT="${1:?usage: $0 <container> <container> [secret...]}"
+RIGHT="${2:?usage: $0 <container> <container> [secret...]}"
+shift 2
+SECRETS=("$@")
 
 # the service name and its paths differ by construction, so they are replaced
 # rather than compared; compose's own labels are dropped, since carrying them is
@@ -43,8 +45,33 @@ left="$(mktemp)"
 right="$(mktemp)"
 trap 'rm -f "$left" "$right"' EXIT
 
-normalise "$LEFT" "${LEFT##*.}" >"$left"
-normalise "$RIGHT" "${RIGHT##*.}" >"$right"
+# the service name reaches more than the paths: a datastore that authenticates
+# on its command line carries it there too, so it is replaced everywhere rather
+# than in the fields that happen to be known to hold it
+scrub() {
+  declare name="$1"
+  sed "s/$name/SERVICE/g"
+}
+
+# a generated secret differs between two services by design, so comparing them
+# would only ever report that they are two services. They are known values, so
+# they are replaced rather than ignored.
+redact() {
+  declare -a filters=()
+  for secret in "${SECRETS[@]}"; do
+    [[ -n "$secret" ]] && filters+=(-e "s/$secret/REDACTED/g")
+  done
+
+  if [[ "${#filters[@]}" -eq 0 ]]; then
+    cat -
+    return
+  fi
+
+  sed "${filters[@]}"
+}
+
+normalise "$LEFT" "${LEFT##*.}" | scrub "${LEFT##*.}" | redact >"$left"
+normalise "$RIGHT" "${RIGHT##*.}" | scrub "${RIGHT##*.}" | redact >"$right"
 
 if diff -u "$left" "$right"; then
   echo "==> $LEFT and $RIGHT are equivalent"
