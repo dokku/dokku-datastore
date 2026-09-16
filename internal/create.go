@@ -88,6 +88,12 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return err
 	}
 
+	// before anything is made, so that a host which cannot run this datastore
+	// says so rather than leaving a half made service behind
+	if err := CheckRequirements(input.Datastore.Definition.Dokku.Requirements); err != nil {
+		return err
+	}
+
 	serviceFolders := service.Folders(input.Datastore, input.ServiceName)
 	serviceRoot := serviceFolders.Root
 	if _, err := os.Stat(serviceRoot); err == nil {

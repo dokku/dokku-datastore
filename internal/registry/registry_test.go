@@ -487,3 +487,81 @@ func TestClickhouseUrlFollowsTheScheme(t *testing.T) {
 		})
 	}
 }
+
+// Elasticsearch is the first datastore split by major version, so it is the
+// first to be selected between: a service says which it runs by the version it
+// pinned, and gets the definition for that line rather than the newest.
+func TestElasticsearchVariantFollowsTheImageVersion(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	tests := []struct {
+		name         string
+		imageVersion string
+		expected     string
+	}{
+		{name: "a seven", imageVersion: "7.17.28", expected: "elasticsearch-7"},
+		{name: "an eight", imageVersion: "8.19.10", expected: "elasticsearch-8"},
+		{name: "a nine", imageVersion: "9.4.1", expected: "elasticsearch-9"},
+		{
+			// a service whose container is gone has no version recorded, and
+			// reporting on it must not be an error
+			name:         "nothing recorded",
+			imageVersion: "",
+			expected:     "elasticsearch-9",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			found, err := loaded.For("elasticsearch", test.imageVersion)
+			if err != nil {
+				t.Fatalf("unable to select a definition: %s", err)
+			}
+
+			if found.Name != test.expected {
+				t.Errorf("expected %s, got %s", test.expected, found.Name)
+			}
+		})
+	}
+}
+
+// The versions differ in one setting: seven names a master node explicitly and
+// the later lines dropped that, which is the whole reason they are separate
+// definitions rather than one.
+func TestElasticsearchVersionsDifferWhereTheyShould(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	seven, _ := loaded.Definition("elasticsearch-7")
+	nine, _ := loaded.Definition("elasticsearch-9")
+
+	if !strings.Contains(seven.Configs["elasticsearch_yml"].Content, "node.master") {
+		t.Error("expected seven to name a master node")
+	}
+
+	if strings.Contains(nine.Configs["elasticsearch_yml"].Content, "node.master") {
+		t.Error("expected nine to have dropped the master node setting")
+	}
+
+	// security arrived on by default in eight, and the plugin hands over an
+	// address with nothing to authenticate with
+	if strings.Contains(seven.Configs["elasticsearch_yml"].Content, "xpack.security") {
+		t.Error("expected seven not to mention security, which it predates")
+	}
+
+	if !strings.Contains(nine.Configs["elasticsearch_yml"].Content, "xpack.security.enabled: false") {
+		t.Error("expected nine to turn security off")
+	}
+
+	// they are one datastore, however many definitions describe it
+	for _, found := range []definition.Definition{seven, nine} {
+		if found.Dokku.Plugin != "elasticsearch" {
+			t.Errorf("expected %s to be the elasticsearch plugin, got %q", found.Name, found.Dokku.Plugin)
+		}
+	}
+}

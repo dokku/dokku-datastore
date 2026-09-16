@@ -198,6 +198,11 @@ type Dokku struct {
 	// than a set of flags because the plugins use seven different url shapes.
 	DSN string `yaml:"dsn"`
 
+	// WaitTimeout bounds the readiness probe, in seconds. A datastore that takes
+	// longer than the probe's own default to answer says so, rather than being
+	// reported as never having started.
+	WaitTimeout int `yaml:"wait_timeout"`
+
 	// Wait names the port to probe with the dokku/wait sidecar, for images with
 	// no tool a compose healthcheck could use. Ignored when Healthcheck is set.
 	Wait string `yaml:"wait"`
@@ -205,6 +210,11 @@ type Dokku struct {
 	// Secrets are the credentials generated once at create time and persisted
 	// under the service root, keyed by the name templates refer to them by.
 	Secrets map[string]Secret `yaml:"secrets"`
+
+	// Requirements are what a datastore needs from the machine rather than from
+	// docker, checked before a service is created so that a host which cannot
+	// run it says so rather than leaving a container to fail obscurely.
+	Requirements []Requirement `yaml:"requirements"`
 
 	// Hooks are the steps a datastore needs run around a service's lifecycle,
 	// which are commands in every respect except that they are not subcommands:
@@ -264,6 +274,11 @@ type Command struct {
 	// User is the in-container user to run as.
 	User string `yaml:"user"`
 
+	// Entrypoint replaces the image's own. A step that runs a plain command in
+	// an image whose entrypoint starts the datastore has to clear it, or the
+	// datastore starts instead of the command.
+	Entrypoint *string `yaml:"entrypoint"`
+
 	// Stdin is true when the command consumes standard input, as import does.
 	Stdin bool `yaml:"stdin"`
 
@@ -276,6 +291,19 @@ type Command struct {
 	// command, and Group is the section it appears under.
 	Documentation string `yaml:"documentation"`
 	Group         string `yaml:"group"`
+}
+
+// Requirement is a precondition on the host.
+type Requirement struct {
+	// Sysctl is the kernel parameter to read, such as vm.max_map_count.
+	Sysctl string `yaml:"sysctl"`
+
+	// Minimum is the lowest acceptable value.
+	Minimum int `yaml:"minimum"`
+
+	// Message is what the operator is told when it is not met, which has to
+	// say how to fix it: knowing a number is too low is not knowing what to do.
+	Message string `yaml:"message"`
 }
 
 // Hooks are the steps run around a service's lifecycle.

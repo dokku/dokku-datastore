@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
@@ -24,6 +25,9 @@ type WaitArgsInput struct {
 
 	// Port is the port the service answers on
 	Port int
+
+	// Timeout bounds the wait in seconds, zero leaving the probe's own default
+	Timeout int
 }
 
 // WaitArgs builds the argv for the readiness probe. It is pure, so what a
@@ -41,7 +45,13 @@ func WaitArgs(input WaitArgsInput) []string {
 	}
 
 	args = append(args, hostenv.WaitImage)
-	return append(args, "-c", fmt.Sprintf("%s:%d", input.NetworkAlias, input.Port))
+	args = append(args, "-c", fmt.Sprintf("%s:%d", input.NetworkAlias, input.Port))
+
+	if input.Timeout > 0 {
+		args = append(args, "-t", strconv.Itoa(input.Timeout))
+	}
+
+	return args
 }
 
 // WaitForServiceInput is the input for WaitForService.
@@ -72,6 +82,7 @@ func WaitForService(ctx context.Context, input WaitForServiceInput) error {
 		NetworkAlias:   service.DNSHostname(input.Datastore, input.ServiceName),
 		InitialNetwork: service.InitialNetwork(input.Datastore, input.ServiceName),
 		Port:           properties.WaitPort,
+		Timeout:        input.Datastore.Definition.Dokku.WaitTimeout,
 	})
 
 	input.Logger.Header1(fmt.Sprintf("Waiting for %s container to be ready", input.ServiceName)) //nolint:errcheck

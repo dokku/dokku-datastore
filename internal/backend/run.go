@@ -35,6 +35,10 @@ type RunInput struct {
 	// User is the in-container user to run as, empty for the image's default
 	User string
 
+	// Entrypoint replaces the image's own when set, which is how a plain
+	// command runs in an image whose entrypoint starts something else
+	Entrypoint *string
+
 	// TTY asks docker for a terminal
 	TTY bool
 
@@ -62,6 +66,10 @@ func RunArgs(input RunInput) []string {
 
 	if input.Network != "" {
 		args = append(args, "--network="+input.Network)
+	}
+
+	if input.Entrypoint != nil {
+		args = append(args, "--entrypoint="+*input.Entrypoint)
 	}
 
 	if input.User != "" {
