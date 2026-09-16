@@ -255,6 +255,12 @@ type Command struct {
 	// Image is the sidecar image, for Mode sidecar.
 	Image string `yaml:"image"`
 
+	// Volumes are mounts this command needs that the service's own do not
+	// provide. A step that seeds a directory the service then mounts over has
+	// to reach that directory by another path, or it would be looking at what
+	// it is trying to fill.
+	Volumes []Volume `yaml:"volumes"`
+
 	// User is the in-container user to run as.
 	User string `yaml:"user"`
 
@@ -274,6 +280,12 @@ type Command struct {
 
 // Hooks are the steps run around a service's lifecycle.
 type Hooks struct {
+	// PreCreate runs before a service's container is created, when nothing of
+	// the service exists but its directories. Clickhouse needs it: it mounts a
+	// directory over the one its own configuration lives in, so the image's
+	// configuration has to be copied out before the mount hides it.
+	PreCreate *Command `yaml:"pre_create"`
+
 	// PostCreate runs once a newly created service is answering, which is when
 	// a datastore that cannot be set up by its image's own initialisation has
 	// to be set up by hand. Couchdb's database is made this way, because the
