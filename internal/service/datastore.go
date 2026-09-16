@@ -516,12 +516,14 @@ func (s *Datastore) RunPreCreate(ctx context.Context, serviceName string) error 
 	}
 
 	return backend.Run(ctx, backend.RunInput{
-		Image:   image,
-		Argv:    resolved.Argv,
-		Env:     resolved.Env,
-		Volumes: volumes,
-		Stdout:  os.Stderr,
-		Stderr:  os.Stderr,
+		Image:      image,
+		Argv:       resolved.Argv,
+		Env:        resolved.Env,
+		Volumes:    volumes,
+		User:       hook.User,
+		Entrypoint: hook.Entrypoint,
+		Stdout:     os.Stderr,
+		Stderr:     os.Stderr,
 	})
 }
 
