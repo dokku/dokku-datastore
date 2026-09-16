@@ -612,6 +612,42 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 // The payload is easy to forget here and impossible to miss at runtime: an
 // offline verb is one of the mounted scripts, so without it there is nothing to
 // exec and import fails with "not found".
+// BindDirectories returns the host directories a definition binds into its
+// containers, beyond the folders every service already has.
+//
+// Docker creates a missing bind source itself, and creates it owned by root.
+// That leaves a directory under the service root that the dokku user can
+// neither write into nor remove, so a later destroy cannot take the service
+// root away again. Creating them here first means every path under the service
+// root is owned the same way, whoever mounts it.
+//
+// The hooks are included because a hook runs before the service container
+// exists, so a directory only a hook mounts would otherwise be created by the
+// hook's own container.
+func (s *Datastore) BindDirectories(serviceName string) []string {
+	root := Folders(s, serviceName).Root
+
+	directories := []string{}
+	collect := func(volumes []definition.Volume) {
+		for _, volume := range volumes {
+			if !strings.HasPrefix(volume.Source, definition.HostRootTemplate) {
+				continue
+			}
+
+			directories = append(directories, strings.Replace(volume.Source, definition.HostRootTemplate, root, 1))
+		}
+	}
+
+	collect(s.Definition.Service.Volumes)
+	for _, hook := range []*definition.Command{s.Definition.Dokku.Hooks.PreCreate, s.Definition.Dokku.Hooks.PostCreate} {
+		if hook != nil {
+			collect(hook.Volumes)
+		}
+	}
+
+	return directories
+}
+
 func (s *Datastore) volumes(serviceName string) []string {
 	serviceFolders := Folders(s, serviceName)
 

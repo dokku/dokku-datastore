@@ -145,6 +145,10 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		serviceFolders.Data,
 	}
 
+	// whatever else the definition binds, so that docker is never the one to
+	// create a path under the service root
+	allServiceFolders = append(allServiceFolders, input.Datastore.BindDirectories(input.ServiceName)...)
+
 	if err := CreateServiceFolders(allServiceFolders, hostenv.SystemUser(), hostenv.SystemGroup()); err != nil {
 		return err
 	}
