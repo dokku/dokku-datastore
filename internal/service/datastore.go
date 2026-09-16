@@ -480,6 +480,51 @@ func (s *Datastore) ImportService(ctx context.Context, input ImportServiceInput)
 	})
 }
 
+// RunPreCreate runs the step a datastore needs before its container exists.
+//
+// Nothing of the service is running yet, so this is a container of its own
+// rather than anything beside or inside the service: there is nothing to be
+// beside. It gets the mounts the command declares rather than the service's,
+// since what it is usually doing is filling a directory the service will mount
+// over.
+func (s *Datastore) RunPreCreate(ctx context.Context, serviceName string) error {
+	hook := s.Definition.Dokku.Hooks.PreCreate
+	if hook == nil {
+		return nil
+	}
+
+	scope := s.scope(serviceName)
+	resolved, err := verb.Resolve(verb.RunInput{
+		Definition: s.Definition,
+		Scope:      scope,
+		Name:       "hooks.pre_create",
+		Command:    hook,
+	})
+	if err != nil {
+		return err
+	}
+
+	image := hook.Image
+	if image == "" {
+		image = s.taggedImage(serviceName)
+	}
+
+	volumes := make([]string, 0, len(hook.Volumes))
+	for _, volume := range hook.Volumes {
+		source := strings.Replace(volume.Source, definition.HostRootTemplate, Folders(s, serviceName).HostRoot, 1)
+		volumes = append(volumes, source+":"+volume.Target)
+	}
+
+	return backend.Run(ctx, backend.RunInput{
+		Image:   image,
+		Argv:    resolved.Argv,
+		Env:     resolved.Env,
+		Volumes: volumes,
+		Stdout:  os.Stderr,
+		Stderr:  os.Stderr,
+	})
+}
+
 // RunPostCreate runs the step a datastore needs once a newly created service is
 // answering.
 //

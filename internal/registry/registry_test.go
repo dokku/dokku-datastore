@@ -430,3 +430,60 @@ func TestRabbitmqSeedsTheFileItMounts(t *testing.T) {
 		t.Errorf("expected %s to be seeded, or docker will make it a directory", target)
 	}
 }
+
+// Clickhouse answers on two ports with two protocols, and an app says which it
+// wants by overriding the scheme. The url has to follow: the http port takes no
+// database in the path and the native one does, so the two are not the same url
+// with a different number in it.
+func TestClickhouseUrlFollowsTheScheme(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	clickhouse, ok := loaded.Definition("clickhouse")
+	if !ok {
+		t.Fatal("expected a clickhouse definition")
+	}
+
+	scope := definition.Scope{
+		ServiceName: "analytics",
+		Database:    "analytics",
+		Host:        "dokku-clickhouse-analytics",
+		Secret:      map[string]string{"password": "hunter2"},
+		Port:        map[string]int{"native": 9000, "http": 8123},
+	}
+
+	tests := []struct {
+		name     string
+		scheme   string
+		expected string
+	}{
+		{
+			name:     "the native protocol",
+			scheme:   "clickhouse",
+			expected: "clickhouse://analytics:hunter2@dokku-clickhouse-analytics:9000/analytics",
+		},
+		{
+			// no database in the path: over http the database is a parameter of
+			// the query rather than part of the address
+			name:     "an app asking for http",
+			scheme:   "http",
+			expected: "http://analytics:hunter2@dokku-clickhouse-analytics:8123",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			scope.Scheme = test.scheme
+			actual, err := definition.Render(clickhouse.Dokku.DSN, scope)
+			if err != nil {
+				t.Fatalf("unable to render the dsn: %s", err)
+			}
+
+			if actual != test.expected {
+				t.Errorf("expected %q, got %q", test.expected, actual)
+			}
+		})
+	}
+}

@@ -196,6 +196,12 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return fmt.Errorf("failed to call service-action post-create trigger: %w", err)
 	}
 
+	// before the container, because what it does is usually fill a directory the
+	// container then mounts over
+	if err := input.Datastore.RunPreCreate(ctx, input.ServiceName); err != nil {
+		return fmt.Errorf("failed to prepare the service: %w", err)
+	}
+
 	err = input.Datastore.CreateServiceContainer(ctx, service.CreateServiceContainerInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
