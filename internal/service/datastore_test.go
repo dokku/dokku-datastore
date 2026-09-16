@@ -262,3 +262,39 @@ func TestPinnedImageSurvivesAMissingDatastore(t *testing.T) {
 		t.Errorf("expected the running image, got %q", actual)
 	}
 }
+
+// Docker creates a missing bind source owned by root, which is how a directory
+// under the service root ends up belonging to somebody the dokku user cannot
+// take it away from. Postgres is the case that found this: its certificates are
+// mounted by the pre-create hook, which runs before the service container
+// exists at all.
+func TestBindDirectoriesCoversWhatTheHooksMountToo(t *testing.T) {
+	postgres, ok := Datastores["postgres"]
+	if !ok {
+		t.Fatal("expected postgres to be registered")
+	}
+
+	directories := postgres.BindDirectories("lollipop")
+	root := Folders(postgres, "lollipop").Root
+
+	for _, expected := range []string{root + "/data", root + "/certs"} {
+		found := false
+		for _, directory := range directories {
+			if directory == expected {
+				found = true
+			}
+		}
+
+		if !found {
+			t.Errorf("expected %s to be created, got %v", expected, directories)
+		}
+	}
+
+	// the service root is where the whole tree has to stay, or destroy is
+	// removing something it does not own
+	for _, directory := range directories {
+		if !strings.HasPrefix(directory, root+"/") {
+			t.Errorf("expected %s to be under the service root", directory)
+		}
+	}
+}

@@ -651,3 +651,73 @@ func TestSolrTakesTheNewestLineForAVersionWithNoDefinition(t *testing.T) {
 		t.Errorf("expected solr-7, got %s", seven.Name)
 	}
 }
+
+// Postgres moved its data directory up one level in eighteen, which is the
+// whole reason the two lines have definitions of their own.
+func TestPostgresMountsItsDataWhereTheVersionKeepsIt(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	tests := []struct {
+		name     string
+		variant  string
+		expected string
+	}{
+		{name: "before eighteen", variant: "postgres-17", expected: "/var/lib/postgresql/data"},
+		{name: "eighteen and since", variant: "postgres-18", expected: "/var/lib/postgresql"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			found, ok := loaded.Definition(test.variant)
+			if !ok {
+				t.Fatalf("expected a %s definition", test.variant)
+			}
+
+			data := ""
+			for _, volume := range found.Service.Volumes {
+				if volume.Target != "/certs" {
+					data = volume.Target
+				}
+			}
+
+			if data != test.expected {
+				t.Errorf("expected the data at %s, got %s", test.expected, data)
+			}
+		})
+	}
+}
+
+// The configuration file postgres writes during its own initialisation does not
+// exist until the service has run once, which is why the bash plugin pauses the
+// service to edit it and starts it again. Saying the same thing in the server's
+// own options needs no service to have run.
+func TestPostgresTurnsSslOnWithoutRestarting(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	postgres, ok := loaded.Definition("postgres-18")
+	if !ok {
+		t.Fatal("expected a postgres-18 definition")
+	}
+
+	command := strings.Join(postgres.Service.Command, " ")
+	for _, expected := range []string{"ssl=on", "ssl_cert_file=/certs/server.crt", "ssl_key_file=/certs/server.key"} {
+		if !strings.Contains(command, expected) {
+			t.Errorf("expected the server to be told %s, got %q", expected, command)
+		}
+	}
+
+	// nothing runs after the service is up, because nothing needs to
+	if postgres.Dokku.Hooks.PostCreate != nil {
+		t.Error("expected nothing to run after the service is up")
+	}
+
+	if postgres.Dokku.Hooks.PreCreate == nil {
+		t.Error("expected the certificate to be made before the service runs")
+	}
+}
