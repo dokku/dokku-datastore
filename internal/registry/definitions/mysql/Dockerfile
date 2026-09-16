@@ -1,0 +1,2 @@
+ARG IMAGE=mysql:9.7.0
+FROM ${IMAGE}

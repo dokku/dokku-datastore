@@ -99,7 +99,7 @@ func Compose(input Input) ([]byte, error) {
 			"dokku":         "service",
 			"dokku.service": arguments.CommandPrefix,
 		},
-		Environment: environment(input.Environment),
+		Environment: environment(input.Environment, arguments.Env),
 		Volumes:     arguments.Volumes,
 		ShmSize:     arguments.ShmSize,
 	}
@@ -145,23 +145,29 @@ func Compose(input Input) ([]byte, error) {
 	return append([]byte("---\n"), rendered...), nil
 }
 
-// environment turns the service's env lines into compose's mapping form.
+// environment turns the service's env lines and the definition's declared
+// environment into compose's mapping form.
+//
+// The declared environment is applied last, which is the same order docker
+// applies it in: a named value wins over the file, so what the definition needs
+// cannot be unset by a custom env.
 //
 // A dollar sign is doubled, because compose expands ${...} in a value and
 // docker's env file does not: left alone, a password containing one would reach
 // the container as something else, or as nothing.
-func environment(lines []string) map[string]string {
-	if len(lines) == 0 {
-		return nil
-	}
-
+func environment(lines []string, declared map[string]string) map[string]string {
 	values := map[string]string{}
+
 	for _, line := range lines {
 		name, value, found := strings.Cut(strings.TrimSpace(line), "=")
 		if !found || name == "" {
 			continue
 		}
 
+		values[name] = strings.ReplaceAll(value, "$", "$$")
+	}
+
+	for name, value := range declared {
 		values[name] = strings.ReplaceAll(value, "$", "$$")
 	}
 

@@ -53,6 +53,16 @@ func ContainerArgs(input Input) (ContainerArgsInput, error) {
 		return ContainerArgsInput{}, err
 	}
 
+	environment := map[string]string{}
+	for name, value := range service.Environment {
+		rendered, err := definition.Render(value, input.Scope)
+		if err != nil {
+			return ContainerArgsInput{}, err
+		}
+
+		environment[name] = rendered
+	}
+
 	volumes := make([]string, 0, len(service.Volumes))
 	for _, volume := range service.Volumes {
 		source, err := definition.Render(volume.Source, input.Scope)
@@ -78,6 +88,7 @@ func ContainerArgs(input Input) (ContainerArgsInput, error) {
 		Command:        command,
 		ConfigOptions:  input.ConfigOptions,
 		ContainerName:  input.Scope.ContainerName,
+		Env:            environment,
 		EnvFile:        input.EnvFile,
 		IDFile:         input.IDFile,
 		InitialNetwork: input.Scope.InitialNetwork,
