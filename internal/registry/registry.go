@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
@@ -88,7 +89,7 @@ func Load(input LoadInput) (*Registry, error) {
 func (r *Registry) add(parsed definition.Definition) {
 	if _, exists := r.definitions[parsed.Name]; !exists {
 		r.byPlugin[parsed.Dokku.Plugin] = append(r.byPlugin[parsed.Dokku.Plugin], parsed.Name)
-		sort.Strings(r.byPlugin[parsed.Dokku.Plugin])
+		sortVariants(r.byPlugin[parsed.Dokku.Plugin])
 	}
 
 	r.definitions[parsed.Name] = parsed
@@ -288,6 +289,38 @@ func (r *Registry) Names() []string {
 
 	sort.Strings(names)
 	return names
+}
+
+// sortVariants orders a datastore's definitions oldest first.
+//
+// By the number rather than by the name: a datastore that reaches a tenth major
+// version would otherwise sort it before its seventh, and the newest, which is
+// what a service with no recorded version falls back to, would be the wrong one.
+func sortVariants(names []string) {
+	sort.Slice(names, func(i int, j int) bool {
+		left, right := variantVersion(names[i]), variantVersion(names[j])
+		if left != right {
+			return left < right
+		}
+
+		return names[i] < names[j]
+	})
+}
+
+// variantVersion is the major version a definition's name ends in, or zero for
+// a datastore that is not split by version.
+func variantVersion(name string) int {
+	_, suffix, found := strings.Cut(name, "-")
+	if !found {
+		return 0
+	}
+
+	version, err := strconv.Atoi(suffix)
+	if err != nil {
+		return 0
+	}
+
+	return version
 }
 
 // majorVersion returns the leading numeric component of an image tag, so that

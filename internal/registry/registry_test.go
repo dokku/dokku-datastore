@@ -565,3 +565,89 @@ func TestElasticsearchVersionsDifferWhereTheyShould(t *testing.T) {
 		}
 	}
 }
+
+// Solr moved where it keeps its cores in eight, which is the whole reason the
+// two lines have definitions of their own: the same data directory has to be
+// mounted somewhere different.
+func TestSolrMountsItsCoresWhereTheVersionKeepsThem(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	tests := []struct {
+		name     string
+		variant  string
+		expected string
+	}{
+		{name: "before eight", variant: "solr-7", expected: "/opt/solr/server/solr/mycores"},
+		{name: "eight and since", variant: "solr-8", expected: "/var/solr/data"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			found, ok := loaded.Definition(test.variant)
+			if !ok {
+				t.Fatalf("expected a %s definition", test.variant)
+			}
+
+			if len(found.Service.Volumes) != 1 {
+				t.Fatalf("expected one volume, got %d", len(found.Service.Volumes))
+			}
+
+			if found.Service.Volumes[0].Target != test.expected {
+				t.Errorf("expected the cores at %s, got %s", test.expected, found.Service.Volumes[0].Target)
+			}
+		})
+	}
+}
+
+// Solr ships a tenth major version, so the fallback a service with no recorded
+// version takes has to count rather than compare names: ten sorts before seven
+// as a word.
+func TestVariantsAreOrderedByNumber(t *testing.T) {
+	names := []string{"solr-8", "solr-10", "solr-7"}
+	sortVariants(names)
+
+	expected := []string{"solr-7", "solr-8", "solr-10"}
+	for i, name := range expected {
+		if names[i] != name {
+			t.Fatalf("expected %v, got %v", expected, names)
+		}
+	}
+
+	// a datastore that is not split by version is unaffected
+	single := []string{"redis"}
+	sortVariants(single)
+	if single[0] != "redis" {
+		t.Errorf("expected redis, got %v", single)
+	}
+}
+
+// Solr's default image is a tenth major version, and there is no definition
+// named for it, so it takes the newest line rather than erroring or taking the
+// oldest.
+func TestSolrTakesTheNewestLineForAVersionWithNoDefinition(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	found, err := loaded.For("solr", "10.0.0")
+	if err != nil {
+		t.Fatalf("unable to select a definition: %s", err)
+	}
+
+	if found.Name != "solr-8" {
+		t.Errorf("expected solr-8, got %s", found.Name)
+	}
+
+	seven, err := loaded.For("solr", "7.7.3")
+	if err != nil {
+		t.Fatalf("unable to select a definition: %s", err)
+	}
+
+	if seven.Name != "solr-7" {
+		t.Errorf("expected solr-7, got %s", seven.Name)
+	}
+}
