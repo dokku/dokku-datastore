@@ -81,7 +81,7 @@ func ContainerArgs(input Input) (ContainerArgsInput, error) {
 		EnvFile:        input.EnvFile,
 		IDFile:         input.IDFile,
 		InitialNetwork: input.Scope.InitialNetwork,
-		Memory:         memoryLimit(input.Scope.Memory),
+		Memory:         MemoryLimit(input.Scope.Memory),
 		NetworkAlias:   input.Scope.Host,
 		ShmSize:        input.Scope.ShmSize,
 		TaggedImage:    image,
@@ -89,12 +89,16 @@ func ContainerArgs(input Input) (ContainerArgsInput, error) {
 	}, nil
 }
 
-// memoryLimit drops a limit of zero.
+// MemoryLimit drops a limit of zero.
 //
 // The memory file holds "0" for a service that was never given a limit, which
 // docker reads as unlimited and so does compose. Emitting it says nothing, and
 // saying nothing is what a service without a limit should emit.
-func memoryLimit(memory string) string {
+//
+// It matters to a definition too: a template asking whether there is a limit
+// sees "0" as a value, so a datastore that takes its own size from the limit
+// would be told to use none rather than its default.
+func MemoryLimit(memory string) string {
 	if memory == "0" {
 		return ""
 	}

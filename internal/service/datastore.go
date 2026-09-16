@@ -655,7 +655,7 @@ func (s *Datastore) scope(serviceName string) definition.Scope {
 		Scheme:        dokku.Scheme,
 		Secret:        secrets,
 		Port:          ports,
-		Memory:        common.ReadFirstLine(serviceFiles.Memory),
+		Memory:        render.MemoryLimit(common.ReadFirstLine(serviceFiles.Memory)),
 		ShmSize:       common.ReadFirstLine(serviceFiles.ShmSize),
 	}
 }
