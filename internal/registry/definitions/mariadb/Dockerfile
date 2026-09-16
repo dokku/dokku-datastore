@@ -1,0 +1,2 @@
+ARG IMAGE=mariadb:12.2.2
+FROM ${IMAGE}
