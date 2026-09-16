@@ -390,3 +390,43 @@ func TestCouchdbFetchesNothingAtRuntime(t *testing.T) {
 		}
 	}
 }
+
+// Rabbitmq mounts its configuration as a file rather than a directory. Docker
+// makes a missing bind source a directory, so the file has to be seeded before
+// the container is created, and the definition has to declare it for that to
+// happen at all.
+func TestRabbitmqSeedsTheFileItMounts(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	rabbitmq, ok := loaded.Definition("rabbitmq")
+	if !ok {
+		t.Fatal("expected a rabbitmq definition")
+	}
+
+	target := "/etc/rabbitmq/rabbitmq.conf"
+
+	mounted := false
+	for _, volume := range rabbitmq.Service.Volumes {
+		if volume.Target == target {
+			mounted = true
+		}
+	}
+
+	if !mounted {
+		t.Fatalf("expected %s to be mounted", target)
+	}
+
+	seeded := false
+	for _, config := range rabbitmq.Service.Configs {
+		if config.Target == target {
+			seeded = true
+		}
+	}
+
+	if !seeded {
+		t.Errorf("expected %s to be seeded, or docker will make it a directory", target)
+	}
+}
