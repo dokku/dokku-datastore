@@ -160,9 +160,22 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 			return fail("port %q needs a target", port.Name)
 		}
 
+		switch port.Protocol {
+		case "", ProtocolTCP, ProtocolUDP:
+		default:
+			return fail("port %q has protocol %q, which is neither tcp nor udp", port.Name, port.Protocol)
+		}
+
 		if port.Primary {
 			primaries++
 		}
+	}
+
+	// readiness is a tcp connect, so a datastore whose readiness would land on
+	// a udp port has no way to be waited for. Graphite has a udp primary and
+	// names a tcp port to wait on instead, which is the shape this allows.
+	if wait, ok := definition.WaitPort(); ok && wait.Protocol == ProtocolUDP {
+		return fail("port %q speaks udp, so readiness cannot probe it: name a tcp port in wait", wait.Name)
 	}
 
 	if primaries > 1 {

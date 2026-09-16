@@ -674,10 +674,10 @@ func (s *Datastore) Properties() ServiceStruct {
 		ports = append(ports, port.Target)
 	}
 
+	// parsing refuses a definition whose readiness would land on a udp port, so
+	// what comes back here can always be probed with a tcp connect
 	waitPort := 0
-	if port, ok := s.Definition.PortFor(dokku.Wait); ok {
-		waitPort = port.Target
-	} else if port, ok := s.Definition.PrimaryPort(); ok {
+	if port, ok := s.Definition.WaitPort(); ok {
 		waitPort = port.Target
 	}
 
