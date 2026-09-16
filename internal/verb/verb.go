@@ -22,8 +22,14 @@ type RunInput struct {
 	// environment are rendered against
 	Scope definition.Scope
 
-	// Name is the verb to run: connect, export, import, or an extra subcommand
+	// Name is the verb to run: connect, export, import, or a command the
+	// datastore adds
 	Name string
+
+	// Command runs this rather than looking Name up, which is how a hook runs:
+	// it is a command in every respect except that it is not a subcommand, so
+	// there is no name to find it under.
+	Command *definition.Command
 
 	// Names are the service's containers. A service command runs in the service
 	// container; an offline command stops both and runs beside them.
@@ -48,6 +54,16 @@ type RunInput struct {
 	Stderr io.Writer
 }
 
+// command is what this input runs: the one it was handed, or the one the
+// definition declares under the name it was given.
+func (input RunInput) command() (definition.Command, bool) {
+	if input.Command != nil {
+		return *input.Command, true
+	}
+
+	return input.Definition.CommandFor(input.Name)
+}
+
 // ErrNotImplemented is returned for a verb the definition does not declare. It
 // is how a datastore says it cannot do something, rather than failing part way
 // through trying.
@@ -67,7 +83,7 @@ func (e ErrNotImplemented) Error() string {
 // separate from Run so that what a definition turns into can be tested without
 // a docker daemon.
 func Resolve(input RunInput) (backend.ExecInput, error) {
-	command, ok := input.Definition.CommandFor(input.Name)
+	command, ok := input.command()
 	if !ok {
 		return backend.ExecInput{}, ErrNotImplemented{
 			Plugin: input.Definition.Dokku.Plugin,
@@ -110,7 +126,7 @@ func Resolve(input RunInput) (backend.ExecInput, error) {
 
 // Run executes a verb against a running service.
 func Run(ctx context.Context, input RunInput) error {
-	command, _ := input.Definition.CommandFor(input.Name)
+	command, _ := input.command()
 
 	switch command.Mode {
 	case "", definition.ModeService:
@@ -147,7 +163,7 @@ func runSidecar(ctx context.Context, input RunInput) error {
 		return err
 	}
 
-	command, _ := input.Definition.CommandFor(input.Name)
+	command, _ := input.command()
 
 	// the command's own image when it names one, since a sidecar exists for a
 	// tool the datastore image does not ship; otherwise the service's own

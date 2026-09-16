@@ -217,9 +217,19 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 
 	// waited on here rather than by the caller, so that every path which creates
 	// a service gets a service that answers rather than one that merely exists
-	return WaitForService(ctx, WaitForServiceInput{
+	if err := WaitForService(ctx, WaitForServiceInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 		Logger:      input.Logger,
-	})
+	}); err != nil {
+		return err
+	}
+
+	// after the wait, because the step needs a service that answers, and before
+	// anything is told the service exists
+	if err := input.Datastore.RunPostCreate(ctx, input.ServiceName); err != nil {
+		return fmt.Errorf("failed to set up the service: %w", err)
+	}
+
+	return nil
 }

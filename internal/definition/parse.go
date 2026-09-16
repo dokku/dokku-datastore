@@ -363,6 +363,10 @@ func cutImage(reference string) (string, string, bool) {
 // checks that apply to both.
 func allCommands(definition Definition) map[string]Command {
 	commands := map[string]Command{}
+	if definition.Dokku.Hooks.PostCreate != nil {
+		commands["hooks.post_create"] = *definition.Dokku.Hooks.PostCreate
+	}
+
 	for name, command := range definition.Dokku.Commands {
 		commands[name] = command
 	}
