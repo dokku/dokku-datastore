@@ -1010,3 +1010,67 @@ func TestGraphitePassesThePasswordItGenerates(t *testing.T) {
 		t.Errorf("expected STATSD, got alias %s and variable %s", graphite.Dokku.Alias, graphite.Dokku.Variable)
 	}
 }
+
+// Graphite is the one definition with a udp port, and the one that shows why
+// readiness and the url are separate questions: the port an app sends metrics
+// to cannot be probed by connecting to it, so a tcp port is named to wait on
+// instead. A definition that did not do that is refused at parse.
+func TestGraphiteWaitsOnAPortThatCanBeProbed(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	graphite, ok := loaded.Definition("graphite")
+	if !ok {
+		t.Fatal("expected a graphite definition")
+	}
+
+	primary, ok := graphite.PrimaryPort()
+	if !ok {
+		t.Fatal("expected a primary port")
+	}
+
+	if primary.Protocol != definition.ProtocolUDP {
+		t.Errorf("expected the primary port to speak udp, got %q", primary.Protocol)
+	}
+
+	wait, ok := graphite.WaitPort()
+	if !ok {
+		t.Fatal("expected a wait port")
+	}
+
+	if wait.Protocol == definition.ProtocolUDP {
+		t.Errorf("expected readiness on a port it can connect to, got %s", wait.Name)
+	}
+
+	if wait.Name == primary.Name {
+		t.Error("expected readiness to be somewhere other than the metrics port")
+	}
+}
+
+// Every other definition leaves the protocol unset, which is tcp. This is the
+// check that a definition does not pick up a udp port by accident, since a udp
+// port is now refused as a readiness target and would fail to load.
+func TestEveryDefinitionCanBeWaitedFor(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	for _, name := range loaded.Names() {
+		found, ok := loaded.Definition(name)
+		if !ok {
+			t.Fatalf("expected a %s definition", name)
+		}
+
+		wait, ok := found.WaitPort()
+		if !ok {
+			continue
+		}
+
+		if wait.Protocol == definition.ProtocolUDP {
+			t.Errorf("%s would wait on a udp port", name)
+		}
+	}
+}

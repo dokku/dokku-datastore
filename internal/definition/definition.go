@@ -349,6 +349,13 @@ const (
 	ModeHost = "host"
 )
 
+// The protocols a port may declare. A port that names none is tcp, which is
+// what docker assumes too.
+const (
+	ProtocolTCP = "tcp"
+	ProtocolUDP = "udp"
+)
+
 // PortFor returns a port by name.
 func (d Definition) PortFor(name string) (Port, bool) {
 	for _, port := range d.Service.Ports {
@@ -493,4 +500,15 @@ func (d Definition) CommandFor(name string) (Command, bool) {
 func (d Definition) ImplementsCustom(name string) bool {
 	_, ok := d.Dokku.CustomCommands[name]
 	return ok
+}
+
+// WaitPort is the port readiness probes: the one the definition names, or the
+// primary when it names none. It is the pair of PortFor and PrimaryPort that
+// every caller was writing out by hand.
+func (d Definition) WaitPort() (Port, bool) {
+	if port, ok := d.PortFor(d.Dokku.Wait); ok {
+		return port, true
+	}
+
+	return d.PrimaryPort()
 }

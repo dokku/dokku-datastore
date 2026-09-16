@@ -183,6 +183,18 @@ func TestParseRejects(t *testing.T) {
 			embedded: false,
 			expected: "only allowed for definitions shipped in the binary",
 		},
+		{
+			name:     "a protocol that is neither tcp nor udp",
+			compose:  strings.Replace(validCompose, "        target: 1234", "        target: 1234\n        protocol: sctp", 1),
+			expected: "neither tcp nor udp",
+		},
+		{
+			name: "readiness on a port that speaks udp",
+			// the shape a definition falls into by declaring a udp port primary
+			// and naming nothing to wait on
+			compose:  strings.Replace(validCompose, "        target: 1234", "        target: 1234\n        protocol: udp", 1),
+			expected: "readiness cannot probe it",
+		},
 	}
 
 	for _, test := range tests {

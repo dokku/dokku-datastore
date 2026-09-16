@@ -19,10 +19,16 @@ services:
 
     ports:
       # where an app sends its metrics, which is what a linked app is handed.
+      #
       # statsd speaks udp, which the bash plugin has no way to say and so has
-      # always exposed as tcp. Recording it here does not fix that on its own:
-      # nothing reads the protocol yet, and whether the ambassador forwards
-      # udp at all has to be answered before it can.
+      # always exposed as tcp. Recording it here does not fix that, and cannot:
+      # the ambassador forwards with socat over TCP4 in both of its branches,
+      # and picks what to forward by matching link variables ending in _TCP, so
+      # a udp port is not merely unforwarded but invisible to it. Exposing this
+      # port properly needs a different ambassador image, not a change here.
+      #
+      # It is recorded anyway because it is true, and because readiness now
+      # refuses to probe a udp port rather than silently connecting to one.
       - name: statsd
         target: 8125
         protocol: udp
