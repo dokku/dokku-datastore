@@ -16,6 +16,46 @@ import (
 // capitalization is deliberate and matches the bash datastore plugins.
 var ErrLinkedService = errors.New("Cannot delete linked service")
 
+// RemoveDataArgsInput is the input for RemoveDataArgs.
+type RemoveDataArgsInput struct {
+	// Directories are the host paths the definition binds, which are the only
+	// places under the service root a container could have written
+	Directories []string
+
+	// Image is the image the widening runs in
+	Image string
+}
+
+// RemoveDataArgs builds the argv for the container that makes a service's data
+// removable again.
+//
+// A datastore writes as whatever user its image runs as, so it leaves a tree
+// belonging to somebody the dokku user is not, with directories the dokku user
+// cannot unlink inside. The mode is widened from a container that is already
+// root, which needs no sudo grant on the host.
+//
+// Only what the definition binds is touched. The credentials beside it keep
+// the modes they were written with, and a definition that binds nothing gets no
+// container at all.
+func RemoveDataArgs(input RemoveDataArgsInput) []string {
+	if len(input.Directories) == 0 {
+		return nil
+	}
+
+	args := []string{"container", "run", "--rm"}
+	targets := make([]string, 0, len(input.Directories))
+
+	for index, directory := range input.Directories {
+		target := fmt.Sprintf("/mnt/%d", index)
+		args = append(args, "-v", directory+":"+target)
+		targets = append(targets, target)
+	}
+
+	args = append(args, input.Image, "chmod", "777", "-R")
+
+	return append(args, targets...)
+}
+
 // DestroyServiceInput is the input for the DestroyService function
 type DestroyServiceInput struct {
 	// Datastore is the service to destroy
@@ -54,12 +94,19 @@ func DestroyService(ctx context.Context, input DestroyServiceInput) error {
 	}
 
 	serviceFolders := service.Folders(input.Datastore, input.ServiceName)
-	_, err = execx.Run(ctx, common.ExecCommandInput{
-		Command: common.DockerBin(),
-		Args:    []string{"container", "run", "--rm", "-v", fmt.Sprintf("%s/data:/data", serviceFolders.HostRoot), "-v", fmt.Sprintf("%s/config:/config", serviceFolders.HostRoot), hostenv.BusyboxImage, "chmod", "777", "-R", "/config", "/data"},
+	arguments := RemoveDataArgs(RemoveDataArgsInput{
+		Directories: input.Datastore.BindHostDirectories(input.ServiceName),
+		Image:       hostenv.BusyboxImage,
 	})
-	if err != nil {
-		return fmt.Errorf("failed to remove data: %w", err)
+
+	if len(arguments) > 0 {
+		_, err = execx.Run(ctx, common.ExecCommandInput{
+			Command: common.DockerBin(),
+			Args:    arguments,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to remove data: %w", err)
+		}
 	}
 
 	if err := os.RemoveAll(serviceFolders.Root); err != nil {

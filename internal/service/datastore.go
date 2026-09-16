@@ -625,16 +625,35 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 // exists, so a directory only a hook mounts would otherwise be created by the
 // hook's own container.
 func (s *Datastore) BindDirectories(serviceName string) []string {
-	root := Folders(s, serviceName).Root
+	return s.bindSources(Folders(s, serviceName).Root)
+}
 
+// BindHostDirectories is the same set as dockerd sees it, which is what a bind
+// mount has to be given. The two differ on a docker-in-docker install.
+func (s *Datastore) BindHostDirectories(serviceName string) []string {
+	return s.bindSources(Folders(s, serviceName).HostRoot)
+}
+
+// bindSources resolves every declared bind source against a root, in the order
+// they are declared and without repeats: postgres mounts its certificates both
+// in the service and in the hook that makes them.
+func (s *Datastore) bindSources(root string) []string {
+	seen := map[string]bool{}
 	directories := []string{}
+
 	collect := func(volumes []definition.Volume) {
 		for _, volume := range volumes {
 			if !strings.HasPrefix(volume.Source, definition.HostRootTemplate) {
 				continue
 			}
 
-			directories = append(directories, strings.Replace(volume.Source, definition.HostRootTemplate, root, 1))
+			resolved := strings.Replace(volume.Source, definition.HostRootTemplate, root, 1)
+			if seen[resolved] {
+				continue
+			}
+
+			seen[resolved] = true
+			directories = append(directories, resolved)
 		}
 	}
 
