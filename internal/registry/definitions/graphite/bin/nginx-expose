@@ -14,32 +14,32 @@ HELPER="/usr/local/bin/dokku-graphite-nginx"
 
 upstream="$(docker container inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
 if [[ -z "$upstream" ]]; then
-	echo "$SERVICE has no address to proxy to, so it is not running" >&2
-	exit 1
+  echo "$SERVICE has no address to proxy to, so it is not running" >&2
+  exit 1
 fi
 
 server_names=""
 if [[ -n "$DOMAIN" ]]; then
-	server_names="$DOMAIN"
+  server_names="$DOMAIN"
 else
-	# every global vhost gets a grafana- name of its own, which is what the
-	# bash plugin did and what the printed urls promise
-	#
-	# the file is tested for rather than redirected from blindly: a missing one
-	# is an ordinary state, and the shell reports a failed redirection itself
-	# where a redirection of the reader's stderr would not catch it
-	vhost_file="${DOKKU_ROOT:-/home/dokku}/VHOST"
-	if [[ -f "$vhost_file" ]]; then
-		while read -r vhost; do
-			[[ -n "$vhost" ]] || continue
-			server_names="${server_names:+$server_names }grafana-$SERVICE.$vhost"
-		done < <(tr '[:space:]' '\n' <"$vhost_file")
-	fi
+  # every global vhost gets a grafana- name of its own, which is what the
+  # bash plugin did and what the printed urls promise
+  #
+  # the file is tested for rather than redirected from blindly: a missing one
+  # is an ordinary state, and the shell reports a failed redirection itself
+  # where a redirection of the reader's stderr would not catch it
+  vhost_file="${DOKKU_ROOT:-/home/dokku}/VHOST"
+  if [[ -f "$vhost_file" ]]; then
+    while read -r vhost; do
+      [[ -n "$vhost" ]] || continue
+      server_names="${server_names:+$server_names }grafana-$SERVICE.$vhost"
+    done < <(tr '[:space:]' '\n' <"$vhost_file")
+  fi
 fi
 
 if [[ -z "$server_names" ]]; then
-	echo "no domain was given and no global vhost is set, so grafana has no name to answer to" >&2
-	exit 1
+  echo "no domain was given and no global vhost is set, so grafana has no name to answer to" >&2
+  exit 1
 fi
 
 # nginx has variables of its own, so the ones it reads at request time are
@@ -79,5 +79,5 @@ EOF
 
 echo "Grafana for $SERVICE is now available under the following url(s):"
 for name in $server_names; do
-	echo "       $name"
+  echo "       $name"
 done
