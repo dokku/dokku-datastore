@@ -8,7 +8,8 @@ import (
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/cron"
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
+	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 )
 
@@ -17,29 +18,29 @@ import (
 // beside it: the directory holding the services is enumerated to list them, so
 // a staged file there is reported as a service of its own, which is what an
 // interrupted schedule used to leave behind.
-func StagedCronFile(s datastores.Datastore, serviceName string) string {
-	return filepath.Join(datastores.Folders(s, serviceName).Root, ".TMP_CRON_FILE")
+func StagedCronFile(s *service.Datastore, serviceName string) string {
+	return filepath.Join(service.Folders(s, serviceName).Root, ".TMP_CRON_FILE")
 }
 
 // SudoersContents returns the sudoers file a datastore plugin installs
-func SudoersContents(s datastores.Datastore) string {
+func SudoersContents(s *service.Datastore) string {
 	return cron.SudoersContents(s.Properties().CommandPrefix)
 }
 
 // SudoersFile describes the sudoers file a datastore plugin installs.
-func SudoersFile(s datastores.Datastore) common.WriteStringToFileInput {
+func SudoersFile(s *service.Datastore) common.WriteStringToFileInput {
 	return cron.SudoersFile(s.Properties().CommandPrefix)
 }
 
 // CronHelperFile describes the helper script the sudoers file grants.
-func CronHelperFile(s datastores.Datastore) common.WriteStringToFileInput {
-	return cron.HelperFile(s.Properties().CommandPrefix, filepath.Join(datastores.PluginDataRoot, s.Properties().CommandPrefix))
+func CronHelperFile(s *service.Datastore) common.WriteStringToFileInput {
+	return cron.HelperFile(s.Properties().CommandPrefix, filepath.Join(service.PluginDataRoot, s.Properties().CommandPrefix))
 }
 
 // InstallInput is the input for the Install function
 type InstallInput struct {
 	// Datastore is the datastore being installed
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 
 	// Logger reports progress
 	Logger Ui
@@ -57,13 +58,13 @@ func Install(ctx context.Context, input InstallInput) error {
 
 	images := []string{
 		fmt.Sprintf("%s:%s", properties.DefaultImage, properties.DefaultImageVersion),
-		datastores.PluginBusyboxImage,
-		datastores.PluginAmbassadorImage,
-		datastores.PluginS3BackupImage,
-		datastores.PluginWaitImage,
+		hostenv.BusyboxImage,
+		hostenv.AmbassadorImage,
+		hostenv.S3BackupImage,
+		hostenv.WaitImage,
 	}
 	for _, image := range images {
-		if err := datastores.ValidateTaggedImageExists(image); err == nil {
+		if err := service.ValidateTaggedImageExists(image); err == nil {
 			continue
 		}
 
@@ -75,17 +76,17 @@ func Install(ctx context.Context, input InstallInput) error {
 			continue
 		}
 
-		if _, err := datastores.PullTaggedImage(ctx, image); err != nil {
+		if _, err := service.PullTaggedImage(ctx, image); err != nil {
 			return fmt.Errorf("failed to pull image %s: %w", image, err)
 		}
 	}
 
 	folders := []string{
-		filepath.Join(datastores.PluginDataRoot, commandPrefix),
-		filepath.Join(datastores.DokkuLibRoot, "config", commandPrefix),
-		filepath.Join(datastores.DokkuLibRoot, "data", commandPrefix),
+		filepath.Join(service.PluginDataRoot, commandPrefix),
+		filepath.Join(service.DokkuLibRoot, "config", commandPrefix),
+		filepath.Join(service.DokkuLibRoot, "data", commandPrefix),
 	}
-	if err := CreateServiceFolders(folders, datastores.SystemUser(), datastores.SystemGroup()); err != nil {
+	if err := CreateServiceFolders(folders, hostenv.SystemUser(), hostenv.SystemGroup()); err != nil {
 		return err
 	}
 
@@ -114,7 +115,7 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 	// earlier versions staged a cron entry beside the services rather than
 	// inside one, where listing the services reported it as a service of its
 	// own. An interrupted schedule left one behind, so clear it.
-	strayCronFile := filepath.Join(datastores.PluginDataRoot, input.Datastore.Properties().CommandPrefix, ".TMP_CRON_FILE")
+	strayCronFile := filepath.Join(service.PluginDataRoot, input.Datastore.Properties().CommandPrefix, ".TMP_CRON_FILE")
 	if common.FileExists(strayCronFile) {
 		if err := os.Remove(strayCronFile); err != nil {
 			return fmt.Errorf("unable to remove %s: %w", strayCronFile, err)
@@ -128,12 +129,12 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 
 	properties := input.Datastore.Properties()
 	for _, serviceName := range services {
-		serviceFiles := datastores.Files(input.Datastore, serviceName)
+		serviceFiles := service.Files(input.Datastore, serviceName)
 
 		// older services recorded the image only on the container, so recover it
 		// onto disk where everything else now looks for it
 		if !common.FileExists(serviceFiles.Image) || !common.FileExists(serviceFiles.ImageVersion) {
-			taggedImage := datastores.Version(ctx, datastores.VersionInput{
+			taggedImage := service.Version(ctx, service.VersionInput{
 				Datastore:   input.Datastore,
 				ServiceName: serviceName,
 			})
@@ -148,7 +149,7 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 		}
 
 		// the config options file used to be named after the plugin variable
-		legacyConfigOptions := filepath.Join(datastores.Folders(input.Datastore, serviceName).Root,
+		legacyConfigOptions := filepath.Join(service.Folders(input.Datastore, serviceName).Root,
 			fmt.Sprintf("%s_CONFIG_OPTIONS", properties.PluginVariable))
 		if common.FileExists(legacyConfigOptions) {
 			if err := os.Rename(legacyConfigOptions, serviceFiles.ConfigOptions); err != nil {
@@ -156,9 +157,9 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 			}
 			if err := common.SetPermissions(common.SetPermissionInput{
 				Filename:  serviceFiles.ConfigOptions,
-				GroupName: datastores.SystemGroup(),
+				GroupName: hostenv.SystemGroup(),
 				Mode:      0644,
-				Username:  datastores.SystemUser(),
+				Username:  hostenv.SystemUser(),
 			}); err != nil {
 				return fmt.Errorf("unable to set permissions on %s: %w", serviceFiles.ConfigOptions, err)
 			}
@@ -173,9 +174,9 @@ func writeServiceFile(filename string, contents string) error {
 	if err := common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   contents,
 		Filename:  filename,
-		GroupName: datastores.SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      0644,
-		Username:  datastores.SystemUser(),
+		Username:  hostenv.SystemUser(),
 	}); err != nil {
 		return fmt.Errorf("unable to write %s: %w", filename, err)
 	}

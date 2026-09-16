@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
 	flag "github.com/spf13/pflag"
@@ -48,7 +48,7 @@ func redisDocumentationData(t *testing.T) DocumentationData {
 	t.Setenv("REDIS_IMAGE", "")
 	t.Setenv("REDIS_IMAGE_VERSION", "")
 
-	return NewDocumentationData(DocumentationDataInput{Datastore: datastores.Datastores["redis"]})
+	return NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["redis"]})
 }
 
 func TestNewDocumentationData(t *testing.T) {
@@ -82,7 +82,7 @@ func TestNewDocumentationDataPrefersTheEnvironment(t *testing.T) {
 	t.Setenv("REDIS_IMAGE", "valkey/valkey")
 	t.Setenv("REDIS_IMAGE_VERSION", "9.9.9")
 
-	data := NewDocumentationData(DocumentationDataInput{Datastore: datastores.Datastores["redis"]})
+	data := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["redis"]})
 	if data.Image != "valkey/valkey" {
 		t.Errorf("expected the image from the environment, got %q", data.Image)
 	}
@@ -102,7 +102,7 @@ func TestNewDocumentationDataReadsThePluginDockerfile(t *testing.T) {
 	}
 
 	data := NewDocumentationData(DocumentationDataInput{
-		Datastore: datastores.Datastores["redis"],
+		Datastore: service.Datastores["redis"],
 		PluginDir: pluginDir,
 	})
 

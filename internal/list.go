@@ -6,13 +6,13 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 // ListServicesInput is the input for the ListServices function
 type ListServicesInput struct {
 	// Datastore is the service to list the services for
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 
 	// Trace is whether to enable trace output
 	Trace bool
@@ -21,7 +21,7 @@ type ListServicesInput struct {
 // ListServices lists all services of a given datastore type
 func ListServices(ctx context.Context, input ListServicesInput) ([]string, error) {
 	// list all immediate subfolders in PluginDataRoot
-	subfolders, err := os.ReadDir(filepath.Join(datastores.PluginDataRoot, input.Datastore.Properties().CommandPrefix))
+	subfolders, err := os.ReadDir(filepath.Join(service.PluginDataRoot, input.Datastore.Properties().CommandPrefix))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []string{}, nil
@@ -42,7 +42,7 @@ func ListServices(ctx context.Context, input ListServicesInput) ([]string, error
 		services = append(services, subfolder.Name())
 	}
 
-	services, err = datastores.FilterServices(ctx, datastores.FilterServicesInput{
+	services, err = service.FilterServices(ctx, service.FilterServicesInput{
 		Datastore: input.Datastore,
 		Services:  services,
 		Trace:     input.Trace,

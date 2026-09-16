@@ -1,4 +1,4 @@
-package datastores
+package service
 
 import (
 	"context"
@@ -33,7 +33,7 @@ type AttachNetworksToContainerInput struct {
 // AttachNetworksToContainer attaches networks to a container
 func AttachNetworksToContainer(ctx context.Context, input AttachNetworksToContainerInput) error {
 	for _, network := range input.Networks {
-		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		_, err := execx.Run(ctx, common.ExecCommandInput{
 			Command: common.DockerBin(),
 			Args:    []string{"network", "connect", "--alias", input.NetworkAlias, network, input.ContainerID},
 		})
@@ -42,11 +42,6 @@ func AttachNetworksToContainer(ctx context.Context, input AttachNetworksToContai
 		}
 	}
 	return nil
-}
-
-// CallExecCommandWithContext calls a command with a context
-func CallExecCommandWithContext(ctx context.Context, input common.ExecCommandInput) (common.ExecCommandResponse, error) {
-	return execx.Run(ctx, input)
 }
 
 // CommitServiceConfigInput is the input for the CommitServiceConfig function
@@ -67,7 +62,7 @@ type CommitServiceConfigInput struct {
 	Memory int
 
 	// Datastore is the service to commit the service config for
-	Datastore Datastore
+	Datastore *Datastore
 
 	// ServiceName is the name of the service to commit the service config for
 	ServiceName string
@@ -97,9 +92,9 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	err := common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   strings.Join(lines, "\n"),
 		Filename:  serviceFiles.Env,
-		GroupName: SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      0644,
-		Username:  SystemUser(),
+		Username:  hostenv.SystemUser(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to write env to %s: %w", serviceFiles.Env, err)
@@ -108,9 +103,9 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	err = common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   input.ConfigOptions,
 		Filename:  serviceFiles.ConfigOptions,
-		GroupName: SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      0644,
-		Username:  SystemUser(),
+		Username:  hostenv.SystemUser(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to write config options to %s: %w", serviceFiles.ConfigOptions, err)
@@ -119,9 +114,9 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	err = common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   strconv.Itoa(input.Memory),
 		Filename:  serviceFiles.Memory,
-		GroupName: SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      0644,
-		Username:  SystemUser(),
+		Username:  hostenv.SystemUser(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to write memory to %s: %w", serviceFiles.Memory, err)
@@ -130,9 +125,9 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	err = common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   input.ShmSize,
 		Filename:  serviceFiles.ShmSize,
-		GroupName: SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      0644,
-		Username:  SystemUser(),
+		Username:  hostenv.SystemUser(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to write shm size to %s: %w", serviceFiles.ShmSize, err)
@@ -141,9 +136,9 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	err = common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   input.Image,
 		Filename:  serviceFiles.Image,
-		GroupName: SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      0644,
-		Username:  SystemUser(),
+		Username:  hostenv.SystemUser(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to write image to %s: %w", serviceFiles.Image, err)
@@ -152,9 +147,9 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	err = common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   input.ImageVersion,
 		Filename:  serviceFiles.ImageVersion,
-		GroupName: SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      0644,
-		Username:  SystemUser(),
+		Username:  hostenv.SystemUser(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to write image version to %s: %w", serviceFiles.ImageVersion, err)
@@ -226,7 +221,7 @@ func GetAvailablePort() int {
 // ImageForServiceInput is the input for the ImageForService function
 type ImageForServiceInput struct {
 	// Datastore is the service to get the image for
-	Datastore Datastore
+	Datastore *Datastore
 
 	// ServiceName is the name of the service to get the image for
 	ServiceName string
@@ -287,7 +282,7 @@ func ImageForService(input ImageForServiceInput) (string, error) {
 
 // PullTaggedImage pulls a tagged image
 func PullTaggedImage(ctx context.Context, taggedImage string) (bool, error) {
-	result, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+	result, err := execx.Run(ctx, common.ExecCommandInput{
 		Command:      common.DockerBin(),
 		Args:         []string{"image", "pull", taggedImage},
 		StreamStderr: true,
@@ -305,7 +300,7 @@ func PullTaggedImage(ctx context.Context, taggedImage string) (bool, error) {
 // FilterServicesInput is the input for the FilterServices function
 type FilterServicesInput struct {
 	// Datastore is the service to filter services for
-	Datastore Datastore
+	Datastore *Datastore
 
 	// Services is the services to filter
 	Services []string
@@ -351,7 +346,7 @@ func FilterServices(ctx context.Context, input FilterServicesInput) ([]string, e
 	}
 
 	pluginCommandPrefix := input.Datastore.Properties().CommandPrefix
-	results, err := CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
+	results, err := execx.PlugnTrigger(ctx, common.PlugnTriggerInput{
 		Trigger: "user-auth-app",
 		Args:    append([]string{defaultSShUser, defaultSShName, pluginCommandPrefix}, input.Services...),
 		Env: map[string]string{
@@ -377,15 +372,10 @@ func FilterServices(ctx context.Context, input FilterServicesInput) ([]string, e
 	return filteredServices, nil
 }
 
-// CallPlugnTriggerWithContext calls a plugin trigger
-func CallPlugnTriggerWithContext(ctx context.Context, input common.PlugnTriggerInput) (common.ExecCommandResponse, error) {
-	return execx.PlugnTrigger(ctx, input)
-}
-
 // ServicePortReconcileStatusInput is the input for the ServicePortReconcileStatus function
 type ServicePortReconcileStatusInput struct {
 	// Datastore is the service to reconcile the port for
-	Datastore Datastore
+	Datastore *Datastore
 
 	// ServiceName is the name of the service to reconcile the port for
 	ServiceName string
@@ -401,7 +391,7 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 
 	if !common.FileExists(portFile) || common.ReadFirstLine(portFile) == "" {
 		if ContainerExists(ctx, ambassadorContainerName) {
-			_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+			_, err := execx.Run(ctx, common.ExecCommandInput{
 				Command: common.DockerBin(),
 				Args:    []string{"container", "stop", ambassadorContainerName},
 			})
@@ -418,7 +408,7 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 	}
 
 	if ContainerExists(ctx, ambassadorContainerName) {
-		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		_, err := execx.Run(ctx, common.ExecCommandInput{
 			Command: common.DockerBin(),
 			Args:    []string{"container", "start", ambassadorContainerName},
 		})
@@ -451,9 +441,9 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		dockerRunOptions = append(dockerRunOptions, fmt.Sprintf("--publish=%s:%d", hostPort, serviceProperties.Ports[i]))
 	}
 
-	dockerRunOptions = append(dockerRunOptions, PluginAmbassadorImage)
+	dockerRunOptions = append(dockerRunOptions, hostenv.AmbassadorImage)
 
-	_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+	_, err := execx.Run(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    dockerRunOptions,
 	})
@@ -461,16 +451,6 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		return fmt.Errorf("failed to run container %s: %w", ambassadorContainerName, err)
 	}
 	return nil
-}
-
-// SystemGroup returns the system group
-func SystemGroup() string {
-	return hostenv.SystemGroup()
-}
-
-// SystemUser returns the system user
-func SystemUser() string {
-	return hostenv.SystemUser()
 }
 
 // MissingServiceNameMessage is the message emitted when a service name is not
@@ -518,7 +498,7 @@ func ValidateTaggedImageExists(taggedImage string) error {
 
 type WriteDatabaseNameInput struct {
 	// Datastore is the datastore to write the database name to
-	Datastore Datastore
+	Datastore *Datastore
 
 	// ServiceName is the name of the service to write the database name to
 	ServiceName string
@@ -532,9 +512,9 @@ func WriteDatabaseName(input WriteDatabaseNameInput) error {
 	err := common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   sanitizedDatabaseName,
 		Filename:  serviceFiles.DatabaseName,
-		GroupName: SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      0644,
-		Username:  SystemUser(),
+		Username:  hostenv.SystemUser(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to write database name to %s: %w", serviceFiles.DatabaseName, err)

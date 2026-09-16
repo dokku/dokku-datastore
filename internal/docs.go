@@ -10,7 +10,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
 	flag "github.com/spf13/pflag"
@@ -81,7 +81,7 @@ type DocumentationData struct {
 // DocumentationDataInput is the input for the NewDocumentationData function
 type DocumentationDataInput struct {
 	// Datastore is the datastore the documentation is rendered for
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 
 	// PluginDir is the plugin checkout to read the pinned image out of. When it
 	// is empty, only the environment and the datastore's defaults are consulted.
@@ -120,7 +120,7 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 // resolveImage works out which image the plugin runs. The plugin pins it in its
 // Dockerfile and exports it as an environment variable at runtime, so both are
 // preferred over the datastore's own default.
-func resolveImage(properties datastores.ServiceStruct, pluginDir string) (string, string) {
+func resolveImage(properties service.ServiceStruct, pluginDir string) (string, string) {
 	image := os.Getenv(properties.PluginVariable + "_IMAGE")
 	imageVersion := os.Getenv(properties.PluginVariable + "_IMAGE_VERSION")
 	if image != "" && imageVersion != "" {

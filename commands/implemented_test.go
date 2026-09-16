@@ -4,21 +4,21 @@ import (
 	"os"
 	"testing"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
 	"github.com/dokku/dokku-datastore/internal/definition"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 // withoutVerbs is a datastore that declares no commands, which is what a
 // datastore with nothing to connect to or dump looks like.
-func withoutVerbs(t *testing.T) datastores.Datastore {
+func withoutVerbs(t *testing.T) *service.Datastore {
 	t.Helper()
 
-	redis, ok := datastores.Datastores["redis"].(*datastores.DefinitionService)
+	redis, ok := service.Datastores["redis"]
 	if !ok {
-		t.Fatal("expected redis to be definition backed")
+		t.Fatal("expected redis to be registered")
 	}
 
-	bare := &datastores.DefinitionService{Definition: redis.Definition}
+	bare := &service.Datastore{Definition: redis.Definition}
 	bare.Definition.Dokku.Commands = map[string]definition.Command{}
 
 	return bare
@@ -26,15 +26,15 @@ func withoutVerbs(t *testing.T) datastores.Datastore {
 
 // exportOnly declares export but not import, which is what a datastore that can
 // be dumped but not loaded looks like.
-func exportOnly(t *testing.T) datastores.Datastore {
+func exportOnly(t *testing.T) *service.Datastore {
 	t.Helper()
 
-	redis, ok := datastores.Datastores["redis"].(*datastores.DefinitionService)
+	redis, ok := service.Datastores["redis"]
 	if !ok {
-		t.Fatal("expected redis to be definition backed")
+		t.Fatal("expected redis to be registered")
 	}
 
-	partial := &datastores.DefinitionService{Definition: redis.Definition}
+	partial := &service.Datastore{Definition: redis.Definition}
 	partial.Definition.Dokku.Commands = map[string]definition.Command{
 		"export": redis.Definition.Dokku.Commands["export"],
 	}
@@ -45,13 +45,13 @@ func exportOnly(t *testing.T) datastores.Datastore {
 func TestRequireImplemented(t *testing.T) {
 	tests := []struct {
 		name          string
-		datastore     datastores.Datastore
+		datastore     *service.Datastore
 		subcommand    string
 		unimplemented bool
 	}{
 		{
 			name:       "a declared command",
-			datastore:  datastores.Datastores["redis"],
+			datastore:  service.Datastores["redis"],
 			subcommand: "connect",
 		},
 		{
@@ -83,7 +83,7 @@ func TestRequireImplemented(t *testing.T) {
 		},
 		{
 			name:       "clone with both",
-			datastore:  datastores.Datastores["redis"],
+			datastore:  service.Datastores["redis"],
 			subcommand: "clone",
 		},
 		{

@@ -6,21 +6,21 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 // TriggerInput is the input shared by the plugin trigger implementations
 type TriggerInput struct {
 	// Datastore is the datastore the trigger is running for
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 
 	// Logger reports progress
 	Logger Ui
 }
 
 // linkedAppsInput builds the links file lookup for a service
-func linkedAppsInput(s datastores.Datastore, serviceName string) datastores.LinkedAppsInput {
-	return datastores.LinkedAppsInput{Datastore: s, ServiceName: serviceName}
+func linkedAppsInput(s *service.Datastore, serviceName string) service.LinkedAppsInput {
+	return service.LinkedAppsInput{Datastore: s, ServiceName: serviceName}
 }
 
 // CopyAppLinks records the new app name against every service the old app was
@@ -33,11 +33,11 @@ func CopyAppLinks(ctx context.Context, input TriggerInput, oldAppName string, ne
 	}
 
 	for _, serviceName := range services {
-		if !slices.Contains(datastores.LinkedApps(ctx, linkedAppsInput(input.Datastore, serviceName)), oldAppName) {
+		if !slices.Contains(service.LinkedApps(ctx, linkedAppsInput(input.Datastore, serviceName)), oldAppName) {
 			continue
 		}
 
-		if err := datastores.AddLinkedApp(ctx, linkedAppsInput(input.Datastore, serviceName), newAppName); err != nil {
+		if err := service.AddLinkedApp(ctx, linkedAppsInput(input.Datastore, serviceName), newAppName); err != nil {
 			return err
 		}
 	}
@@ -54,7 +54,7 @@ func RemoveAppLinks(ctx context.Context, input TriggerInput, appName string) err
 
 	for _, serviceName := range services {
 		input.Logger.Info(fmt.Sprintf("Unlinking from %s", serviceName))
-		if err := datastores.RemoveLinkedApp(ctx, linkedAppsInput(input.Datastore, serviceName), appName); err != nil {
+		if err := service.RemoveLinkedApp(ctx, linkedAppsInput(input.Datastore, serviceName), appName); err != nil {
 			return err
 		}
 	}
@@ -72,11 +72,11 @@ func StartLinkedServices(ctx context.Context, input TriggerInput, appName string
 
 	serviceType := input.Datastore.Properties().CommandPrefix
 	for _, serviceName := range services {
-		if !slices.Contains(datastores.LinkedApps(ctx, linkedAppsInput(input.Datastore, serviceName)), appName) {
+		if !slices.Contains(service.LinkedApps(ctx, linkedAppsInput(input.Datastore, serviceName)), appName) {
 			continue
 		}
 
-		status := strings.ToLower(datastores.Status(ctx, datastores.StatusInput{
+		status := strings.ToLower(service.Status(ctx, service.StatusInput{
 			Datastore:   input.Datastore,
 			ServiceName: serviceName,
 		}))
@@ -94,7 +94,7 @@ func StartLinkedServices(ctx context.Context, input TriggerInput, appName string
 		input.Logger.Warn(WarnInput{
 			Warning: fmt.Sprintf("%s service %s is not running, issuing service start", serviceType, serviceName),
 		})
-		if err := datastores.Start(ctx, datastores.StartInput{
+		if err := service.Start(ctx, service.StartInput{
 			Datastore:   input.Datastore,
 			ServiceName: serviceName,
 		}); err != nil {

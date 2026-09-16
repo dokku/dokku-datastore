@@ -9,7 +9,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -155,7 +155,7 @@ func (c *UnlinkCommand) Run(args []string) int {
 		return 1
 	}
 
-	datastore, ok := datastores.Datastores[datastoreType]
+	datastore, ok := service.Datastores[datastoreType]
 	if !ok {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
@@ -167,12 +167,12 @@ func (c *UnlinkCommand) Run(args []string) int {
 	if serviceName == "" {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
-			Error:   datastores.ErrMissingServiceName,
+			Error:   service.ErrMissingServiceName,
 		})
 		return 1
 	}
 
-	if err := datastores.ValidateServiceName(serviceName); err != nil {
+	if err := service.ValidateServiceName(serviceName); err != nil {
 		logger.Error(internal.ErrorInput{
 			Error: err,
 		})
@@ -183,14 +183,14 @@ func (c *UnlinkCommand) Run(args []string) int {
 	if appName == "" {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
-			Error:   datastores.ErrMissingAppName,
+			Error:   service.ErrMissingAppName,
 		})
 		return 1
 	}
 
 	// the service is checked first, because whether a missing app is an error
 	// depends on whether this service is linked to it
-	if !datastores.Exists(ctx, datastore, serviceName) {
+	if !service.Exists(ctx, datastore, serviceName) {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("service %s does not exist", serviceName),
 		})
@@ -203,12 +203,12 @@ func (c *UnlinkCommand) Run(args []string) int {
 		// is the only command that can take the name out of the links file. An
 		// app that was never linked stays an error, so a typo is not accepted
 		// silently.
-		linked := slices.Contains(datastores.LinkedApps(ctx, datastores.LinkedAppsInput{
+		linked := slices.Contains(service.LinkedApps(ctx, service.LinkedAppsInput{
 			Datastore:   datastore,
 			ServiceName: serviceName,
 		}), appName)
 
-		if !linked || datastores.AppExists(appName) {
+		if !linked || service.AppExists(appName) {
 			logger.Error(internal.ErrorInput{
 				Error: err,
 			})

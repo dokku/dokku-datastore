@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 // withDataRoot points the package at a temporary services root. Both variables
@@ -15,22 +15,22 @@ func withDataRoot(t *testing.T) {
 	t.Helper()
 
 	root := t.TempDir()
-	previousLib, previousData := datastores.DokkuLibRoot, datastores.PluginDataRoot
-	datastores.DokkuLibRoot = root
-	datastores.PluginDataRoot = filepath.Join(root, "services")
+	previousLib, previousData := service.DokkuLibRoot, service.PluginDataRoot
+	service.DokkuLibRoot = root
+	service.PluginDataRoot = filepath.Join(root, "services")
 
 	t.Cleanup(func() {
-		datastores.DokkuLibRoot = previousLib
-		datastores.PluginDataRoot = previousData
+		service.DokkuLibRoot = previousLib
+		service.PluginDataRoot = previousData
 	})
 }
 
 func TestListServicesSkipsStrayFiles(t *testing.T) {
-	datastore := datastores.Datastores["redis"]
+	datastore := service.Datastores["redis"]
 
 	withDataRoot(t)
 
-	pluginRoot := filepath.Dir(datastores.Folders(datastore, "unused").Root)
+	pluginRoot := filepath.Dir(service.Folders(datastore, "unused").Root)
 	for _, service := range []string{"lollipop", "gobstopper"} {
 		if err := os.MkdirAll(filepath.Join(pluginRoot, service), 0755); err != nil {
 			t.Fatalf("failed to create the service root: %s", err)
@@ -63,11 +63,11 @@ func TestListServicesSkipsStrayFiles(t *testing.T) {
 // A service root symlinked onto another disk is still a service, which is why
 // the filter drops regular files rather than keeping only directories.
 func TestListServicesKeepsASymlinkedServiceRoot(t *testing.T) {
-	datastore := datastores.Datastores["redis"]
+	datastore := service.Datastores["redis"]
 
 	withDataRoot(t)
 
-	pluginRoot := filepath.Dir(datastores.Folders(datastore, "unused").Root)
+	pluginRoot := filepath.Dir(service.Folders(datastore, "unused").Root)
 	if err := os.MkdirAll(pluginRoot, 0755); err != nil {
 		t.Fatalf("failed to create the plugin root: %s", err)
 	}

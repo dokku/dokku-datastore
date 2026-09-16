@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/dokku/dokku/plugins/common"
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -142,7 +142,7 @@ func (c *AppLinksCommand) Run(args []string) int {
 		return 1
 	}
 
-	datastore, ok := datastores.Datastores[datastoreType]
+	datastore, ok := service.Datastores[datastoreType]
 	if !ok {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
@@ -154,7 +154,7 @@ func (c *AppLinksCommand) Run(args []string) int {
 	if appName == "" {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
-			Error:   datastores.ErrMissingAppName,
+			Error:   service.ErrMissingAppName,
 		})
 		return 1
 	}

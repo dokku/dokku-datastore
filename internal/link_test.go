@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 func TestConfigKeysForURL(t *testing.T) {
@@ -56,7 +56,7 @@ func TestConfigKeysForURL(t *testing.T) {
 }
 
 func TestAlternateAlias(t *testing.T) {
-	datastore := datastores.Datastores["redis"]
+	datastore := service.Datastores["redis"]
 
 	tests := []struct {
 		name        string
@@ -98,7 +98,7 @@ func TestAlternateAlias(t *testing.T) {
 }
 
 func TestAlternateAliasExhausted(t *testing.T) {
-	datastore := datastores.Datastores["redis"]
+	datastore := service.Datastores["redis"]
 
 	environment := map[string]string{}
 	for _, color := range alternateAliasColors {

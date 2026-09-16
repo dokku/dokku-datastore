@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 )
 
 func TestWaitArgs(t *testing.T) {
@@ -20,7 +20,7 @@ func TestWaitArgs(t *testing.T) {
 				NetworkAlias:  "dokku-redis-lollipop",
 				Port:          6379,
 			},
-			expected: "container run --rm --link=dokku.redis.lollipop:dokku-redis-lollipop " + datastores.PluginWaitImage + " -c dokku-redis-lollipop:6379",
+			expected: "container run --rm --link=dokku.redis.lollipop:dokku-redis-lollipop " + hostenv.WaitImage + " -c dokku-redis-lollipop:6379",
 		},
 		{
 			// the probe has to join the network the service was created on, or
@@ -32,7 +32,7 @@ func TestWaitArgs(t *testing.T) {
 				InitialNetwork: "custom-network",
 				Port:           6379,
 			},
-			expected: "container run --rm --link=dokku.redis.lollipop:dokku-redis-lollipop --network=custom-network " + datastores.PluginWaitImage + " -c dokku-redis-lollipop:6379",
+			expected: "container run --rm --link=dokku.redis.lollipop:dokku-redis-lollipop --network=custom-network " + hostenv.WaitImage + " -c dokku-redis-lollipop:6379",
 		},
 	}
 
@@ -55,7 +55,7 @@ func TestWaitArgsUsesThePinnedProbe(t *testing.T) {
 	}
 
 	for _, arg := range args {
-		if arg == datastores.PluginWaitImage {
+		if arg == hostenv.WaitImage {
 			return
 		}
 	}
@@ -75,7 +75,7 @@ func TestWaitArgsPutsTheProbeArgumentsLast(t *testing.T) {
 
 	image := -1
 	for i, arg := range args {
-		if arg == datastores.PluginWaitImage {
+		if arg == hostenv.WaitImage {
 			image = i
 		}
 	}

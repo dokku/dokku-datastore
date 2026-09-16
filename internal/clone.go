@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 // CloneServiceInput is the input for the CloneService function
@@ -20,7 +20,7 @@ type CloneServiceInput struct {
 	CustomEnv string
 
 	// Datastore is the datastore both services belong to
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 
 	// Logger reports progress
 	Logger Ui
@@ -55,7 +55,7 @@ type CloneServiceInput struct {
 func CloneService(ctx context.Context, input CloneServiceInput) error {
 	// the clone runs on whatever image the source service is on, so that the
 	// copied data is never handed to a different version than it came from
-	sourceImage := datastores.Version(ctx, datastores.VersionInput{
+	sourceImage := service.Version(ctx, service.VersionInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})
@@ -94,7 +94,7 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 	}
 	defer os.Remove(dumpFile.Name())
 
-	if err := input.Datastore.ExportService(ctx, datastores.ExportServiceInput{
+	if err := input.Datastore.ExportService(ctx, service.ExportServiceInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 		Writer:      dumpFile,
@@ -108,7 +108,7 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 		return fmt.Errorf("unable to rewind %s: %w", filepath.Base(dumpFile.Name()), err)
 	}
 
-	if err := input.Datastore.ImportService(ctx, datastores.ImportServiceInput{
+	if err := input.Datastore.ImportService(ctx, service.ImportServiceInput{
 		Datastore:   input.Datastore,
 		Reader:      dumpFile,
 		ServiceName: input.NewServiceName,

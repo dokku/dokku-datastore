@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/dokku/dokku/plugins/common"
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -152,12 +152,12 @@ func (c *DestroyCommand) Run(args []string) int {
 	if serviceName == "" {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
-			Error:   datastores.ErrMissingServiceName,
+			Error:   service.ErrMissingServiceName,
 		})
 		return 1
 	}
 
-	datastore, ok := datastores.Datastores[datastoreType]
+	datastore, ok := service.Datastores[datastoreType]
 	if !ok {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
@@ -166,7 +166,7 @@ func (c *DestroyCommand) Run(args []string) int {
 	}
 
 	// check if the service exists
-	if !datastores.Exists(ctx, datastore, serviceName) {
+	if !service.Exists(ctx, datastore, serviceName) {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("service %s does not exist", serviceName),
 		})
@@ -176,7 +176,7 @@ func (c *DestroyCommand) Run(args []string) int {
 	// check if the service is linked to any apps. A link naming an app that no
 	// longer exists is stale, and this guard is here to stop a datastore being
 	// deleted while an app is using it, so a stale one must not block.
-	linkedApps := datastores.LiveLinkedApps(ctx, datastores.LinkedAppsInput{
+	linkedApps := service.LiveLinkedApps(ctx, service.LinkedAppsInput{
 		Datastore:   datastore,
 		ServiceName: serviceName,
 	})

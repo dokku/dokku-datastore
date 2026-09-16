@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 func TestSudoersContents(t *testing.T) {
-	datastore := datastores.Datastores["redis"]
+	datastore := service.Datastores["redis"]
 	contents := SudoersContents(datastore)
 
 	// every line has to be a NOPASSWD grant to the dokku group, and nothing else
@@ -42,7 +42,7 @@ func TestSudoersContents(t *testing.T) {
 func TestCronHelperIsOwnedByRoot(t *testing.T) {
 	// the dokku group may run this as root, so being able to rewrite it, or to
 	// replace the directory holding it, would be a way to run anything as root
-	file := CronHelperFile(datastores.Datastores["redis"])
+	file := CronHelperFile(service.Datastores["redis"])
 
 	if file.Username != "root" || file.GroupName != "root" {
 		t.Errorf("expected root:root, got %s:%s", file.Username, file.GroupName)
@@ -77,7 +77,7 @@ func TestCronHelperIsOwnedByRoot(t *testing.T) {
 func TestSudoersFileIsOwnedByRoot(t *testing.T) {
 	// sudo ignores a sudoers file that is not owned by root, and a file the
 	// dokku user owns would let it grant itself anything
-	file := SudoersFile(datastores.Datastores["redis"])
+	file := SudoersFile(service.Datastores["redis"])
 
 	if file.Username != "root" || file.GroupName != "root" {
 		t.Errorf("expected root:root, got %s:%s", file.Username, file.GroupName)
@@ -96,7 +96,7 @@ func TestSudoersFileIsOwnedByRoot(t *testing.T) {
 // at", so the agreement is pinned by reading the path back out of the generated
 // helper rather than restating it.
 func TestTheHelperStagesWhereTheBinaryWrites(t *testing.T) {
-	datastore := datastores.Datastores["redis"]
+	datastore := service.Datastores["redis"]
 
 	dataRoot := ""
 	for _, line := range strings.Split(CronHelperFile(datastore).Content, "\n") {

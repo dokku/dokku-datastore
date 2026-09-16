@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 
 	"github.com/dokku/dokku-datastore/internal/cron"
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/execx"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
+	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 )
 
@@ -33,9 +35,9 @@ func writeBackupFile(folder string, name string, contents string) error {
 
 	if err := common.SetPermissions(common.SetPermissionInput{
 		Filename:  folder,
-		GroupName: datastores.SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      ServiceFolderMode,
-		Username:  datastores.SystemUser(),
+		Username:  hostenv.SystemUser(),
 	}); err != nil {
 		return fmt.Errorf("unable to set permissions on %s: %w", folder, err)
 	}
@@ -44,9 +46,9 @@ func writeBackupFile(folder string, name string, contents string) error {
 	if err := common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   contents,
 		Filename:  filename,
-		GroupName: datastores.SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      0640,
-		Username:  datastores.SystemUser(),
+		Username:  hostenv.SystemUser(),
 	}); err != nil {
 		return fmt.Errorf("unable to write %s: %w", filename, err)
 	}
@@ -57,7 +59,7 @@ func writeBackupFile(folder string, name string, contents string) error {
 // BackupAuthInput is the input for the BackupAuth function
 type BackupAuthInput struct {
 	AccessKeyID      string
-	Datastore        datastores.Datastore
+	Datastore        *service.Datastore
 	DefaultRegion    string
 	EndpointURL      string
 	SecretAccessKey  string
@@ -67,7 +69,7 @@ type BackupAuthInput struct {
 
 // BackupAuth stores the credentials backups are shipped with
 func BackupAuth(ctx context.Context, input BackupAuthInput) error {
-	folder := datastores.Folders(input.Datastore, input.ServiceName).Backup
+	folder := service.Folders(input.Datastore, input.ServiceName).Backup
 
 	entries := map[string]string{
 		accessKeyIDFile:     input.AccessKeyID,
@@ -93,8 +95,8 @@ func BackupAuth(ctx context.Context, input BackupAuthInput) error {
 }
 
 // BackupDeauth removes the stored backup credentials for a service
-func BackupDeauth(ctx context.Context, s datastores.Datastore, serviceName string) error {
-	folder := datastores.Folders(s, serviceName).Backup
+func BackupDeauth(ctx context.Context, s *service.Datastore, serviceName string) error {
+	folder := service.Folders(s, serviceName).Backup
 	if err := os.RemoveAll(folder); err != nil {
 		return fmt.Errorf("unable to remove %s: %w", folder, err)
 	}
@@ -103,28 +105,28 @@ func BackupDeauth(ctx context.Context, s datastores.Datastore, serviceName strin
 }
 
 // SetBackupEncryption stores a passphrase future backups are encrypted with
-func SetBackupEncryption(ctx context.Context, s datastores.Datastore, serviceName string, passphrase string) error {
-	return writeBackupFile(datastores.Folders(s, serviceName).BackupEncryption, encryptionKeyFile, passphrase)
+func SetBackupEncryption(ctx context.Context, s *service.Datastore, serviceName string, passphrase string) error {
+	return writeBackupFile(service.Folders(s, serviceName).BackupEncryption, encryptionKeyFile, passphrase)
 }
 
 // SetBackupPublicKeyEncryption stores the gpg public key future backups are encrypted with
-func SetBackupPublicKeyEncryption(ctx context.Context, s datastores.Datastore, serviceName string, publicKeyID string) error {
-	return writeBackupFile(datastores.Folders(s, serviceName).BackupEncryption, publicKeyIDFile, publicKeyID)
+func SetBackupPublicKeyEncryption(ctx context.Context, s *service.Datastore, serviceName string, publicKeyID string) error {
+	return writeBackupFile(service.Folders(s, serviceName).BackupEncryption, publicKeyIDFile, publicKeyID)
 }
 
 // UnsetBackupEncryption removes the stored backup passphrase
-func UnsetBackupEncryption(ctx context.Context, s datastores.Datastore, serviceName string) error {
+func UnsetBackupEncryption(ctx context.Context, s *service.Datastore, serviceName string) error {
 	return removeBackupSetting(s, serviceName, encryptionKeyFile)
 }
 
 // UnsetBackupPublicKeyEncryption removes the stored backup public key
-func UnsetBackupPublicKeyEncryption(ctx context.Context, s datastores.Datastore, serviceName string) error {
+func UnsetBackupPublicKeyEncryption(ctx context.Context, s *service.Datastore, serviceName string) error {
 	return removeBackupSetting(s, serviceName, publicKeyIDFile)
 }
 
 // removeBackupSetting deletes one of the backup encryption files
-func removeBackupSetting(s datastores.Datastore, serviceName string, name string) error {
-	filename := filepath.Join(datastores.Folders(s, serviceName).BackupEncryption, name)
+func removeBackupSetting(s *service.Datastore, serviceName string, name string) error {
+	filename := filepath.Join(service.Folders(s, serviceName).BackupEncryption, name)
 	if err := os.Remove(filename); err != nil {
 		return fmt.Errorf("unable to remove %s: %w", filename, err)
 	}
@@ -133,8 +135,8 @@ func removeBackupSetting(s datastores.Datastore, serviceName string, name string
 }
 
 // BackupScheduleCat returns the contents of the backup cron file for a service
-func BackupScheduleCat(s datastores.Datastore, serviceName string) (string, error) {
-	cronFile := datastores.Files(s, serviceName).CronFile
+func BackupScheduleCat(s *service.Datastore, serviceName string) (string, error) {
+	cronFile := service.Files(s, serviceName).CronFile
 	if !common.FileExists(cronFile) {
 		return "", fmt.Errorf("There is no scheduled backup for %s.", serviceName) //nolint:staticcheck // matches the bash datastore plugins
 	}
@@ -160,7 +162,7 @@ func CronEntry(dokkuBin string, commandPrefix string, input ScheduleBackupInput)
 // ScheduleBackupInput is the input for the ScheduleBackup function
 type ScheduleBackupInput struct {
 	BucketName  string
-	Datastore   datastores.Datastore
+	Datastore   *service.Datastore
 	Schedule    string
 	ServiceName string
 	UseIAM      bool
@@ -184,9 +186,9 @@ func ScheduleBackup(ctx context.Context, input ScheduleBackupInput) error {
 	if err := common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   entry + "\n",
 		Filename:  tmpCronFile,
-		GroupName: datastores.SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      0644,
-		Username:  datastores.SystemUser(),
+		Username:  hostenv.SystemUser(),
 	}); err != nil {
 		return fmt.Errorf("unable to write %s: %w", tmpCronFile, err)
 	}
@@ -199,14 +201,14 @@ func ScheduleBackup(ctx context.Context, input ScheduleBackupInput) error {
 // BackupInput is the input for the Backup function
 type BackupInput struct {
 	BucketName  string
-	Datastore   datastores.Datastore
+	Datastore   *service.Datastore
 	ServiceName string
 	UseIAM      bool
 }
 
 // Backup exports a service and ships the result to an s3 bucket
 func Backup(ctx context.Context, input BackupInput) error {
-	serviceFolders := datastores.Folders(input.Datastore, input.ServiceName)
+	serviceFolders := service.Folders(input.Datastore, input.ServiceName)
 	commandPrefix := input.Datastore.Properties().CommandPrefix
 
 	dockerArgs := []string{"container", "run", "--rm"}
@@ -228,8 +230,8 @@ func Backup(ctx context.Context, input BackupInput) error {
 		)
 	}
 
-	containerID := datastores.ContainerID(input.Datastore, input.ServiceName)
-	if !datastores.ContainerExists(ctx, containerID) {
+	containerID := service.ContainerID(input.Datastore, input.ServiceName)
+	if !service.ContainerExists(ctx, containerID) {
 		return errors.New("Service container does not exist") //nolint:staticcheck // matches the bash datastore plugins
 	}
 
@@ -249,7 +251,7 @@ func Backup(ctx context.Context, input BackupInput) error {
 		return fmt.Errorf("unable to create %s: %w", exportFile, err)
 	}
 
-	if err := input.Datastore.ExportService(ctx, datastores.ExportServiceInput{
+	if err := input.Datastore.ExportService(ctx, service.ExportServiceInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 		Writer:      handle,
@@ -280,9 +282,9 @@ func Backup(ctx context.Context, input BackupInput) error {
 		}
 	}
 
-	dockerArgs = append(dockerArgs, datastores.PluginS3BackupImage)
+	dockerArgs = append(dockerArgs, hostenv.S3BackupImage)
 
-	if _, err := datastores.CallExecCommandWithContext(ctx, common.ExecCommandInput{
+	if _, err := execx.Run(ctx, common.ExecCommandInput{
 		Command:      common.DockerBin(),
 		Args:         dockerArgs,
 		StreamStderr: true,

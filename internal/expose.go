@@ -5,32 +5,33 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
+	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 )
 
 // IsExposed checks if a service is exposed
-func IsExposed(s datastores.Datastore, serviceName string) bool {
-	return len(datastores.ExposedHostPorts(s, serviceName)) > 0
+func IsExposed(s *service.Datastore, serviceName string) bool {
+	return len(service.ExposedHostPorts(s, serviceName)) > 0
 }
 
 // ConfiguredPorts returns the host ports a service is exposed on. Unlike
-// datastores.ExposedPorts this is the raw port list rather than a container to
+// service.ExposedPorts this is the raw port list rather than a container to
 // host mapping.
-func ConfiguredPorts(s datastores.Datastore, serviceName string) string {
-	return strings.Join(datastores.ExposedHostPorts(s, serviceName), " ")
+func ConfiguredPorts(s *service.Datastore, serviceName string) string {
+	return strings.Join(service.ExposedHostPorts(s, serviceName), " ")
 }
 
 // AlreadyExposedError returns the error reported when exposing a service that is
 // already exposed
-func AlreadyExposedError(s datastores.Datastore, serviceName string) error {
+func AlreadyExposedError(s *service.Datastore, serviceName string) error {
 	return fmt.Errorf("Service %s already exposed on port(s) %s", serviceName, ConfiguredPorts(s, serviceName)) //nolint:staticcheck // matches the bash datastore plugins
 }
 
 // ExposeServiceInput is the input for the ExposeService function
 type ExposeServiceInput struct {
 	// Datastore is the service to expose
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 
 	// Ports is the ports to expose
 	Ports []string
@@ -41,11 +42,11 @@ type ExposeServiceInput struct {
 
 // ExposeService exposes a service
 func ExposeService(ctx context.Context, input ExposeServiceInput) error {
-	serviceFiles := datastores.Files(input.Datastore, input.ServiceName)
+	serviceFiles := service.Files(input.Datastore, input.ServiceName)
 	portFile := serviceFiles.Port
 
 	if len(input.Ports) == 0 {
-		ports, err := datastores.GenerateRandomPorts(len(input.Datastore.Properties().Ports))
+		ports, err := service.GenerateRandomPorts(len(input.Datastore.Properties().Ports))
 		if err != nil {
 			return fmt.Errorf("failed to generate random ports: %w", err)
 		}
@@ -66,15 +67,15 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 	err := common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   strings.Join(input.Ports, " "),
 		Filename:  portFile,
-		GroupName: datastores.SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      0644,
-		Username:  datastores.SystemUser(),
+		Username:  hostenv.SystemUser(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to write ports to %s: %w", portFile, err)
 	}
 
-	err = datastores.Start(ctx, datastores.StartInput{
+	err = service.Start(ctx, service.StartInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})
@@ -82,7 +83,7 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 		return fmt.Errorf("failed to start service: %w", err)
 	}
 
-	err = datastores.ServicePortReconcileStatus(ctx, datastores.ServicePortReconcileStatusInput{
+	err = service.ServicePortReconcileStatus(ctx, service.ServicePortReconcileStatusInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})
@@ -94,8 +95,8 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 }
 
 // RemoveAmbassadorContainer removes the ambassador container for a service
-func RemoveAmbassadorContainer(ctx context.Context, s datastores.Datastore, serviceName string) error {
-	ambassadorName := datastores.AmbassadorContainerName(s, serviceName)
+func RemoveAmbassadorContainer(ctx context.Context, s *service.Datastore, serviceName string) error {
+	ambassadorName := service.AmbassadorContainerName(s, serviceName)
 	_, err := common.CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    []string{"container", "stop", ambassadorName},

@@ -7,14 +7,15 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/execx"
+	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 )
 
 // LogsInput is the input for the Logs function
 type LogsInput struct {
 	// Datastore is the datastore to get the logs for
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 
 	// ServiceName is the name of the service to get the logs for
 	ServiceName string
@@ -28,7 +29,7 @@ type LogsInput struct {
 
 // Logs gets the logs for a service
 func Logs(ctx context.Context, input LogsInput) error {
-	containerID := datastores.LiveContainerID(ctx, datastores.LiveContainerIDInput{
+	containerID := service.LiveContainerID(ctx, service.LiveContainerIDInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})
@@ -44,7 +45,7 @@ func Logs(ctx context.Context, input LogsInput) error {
 		args = append(args, "--follow")
 	}
 
-	_, err := datastores.CallExecCommandWithContext(ctx, common.ExecCommandInput{
+	_, err := execx.Run(ctx, common.ExecCommandInput{
 		Command:      common.DockerBin(),
 		Args:         args,
 		StdoutWriter: os.Stdout,

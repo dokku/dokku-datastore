@@ -10,7 +10,7 @@ import (
 
 var updateGolden = flag.Bool("update-golden", false, "rewrite the golden files instead of comparing against them")
 
-// redisContainerArgs is what internal/datastores/redis.go passes for a service
+// redisContainerArgs is what the previous hand written redis service passed
 // named lollipop, with everything the user can vary left at its default.
 func redisContainerArgs() ContainerArgsInput {
 	return ContainerArgsInput{

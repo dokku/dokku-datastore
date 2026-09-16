@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/execx"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
+	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 )
 
@@ -38,14 +40,14 @@ func WaitArgs(input WaitArgsInput) []string {
 		args = append(args, "--network="+input.InitialNetwork)
 	}
 
-	args = append(args, datastores.PluginWaitImage)
+	args = append(args, hostenv.WaitImage)
 	return append(args, "-c", fmt.Sprintf("%s:%d", input.NetworkAlias, input.Port))
 }
 
 // WaitForServiceInput is the input for WaitForService.
 type WaitForServiceInput struct {
 	// Datastore is the service's datastore
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 
 	// ServiceName is the service to wait on
 	ServiceName string
@@ -66,15 +68,15 @@ func WaitForService(ctx context.Context, input WaitForServiceInput) error {
 	properties := input.Datastore.Properties()
 
 	arguments := WaitArgs(WaitArgsInput{
-		ContainerName:  datastores.ContainerName(input.Datastore, input.ServiceName),
-		NetworkAlias:   datastores.DNSHostname(input.Datastore, input.ServiceName),
-		InitialNetwork: datastores.InitialNetwork(input.Datastore, input.ServiceName),
+		ContainerName:  service.ContainerName(input.Datastore, input.ServiceName),
+		NetworkAlias:   service.DNSHostname(input.Datastore, input.ServiceName),
+		InitialNetwork: service.InitialNetwork(input.Datastore, input.ServiceName),
 		Port:           properties.WaitPort,
 	})
 
 	input.Logger.Header1(fmt.Sprintf("Waiting for %s container to be ready", input.ServiceName)) //nolint:errcheck
 
-	_, err := datastores.CallExecCommandWithContext(ctx, common.ExecCommandInput{
+	_, err := execx.Run(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    arguments,
 	})
@@ -84,7 +86,7 @@ func WaitForService(ctx context.Context, input WaitForServiceInput) error {
 
 	// the probe only reports that nothing answered, and what went wrong is in
 	// the datastore's own output, so it is shown rather than left to be asked for
-	containerID := datastores.LiveContainerID(ctx, datastores.LiveContainerIDInput{
+	containerID := service.LiveContainerID(ctx, service.LiveContainerIDInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})

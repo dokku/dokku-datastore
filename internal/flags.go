@@ -3,7 +3,7 @@ package internal
 import (
 	"os"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 // UpdateFlagFromEnvInput is the input for the UpdateFlagFromEnv function
@@ -17,7 +17,7 @@ type UpdateFlagFromEnvInput struct {
 	// ImageVersion is the image version to update from the environment
 	ImageVersion string
 	// Datastore is the service to update the flags for
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 }
 
 // UpdateFlagFromEnv updates the flags from the environment

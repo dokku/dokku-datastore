@@ -1,7 +1,6 @@
-package datastores
+package service
 
 import (
-	"context"
 	"io"
 
 	"github.com/dokku/dokku-datastore/internal/hostenv"
@@ -55,7 +54,7 @@ type ServiceStruct struct {
 // CreateServiceContainerInput is the input for the CreateServiceContainer function
 type CreateServiceContainerInput struct {
 	// Datastore is the service to create the container for
-	Datastore Datastore
+	Datastore *Datastore
 
 	// ServiceName is the name of the service to create the container for
 	ServiceName string
@@ -67,7 +66,7 @@ type CreateServiceContainerInput struct {
 // ConnectToServiceInput is the input for the ConnectToService function
 type ConnectToServiceInput struct {
 	// Datastore is the service to connect to
-	Datastore Datastore
+	Datastore *Datastore
 
 	// ServiceName is the name of the service to connect to
 	ServiceName string
@@ -76,7 +75,7 @@ type ConnectToServiceInput struct {
 // ExportServiceInput is the input for the ExportService function
 type ExportServiceInput struct {
 	// Datastore is the service to export
-	Datastore Datastore
+	Datastore *Datastore
 
 	// ServiceName is the name of the service to export
 	ServiceName string
@@ -88,43 +87,13 @@ type ExportServiceInput struct {
 // ImportServiceInput is the input for the ImportService function
 type ImportServiceInput struct {
 	// Datastore is the service to import into
-	Datastore Datastore
+	Datastore *Datastore
 
 	// Reader supplies the data to import
 	Reader io.Reader
 
 	// ServiceName is the name of the service to import into
 	ServiceName string
-}
-
-// Datastore is the interface for a service
-type Datastore interface {
-	// CreateService creates a new service
-	CreateService(ctx context.Context, serviceName string) error
-
-	// CreateServiceContainer creates a new service container
-	CreateServiceContainer(ctx context.Context, input CreateServiceContainerInput) error
-
-	// ConnectToService opens an interactive session against a service
-	ConnectToService(ctx context.Context, input ConnectToServiceInput) error
-
-	// ExportService writes a dump of the service's data to a writer
-	ExportService(ctx context.Context, input ExportServiceInput) error
-
-	// ImportService replaces the service's data with what is read from a reader
-	ImportService(ctx context.Context, input ImportServiceInput) error
-
-	// Properties returns the properties of a service
-	Properties() ServiceStruct
-
-	// ServiceType returns the type of service
-	ServiceType() string
-
-	// Title returns the service name in title case
-	Title() string
-
-	// URL returns the url for a service
-	URL(serviceName string, schemeOverride string) string
 }
 
 var (
@@ -142,19 +111,7 @@ var (
 )
 
 // Datastores is the map of datastores
-var Datastores = map[string]Datastore{}
-
-// PluginAmbassadorImage is the ambassador image
-var PluginAmbassadorImage = hostenv.AmbassadorImage
-
-// PluginS3BackupImage is the image used to ship backups to s3
-var PluginS3BackupImage = hostenv.S3BackupImage
-
-// PluginBusyboxImage is the busybox image
-var PluginBusyboxImage = hostenv.BusyboxImage
-
-// PluginWaitImage is the wait image
-var PluginWaitImage = hostenv.WaitImage
+var Datastores = map[string]*Datastore{}
 
 // init initializes the services
 func init() {
@@ -177,6 +134,6 @@ func init() {
 			panic(err)
 		}
 
-		Datastores[name] = &DefinitionService{Definition: found}
+		Datastores[name] = &Datastore{Definition: found}
 	}
 }

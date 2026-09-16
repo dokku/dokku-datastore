@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 )
 
@@ -20,7 +20,7 @@ type UpgradeServiceInput struct {
 	CustomEnv string
 
 	// Datastore is the datastore the service belongs to
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 
 	// Image is the image to upgrade to
 	Image string
@@ -40,7 +40,7 @@ type UpgradeServiceInput struct {
 
 // UpgradeService recreates a service's container on a different image
 func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
-	taggedImage, err := datastores.ImageForService(datastores.ImageForServiceInput{
+	taggedImage, err := service.ImageForService(service.ImageForServiceInput{
 		ImageOverride:        input.Image,
 		ImageVersionOverride: input.ImageVersion,
 		Datastore:            input.Datastore,
@@ -51,7 +51,7 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	}
 
 	properties := input.Datastore.Properties()
-	if err := datastores.ValidateTaggedImageExists(taggedImage); err != nil {
+	if err := service.ValidateTaggedImageExists(taggedImage); err != nil {
 		if os.Getenv(properties.ImagePullVariable) == "true" {
 			message := []string{
 				fmt.Sprintf("%s environment variable detected. Not running pull command.", properties.ImagePullVariable),
@@ -61,12 +61,12 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 			return errors.New(strings.Join(message, "\n"))
 		}
 
-		if _, err := datastores.PullTaggedImage(ctx, taggedImage); err != nil {
+		if _, err := service.PullTaggedImage(ctx, taggedImage); err != nil {
 			return fmt.Errorf("failed to pull image %s: %w", taggedImage, err)
 		}
 	}
 
-	currentImage := datastores.Version(ctx, datastores.VersionInput{
+	currentImage := service.Version(ctx, service.VersionInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})
@@ -75,7 +75,7 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		return nil
 	}
 
-	linkedApps := datastores.LinkedApps(ctx, datastores.LinkedAppsInput{
+	linkedApps := service.LinkedApps(ctx, service.LinkedAppsInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})
@@ -88,14 +88,14 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	}
 
 	input.Logger.Header2(fmt.Sprintf("Upgrading %s to %s", input.ServiceName, taggedImage)) //nolint:errcheck
-	if err := datastores.RemoveServiceContainer(ctx, datastores.RemoveServiceContainerInput{
+	if err := service.RemoveServiceContainer(ctx, service.RemoveServiceContainerInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	}); err != nil {
 		return err
 	}
 
-	if err := input.Datastore.CreateServiceContainer(ctx, datastores.CreateServiceContainerInput{
+	if err := input.Datastore.CreateServiceContainer(ctx, service.CreateServiceContainerInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 		TaggedImage: taggedImage,
@@ -103,7 +103,7 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		return err
 	}
 
-	if err := datastores.Start(ctx, datastores.StartInput{
+	if err := service.Start(ctx, service.StartInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	}); err != nil {
