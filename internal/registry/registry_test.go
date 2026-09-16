@@ -912,3 +912,101 @@ func TestOmnisciGeneratesItsRootPassword(t *testing.T) {
 		}
 	}
 }
+
+// Graphite is the definition the port names were introduced for: it has five,
+// the one a linked app is handed is not the one readiness waits on, and the
+// bash plugin distinguishes them only by position in a list.
+func TestGraphiteNamesEveryPortItNeeds(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	graphite, ok := loaded.Definition("graphite")
+	if !ok {
+		t.Fatal("expected a graphite definition")
+	}
+
+	expected := map[string]int{
+		"statsd":       8125,
+		"statsd_admin": 8126,
+		"web":          80,
+		"web_alt":      81,
+		"carbon":       2003,
+	}
+
+	for name, target := range expected {
+		port, ok := graphite.PortFor(name)
+		if !ok {
+			t.Errorf("expected a port named %s", name)
+			continue
+		}
+
+		if port.Target != target {
+			t.Errorf("expected %s on %d, got %d", name, target, port.Target)
+		}
+	}
+
+	// the url is the metrics port and readiness is grafana, which is the third
+	// entry in the list the bash plugin has to count along
+	primary, ok := graphite.PrimaryPort()
+	if !ok {
+		t.Fatal("expected a primary port")
+	}
+
+	if primary.Name != "statsd" {
+		t.Errorf("expected statsd to be primary, got %s", primary.Name)
+	}
+
+	wait, ok := graphite.PortFor(graphite.Dokku.Wait)
+	if !ok {
+		t.Fatal("expected the wait port to be named")
+	}
+
+	if wait.Target != 80 {
+		t.Errorf("expected readiness on grafana, got %d", wait.Target)
+	}
+
+	// recorded rather than acted on: nothing reads the protocol yet
+	statsd, _ := graphite.PortFor("statsd")
+	if statsd.Protocol != "udp" {
+		t.Errorf("expected statsd to be recorded as udp, got %q", statsd.Protocol)
+	}
+}
+
+// Every service the bash plugin creates gets an empty grafana password: it
+// passes GRAPHITE_PASSWORD from a variable its create function never assigns.
+func TestGraphitePassesThePasswordItGenerates(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	graphite, ok := loaded.Definition("graphite")
+	if !ok {
+		t.Fatal("expected a graphite definition")
+	}
+
+	secret, ok := graphite.Dokku.Secrets["password"]
+	if !ok {
+		t.Fatal("expected a password to be generated")
+	}
+
+	if secret.File != "PASSWORD" {
+		t.Errorf("expected PASSWORD, got %s", secret.File)
+	}
+
+	password, ok := graphite.Service.Environment["GRAPHITE_PASSWORD"]
+	if !ok {
+		t.Fatal("expected the password to reach the container")
+	}
+
+	if !strings.Contains(password, ".Secret.password") {
+		t.Errorf("expected the generated password, got %q", password)
+	}
+
+	// STATSD, which is not derivable from the datastore's name
+	if graphite.Dokku.Alias != "STATSD" || graphite.Dokku.Variable != "STATSD" {
+		t.Errorf("expected STATSD, got alias %s and variable %s", graphite.Dokku.Alias, graphite.Dokku.Variable)
+	}
+}

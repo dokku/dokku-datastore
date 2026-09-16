@@ -1,0 +1,79 @@
+---
+services:
+  graphite:
+    image: "{{ .Image }}:{{ .ImageVersion }}"
+
+    environment:
+      # the grafana account's password. The bash plugin passes this too, but
+      # reads it from a variable it never assigns, so every service it creates
+      # starts with an empty one.
+      GRAPHITE_PASSWORD: "{{ .Secret.password }}"
+
+    volumes:
+      - type: bind
+        source: "{{ .HostRoot }}/data/grafana"
+        target: /opt/grafana/data
+      - type: bind
+        source: "{{ .HostRoot }}/data/whisper"
+        target: /opt/graphite/storage/whisper
+
+    ports:
+      # where an app sends its metrics, which is what a linked app is handed.
+      # statsd speaks udp, which the bash plugin has no way to say and so has
+      # always exposed as tcp. Recording it here does not fix that on its own:
+      # nothing reads the protocol yet, and whether the ambassador forwards
+      # udp at all has to be answered before it can.
+      - name: statsd
+        target: 8125
+        protocol: udp
+        primary: true
+
+      # statsd's own administrative interface
+      - name: statsd_admin
+        target: 8126
+
+      # grafana, which is the page a person looks at
+      - name: web
+        target: 80
+
+      - name: web_alt
+        target: 81
+
+      # where carbon accepts metrics in its own line protocol
+      - name: carbon
+        target: 2003
+
+x-dokku:
+  plugin: graphite
+  title: Graphite
+  scheme: statsd
+
+  # STATSD rather than GRAPHITE, for the alias and for every variable the
+  # plugin reads. The one exception is GRAPHITE_DISABLE_PULL, which is derived
+  # from the name instead, and the two rules look identical without being it.
+  alias: STATSD
+  variable: STATSD
+  alt_alias: DOKKU_STATSD
+
+  dsn: "{{ .Scheme }}://{{ .Host }}:{{ .Port.statsd }}"
+
+  # readiness is grafana rather than the metrics port: statsd speaks udp, where
+  # a connection proves nothing, and the third entry in a list is what the bash
+  # plugin had to name this by position
+  wait: web
+
+  secrets:
+    password:
+      file: PASSWORD
+      length: 16
+      env: SERVICE_PASSWORD
+
+  # no connect, export or import: graphite is a metrics store reached over its
+  # own protocols, and the image ships no client and no dump tool. Clone and
+  # the backup family fall out of that, which is the list the bash plugin kept
+  # by hand.
+  #
+  # nginx-expose and nginx-unexpose are not here. They write a vhost under
+  # /etc/nginx and reload nginx, which needs both the host and a privilege this
+  # binary is not granted, so they stay in the plugin repo the way solr's
+  # post-extract trigger does.
