@@ -842,3 +842,73 @@ func TestPushpinPublishesWhereTheUrlPoints(t *testing.T) {
 		t.Errorf("expected WEBSOCKET, got %s", pushpin.Dokku.Alias)
 	}
 }
+
+// The bash plugin puts the service's own name in the url while creating an
+// account called omnisci, so the url it hands a linked app names a user that
+// was never made. The account the post-create step makes is the one the url
+// has to name.
+func TestOmnisciNamesTheAccountItMakes(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	omnisci, ok := loaded.Definition("omnisci")
+	if !ok {
+		t.Fatal("expected an omnisci definition")
+	}
+
+	if !strings.Contains(omnisci.Dokku.DSN, "://omnisci:") {
+		t.Errorf("expected the url to name the omnisci account, got %q", omnisci.Dokku.DSN)
+	}
+
+	if strings.Contains(omnisci.Dokku.DSN, "ServiceName") {
+		t.Errorf("expected the url not to name the service, got %q", omnisci.Dokku.DSN)
+	}
+
+	if omnisci.Dokku.Hooks.PostCreate == nil {
+		t.Fatal("expected the account and the database to be made after the service answers")
+	}
+}
+
+// The image ships one administrative account whose password is the same in
+// every installation of it. The bash plugin writes that password to disk and
+// then sets the password to what it just read, so it never changes: a
+// generated one is what makes the step it already meant to take a real one.
+func TestOmnisciGeneratesItsRootPassword(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	omnisci, ok := loaded.Definition("omnisci")
+	if !ok {
+		t.Fatal("expected an omnisci definition")
+	}
+
+	root, ok := omnisci.Dokku.Secrets["root_password"]
+	if !ok {
+		t.Fatal("expected a root password to be generated")
+	}
+
+	if root.File != "ROOTPASSWORD" {
+		t.Errorf("expected ROOTPASSWORD, got %s", root.File)
+	}
+
+	if root.Length == 0 {
+		t.Error("expected a generated length rather than a fixed value")
+	}
+
+	// the flag the cli has always accepted and then dropped
+	if root.Env != "SERVICE_ROOT_PASSWORD" {
+		t.Errorf("expected --root-password to be wired up, got %q", root.Env)
+	}
+
+	// the password that ships with the image belongs in the script that has to
+	// authenticate with it once, not in anything that is written to disk
+	for name, secret := range omnisci.Dokku.Secrets {
+		if secret.Length == 0 {
+			t.Errorf("expected %s to be generated", name)
+		}
+	}
+}
