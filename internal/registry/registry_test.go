@@ -721,3 +721,70 @@ func TestPostgresTurnsSslOnWithoutRestarting(t *testing.T) {
 		t.Error("expected the certificate to be made before the service runs")
 	}
 }
+
+// Rethinkdb is the first definition with more ports than a name to spare, and
+// the one everything addresses is neither the lowest numbered nor the first the
+// bash plugin listed. Naming them is what stops readiness waiting on the
+// administrative web page instead of the port a driver connects on.
+func TestRethinkdbAddressesTheDriverPort(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	rethinkdb, ok := loaded.Definition("rethinkdb")
+	if !ok {
+		t.Fatal("expected a rethinkdb definition")
+	}
+
+	primary, ok := rethinkdb.PrimaryPort()
+	if !ok {
+		t.Fatal("expected a primary port")
+	}
+
+	if primary.Target != 28015 {
+		t.Errorf("expected the driver port, got %d", primary.Target)
+	}
+
+	wait, ok := rethinkdb.PortFor(rethinkdb.Dokku.Wait)
+	if !ok {
+		t.Fatalf("expected the wait port %q to be named", rethinkdb.Dokku.Wait)
+	}
+
+	if wait.Target != 28015 {
+		t.Errorf("expected readiness on the driver port, got %d", wait.Target)
+	}
+
+	for _, name := range []string{"native", "cluster", "http"} {
+		if _, ok := rethinkdb.PortFor(name); !ok {
+			t.Errorf("expected a port named %s", name)
+		}
+	}
+}
+
+// The bash plugin offers connect and then fails with "Not yet implemented"
+// once it has been called. A definition says the same thing by leaving the
+// command out, which is a refusal rather than a failure.
+func TestRethinkdbOffersNothingItCannotDo(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	rethinkdb, ok := loaded.Definition("rethinkdb")
+	if !ok {
+		t.Fatal("expected a rethinkdb definition")
+	}
+
+	for _, subcommand := range []string{"connect", "export", "import", "clone", "backup"} {
+		if rethinkdb.Implements(subcommand) {
+			t.Errorf("expected rethinkdb not to implement %s", subcommand)
+		}
+	}
+
+	// the image starts with an open admin account, so there is no credential
+	// to generate and none in the url
+	if len(rethinkdb.Dokku.Secrets) != 0 {
+		t.Errorf("expected no secrets, got %v", rethinkdb.Dokku.Secrets)
+	}
+}
