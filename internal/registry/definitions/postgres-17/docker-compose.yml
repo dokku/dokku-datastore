@@ -77,11 +77,15 @@ x-dokku:
         - sh
         - -c
         # postgres refuses to start on a key anyone but its own user can read
+        # the two files change hands, but the directory holding them stays
+        # with dokku: postgres only ever stats the key, and a directory owned
+        # by the server would leave destroy unable to unlink what is inside it
         - >-
           test -f /certs/server.key ||
           (openssl req -new -newkey rsa:4096 -x509 -days 365000 -nodes
           -out /certs/server.crt -keyout /certs/server.key -batch >/dev/null 2>&1);
-          chown -R 999:999 /certs && chmod 600 /certs/server.key && chmod 750 /certs
+          chown 999:999 /certs/server.key /certs/server.crt &&
+          chmod 600 /certs/server.key && chmod 644 /certs/server.crt
 
   commands:
     # the password goes in PGPASSWORD rather than on the command line, which is
