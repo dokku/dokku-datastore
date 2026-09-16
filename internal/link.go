@@ -7,7 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/execx"
+	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 	"github.com/dokku/dokku/plugins/config"
 )
@@ -35,7 +36,7 @@ func AppEnvironment(appName string) (map[string]string, error) {
 
 // SchemeForApp returns the scheme to build a service url with, honoring the
 // per-app override the datastore exposes
-func SchemeForApp(s datastores.Datastore, appName string) string {
+func SchemeForApp(s *service.Datastore, appName string) string {
 	variable := fmt.Sprintf("%s_DATABASE_SCHEME", s.Properties().PluginVariable)
 	scheme, ok := config.Get(appName, variable)
 	if !ok {
@@ -61,7 +62,7 @@ func ConfigKeysForURL(environment map[string]string, serviceURL string) []string
 
 // AlternateAlias returns the first alternate alias that is not already in use on
 // the app, or an empty string when every alias is taken
-func AlternateAlias(s datastores.Datastore, environment map[string]string) string {
+func AlternateAlias(s *service.Datastore, environment map[string]string) string {
 	for _, color := range alternateAliasColors {
 		alias := fmt.Sprintf("%s_%s", s.Properties().AltAlias, color)
 		if _, ok := environment[fmt.Sprintf("%s_URL", alias)]; !ok {
@@ -81,7 +82,7 @@ type LinkServiceInput struct {
 	AppName string
 
 	// Datastore is the datastore the service belongs to
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 
 	// NoRestart is whether to skip restarting the app
 	NoRestart bool
@@ -127,7 +128,7 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 		return err
 	}
 
-	if err := datastores.AddLinkedApp(ctx, datastores.LinkedAppsInput{
+	if err := service.AddLinkedApp(ctx, service.LinkedAppsInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	}, input.AppName); err != nil {
@@ -161,7 +162,7 @@ type UnlinkServiceInput struct {
 	AppName string
 
 	// Datastore is the datastore the service belongs to
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 
 	// NoRestart is whether to skip restarting the app
 	NoRestart bool
@@ -177,8 +178,8 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 	// links file or the service can never be destroyed. The service-action
 	// triggers are skipped too: they are handed an app name, and firing them
 	// for an app that is gone asks other plugins to act on nothing.
-	if !datastores.AppExists(input.AppName) {
-		return datastores.RemoveLinkedApp(ctx, datastores.LinkedAppsInput{
+	if !service.AppExists(input.AppName) {
+		return service.RemoveLinkedApp(ctx, service.LinkedAppsInput{
 			Datastore:   input.Datastore,
 			ServiceName: input.ServiceName,
 		}, input.AppName)
@@ -198,7 +199,7 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 
 	// the links file and the docker options are cleaned up even when the app has
 	// no config pointing at the service, so a partial link cannot be stranded
-	if err := datastores.RemoveLinkedApp(ctx, datastores.LinkedAppsInput{
+	if err := service.RemoveLinkedApp(ctx, service.LinkedAppsInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	}, input.AppName); err != nil {
@@ -225,8 +226,8 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 }
 
 // callServiceAction fires one of the service-action triggers for a link change
-func callServiceAction(ctx context.Context, s datastores.Datastore, action string, serviceName string, appName string) error {
-	_, err := datastores.CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
+func callServiceAction(ctx context.Context, s *service.Datastore, action string, serviceName string, appName string) error {
+	_, err := execx.PlugnTrigger(ctx, common.PlugnTriggerInput{
 		Trigger:      "service-action",
 		Args:         []string{action, s.ServiceType(), serviceName, appName},
 		StreamStderr: true,
@@ -240,8 +241,8 @@ func callServiceAction(ctx context.Context, s datastores.Datastore, action strin
 }
 
 // dockerOption adds or removes the container link for an app across every phase
-func dockerOption(ctx context.Context, operation string, s datastores.Datastore, serviceName string, appName string) error {
-	option := fmt.Sprintf("--link %s:%s", datastores.ContainerName(s, serviceName), datastores.DNSHostname(s, serviceName))
+func dockerOption(ctx context.Context, operation string, s *service.Datastore, serviceName string, appName string) error {
+	option := fmt.Sprintf("--link %s:%s", service.ContainerName(s, serviceName), service.DNSHostname(s, serviceName))
 	_, err := common.CallExecCommandWithContext(ctx, common.ExecCommandInput{
 		Command: "dokku",
 		Args:    []string{fmt.Sprintf("docker-options:%s", operation), appName, "build,deploy,run", option},

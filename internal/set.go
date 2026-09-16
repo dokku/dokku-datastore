@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 )
 
@@ -28,7 +28,7 @@ func ValidateProperty(key string) error {
 
 // SetProperty writes a property for a service, or deletes it when the value is
 // empty, matching how the bash datastore plugins treat an omitted value
-func SetProperty(s datastores.Datastore, serviceName string, key string, value string) error {
+func SetProperty(s *service.Datastore, serviceName string, key string, value string) error {
 	if err := ValidateProperty(key); err != nil {
 		return err
 	}

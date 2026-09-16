@@ -7,8 +7,8 @@ import (
 	"strconv"
 
 	"github.com/dokku/dokku-datastore/internal"
-	"github.com/dokku/dokku-datastore/internal/datastores"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
+	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
 	"github.com/posener/complete"
@@ -112,7 +112,7 @@ func (c *TriggerHelpCommand) Run(args []string) int {
 	}
 
 	datastoreType := arguments["datastore-type"].StringValue()
-	datastore, ok := datastores.Datastores[datastoreType]
+	datastore, ok := service.Datastores[datastoreType]
 	if !ok {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
@@ -129,7 +129,7 @@ func (c *TriggerHelpCommand) Run(args []string) int {
 	// so a datastore never advertises something that would exit as not a command
 	implemented := []internal.PluginCommand{}
 	for _, pluginCommand := range pluginCommands(context.Background(), c.Meta, c.CommandFunc) {
-		if datastores.Implements(datastore, pluginCommand.Name()) {
+		if service.Implements(datastore, pluginCommand.Name()) {
 			implemented = append(implemented, pluginCommand)
 		}
 	}

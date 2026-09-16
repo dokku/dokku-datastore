@@ -7,7 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/execx"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
+	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 )
 
@@ -47,7 +49,7 @@ type CreateServiceInput struct {
 	CustomEnv string
 
 	// Datastore is the service to create
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 
 	// Image is the image to use for the service
 	Image string
@@ -82,18 +84,18 @@ type CreateServiceInput struct {
 
 // CreateService creates a new service
 func CreateService(ctx context.Context, input CreateServiceInput) error {
-	if err := datastores.ValidateServiceName(input.ServiceName); err != nil {
+	if err := service.ValidateServiceName(input.ServiceName); err != nil {
 		return err
 	}
 
-	serviceFolders := datastores.Folders(input.Datastore, input.ServiceName)
+	serviceFolders := service.Folders(input.Datastore, input.ServiceName)
 	serviceRoot := serviceFolders.Root
 	if _, err := os.Stat(serviceRoot); err == nil {
 		return fmt.Errorf("service %s already exists", input.ServiceName)
 	}
 
 	// check if the image exists
-	taggedImage, err := datastores.ImageForService(datastores.ImageForServiceInput{
+	taggedImage, err := service.ImageForService(service.ImageForServiceInput{
 		ImageOverride:        input.Image,
 		ImageVersionOverride: input.ImageVersion,
 		Datastore:            input.Datastore,
@@ -104,7 +106,7 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	}
 
 	properties := input.Datastore.Properties()
-	if err := datastores.ValidateTaggedImageExists(taggedImage); err != nil {
+	if err := service.ValidateTaggedImageExists(taggedImage); err != nil {
 		if os.Getenv(properties.ImagePullVariable) == "true" {
 			message := []string{
 				fmt.Sprintf("%s environment variable detected. Not running pull command.", properties.ImagePullVariable),
@@ -115,12 +117,12 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		}
 
 		// pull the image
-		if _, err := datastores.PullTaggedImage(ctx, taggedImage); err != nil {
+		if _, err := service.PullTaggedImage(ctx, taggedImage); err != nil {
 			return fmt.Errorf("failed to pull image %s: %w", taggedImage, err)
 		}
 	}
 
-	_, err = datastores.CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
+	_, err = execx.PlugnTrigger(ctx, common.PlugnTriggerInput{
 		Trigger:      "service-action",
 		Args:         []string{"pre-create", input.Datastore.ServiceType(), input.ServiceName},
 		Env:          map[string]string{},
@@ -137,19 +139,19 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		serviceFolders.Data,
 	}
 
-	if err := CreateServiceFolders(allServiceFolders, datastores.SystemUser(), datastores.SystemGroup()); err != nil {
+	if err := CreateServiceFolders(allServiceFolders, hostenv.SystemUser(), hostenv.SystemGroup()); err != nil {
 		return err
 	}
 
 	// create the service links file
-	serviceFiles := datastores.Files(input.Datastore, input.ServiceName)
+	serviceFiles := service.Files(input.Datastore, input.ServiceName)
 	if !common.FileExists(serviceFiles.Links) {
 		err = common.WriteStringToFile(common.WriteStringToFileInput{
 			Content:   "",
 			Filename:  serviceFiles.Links,
-			GroupName: datastores.SystemGroup(),
+			GroupName: hostenv.SystemGroup(),
 			Mode:      0644,
-			Username:  datastores.SystemUser(),
+			Username:  hostenv.SystemUser(),
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create service links file %s: %w", serviceFiles.Links, err)
@@ -161,7 +163,7 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return fmt.Errorf("failed to create service: %w", err)
 	}
 
-	if err := datastores.CommitServiceConfig(datastores.CommitServiceConfigInput{
+	if err := service.CommitServiceConfig(service.CommitServiceConfigInput{
 		ConfigOptions:      input.ConfigOptions,
 		CustomEnv:          input.CustomEnv,
 		Datastore:          input.Datastore,
@@ -177,14 +179,14 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return fmt.Errorf("failed to commit service config: %w", err)
 	}
 
-	if err := datastores.WriteDatabaseName(datastores.WriteDatabaseNameInput{
+	if err := service.WriteDatabaseName(service.WriteDatabaseNameInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	}); err != nil {
 		return fmt.Errorf("failed to write database name: %w", err)
 	}
 
-	_, err = datastores.CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
+	_, err = execx.PlugnTrigger(ctx, common.PlugnTriggerInput{
 		Trigger:      "service-action",
 		Args:         []string{"post-create", input.Datastore.ServiceType(), input.ServiceName},
 		StreamStderr: true,
@@ -194,7 +196,7 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return fmt.Errorf("failed to call service-action post-create trigger: %w", err)
 	}
 
-	err = input.Datastore.CreateServiceContainer(ctx, datastores.CreateServiceContainerInput{
+	err = input.Datastore.CreateServiceContainer(ctx, service.CreateServiceContainerInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 		TaggedImage: taggedImage,
@@ -203,7 +205,7 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return fmt.Errorf("failed to create service container: %w", err)
 	}
 
-	_, err = datastores.CallPlugnTriggerWithContext(ctx, common.PlugnTriggerInput{
+	_, err = execx.PlugnTrigger(ctx, common.PlugnTriggerInput{
 		Trigger:      "service-action",
 		Args:         []string{"post-create-complete", input.Datastore.ServiceType(), input.ServiceName},
 		StreamStderr: true,

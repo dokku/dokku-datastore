@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
 )
@@ -48,13 +48,13 @@ func TestParseArguments(t *testing.T) {
 			name:        "missing service name",
 			args:        []string{"redis"},
 			arguments:   serviceArguments(),
-			expectedErr: datastores.MissingServiceNameMessage,
+			expectedErr: service.MissingServiceNameMessage,
 		},
 		{
 			name:        "missing service name for a command with optional arguments",
 			args:        []string{"redis"},
 			arguments:   exposeArguments(),
-			expectedErr: datastores.MissingServiceNameMessage,
+			expectedErr: service.MissingServiceNameMessage,
 		},
 		{
 			name:        "missing every argument",
@@ -101,7 +101,7 @@ func TestParseArguments(t *testing.T) {
 			if err.Error() != test.expectedErr {
 				t.Errorf("expected error %q, got %q", test.expectedErr, err)
 			}
-			if test.expectedErr == datastores.MissingServiceNameMessage && !errors.Is(err, datastores.ErrMissingServiceName) {
+			if test.expectedErr == service.MissingServiceNameMessage && !errors.Is(err, service.ErrMissingServiceName) {
 				t.Errorf("expected the error to wrap ErrMissingServiceName")
 			}
 		})

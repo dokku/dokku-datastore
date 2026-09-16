@@ -1,8 +1,9 @@
-package datastores
+package service
 
 import (
 	"context"
 	"fmt"
+	"github.com/dokku/dokku-datastore/internal/execx"
 	"io"
 	"os"
 	"path/filepath"
@@ -20,18 +21,18 @@ import (
 	"mvdan.cc/sh/v3/shell"
 )
 
-// DefinitionService is a datastore described by a docker-compose.yml rather than
+// Datastore is a datastore described by a docker-compose.yml rather than
 // by Go code. It satisfies the same interface the hand written services did, so
 // the forty command files that look a datastore up in the map need no change: a
 // datastore becomes data, and this is the only thing that has to know that.
-type DefinitionService struct {
+type Datastore struct {
 	// Definition is the parsed definition backing this datastore.
 	Definition definition.Definition
 }
 
 // CreateService writes the credentials and config files a service needs before
 // its container exists.
-func (s *DefinitionService) CreateService(ctx context.Context, serviceName string) error {
+func (s *Datastore) CreateService(ctx context.Context, serviceName string) error {
 	if err := s.writeSecrets(serviceName); err != nil {
 		return err
 	}
@@ -46,15 +47,15 @@ func (s *DefinitionService) CreateService(ctx context.Context, serviceName strin
 
 	return seed.Configs(seed.Input{
 		Configs:   configs,
-		Username:  SystemUser(),
-		GroupName: SystemGroup(),
+		Username:  hostenv.SystemUser(),
+		GroupName: hostenv.SystemGroup(),
 	})
 }
 
 // writeSecrets generates and persists the credentials the definition declares.
 // They are generated once, in Go, and read off disk everywhere else: a value
 // four things read must not be produced by a template that runs again each time.
-func (s *DefinitionService) writeSecrets(serviceName string) error {
+func (s *Datastore) writeSecrets(serviceName string) error {
 	serviceFolders := Folders(s, serviceName)
 
 	for name, secret := range s.Definition.Dokku.Secrets {
@@ -80,9 +81,9 @@ func (s *DefinitionService) writeSecrets(serviceName string) error {
 		err := common.WriteStringToFile(common.WriteStringToFileInput{
 			Content:   value,
 			Filename:  filename,
-			GroupName: SystemGroup(),
+			GroupName: hostenv.SystemGroup(),
 			Mode:      0640,
-			Username:  SystemUser(),
+			Username:  hostenv.SystemUser(),
 		})
 		if err != nil {
 			return fmt.Errorf("unable to write the %s secret to %s: %w", name, filename, err)
@@ -93,7 +94,7 @@ func (s *DefinitionService) writeSecrets(serviceName string) error {
 }
 
 // CreateServiceContainer creates and starts the service container.
-func (s *DefinitionService) CreateServiceContainer(ctx context.Context, input CreateServiceContainerInput) error {
+func (s *Datastore) CreateServiceContainer(ctx context.Context, input CreateServiceContainerInput) error {
 	serviceFiles := Files(input.Datastore, input.ServiceName)
 	cidFilename := serviceFiles.ID
 
@@ -210,7 +211,7 @@ func (s *DefinitionService) CreateServiceContainer(ctx context.Context, input Cr
 // and seeding it twice would discard their edits, while a script ships with the
 // binary and a stale one left after an upgrade would be a verb running last
 // release's code.
-func (s *DefinitionService) writePayload(serviceName string) error {
+func (s *Datastore) writePayload(serviceName string) error {
 	files := render.RootfsFiles(render.Input{
 		Definition: s.Definition,
 		Scope:      s.scope(serviceName),
@@ -236,7 +237,7 @@ func (s *DefinitionService) writePayload(serviceName string) error {
 }
 
 // backend reports which execution backend a service is driven with.
-func (s *DefinitionService) backend(serviceName string) string {
+func (s *Datastore) backend(serviceName string) string {
 	return backend.Select(backend.SelectInput{
 		Recorded: common.ReadFirstLine(Files(s, serviceName).Backend),
 		Default:  hostenv.Backend(),
@@ -244,7 +245,7 @@ func (s *DefinitionService) backend(serviceName string) string {
 }
 
 // composeInput addresses a service's rendered compose file.
-func (s *DefinitionService) composeInput(serviceName string) backend.ComposeInput {
+func (s *Datastore) composeInput(serviceName string) backend.ComposeInput {
 	return backend.ComposeInput{
 		File:    Files(s, serviceName).Compose,
 		Project: fmt.Sprintf("dokku-%s-%s", s.Definition.Dokku.Plugin, serviceName),
@@ -257,7 +258,7 @@ func (s *DefinitionService) composeInput(serviceName string) backend.ComposeInpu
 // The two backends are handed the same resolved values: the argv and the
 // compose file are rendered together, so what they produce is the same
 // container addressed by the same name.
-func (s *DefinitionService) createContainer(ctx context.Context, serviceName string, arguments render.ContainerArgsInput, idFile string) error {
+func (s *Datastore) createContainer(ctx context.Context, serviceName string, arguments render.ContainerArgsInput, idFile string) error {
 	selected := s.backend(serviceName)
 
 	if err := s.recordBackend(serviceName, selected); err != nil {
@@ -265,7 +266,7 @@ func (s *DefinitionService) createContainer(ctx context.Context, serviceName str
 	}
 
 	if selected != backend.Compose {
-		_, err := CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		_, err := execx.Run(ctx, common.ExecCommandInput{
 			Command: common.DockerBin(),
 			Args:    render.DockerCreateArgs(arguments),
 		})
@@ -289,14 +290,14 @@ func (s *DefinitionService) createContainer(ctx context.Context, serviceName str
 	return common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   containerID,
 		Filename:  idFile,
-		GroupName: SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      0644,
-		Username:  SystemUser(),
+		Username:  hostenv.SystemUser(),
 	})
 }
 
 // startContainer starts the service container with the service's backend.
-func (s *DefinitionService) startContainer(ctx context.Context, serviceName string, containerID string) error {
+func (s *Datastore) startContainer(ctx context.Context, serviceName string, containerID string) error {
 	if s.backend(serviceName) != backend.Compose {
 		return backend.Start(ctx, containerID)
 	}
@@ -306,14 +307,14 @@ func (s *DefinitionService) startContainer(ctx context.Context, serviceName stri
 
 // recordBackend writes which backend made a service, so that a later change to
 // the host default does not address it the other way.
-func (s *DefinitionService) recordBackend(serviceName string, selected string) error {
+func (s *Datastore) recordBackend(serviceName string, selected string) error {
 	filename := Files(s, serviceName).Backend
 	err := common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   selected,
 		Filename:  filename,
-		GroupName: SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      0644,
-		Username:  SystemUser(),
+		Username:  hostenv.SystemUser(),
 	})
 	if err != nil {
 		return fmt.Errorf("unable to write %s: %w", filename, err)
@@ -325,7 +326,7 @@ func (s *DefinitionService) recordBackend(serviceName string, selected string) e
 // writeScripts writes the definition's hook scripts into the service directory.
 // They run on the host rather than in the container, which is why they are kept
 // apart from the payload and are not mounted anywhere.
-func (s *DefinitionService) writeScripts(serviceName string) error {
+func (s *Datastore) writeScripts(serviceName string) error {
 	if len(s.Definition.Scripts) == 0 {
 		return nil
 	}
@@ -362,7 +363,7 @@ func (s *DefinitionService) writeScripts(serviceName string) error {
 // changes so that it describes the container that exists rather than the one a
 // later create would make, and it is rendered from the same resolved values as
 // the argv beside it, which is what keeps the two from drifting.
-func (s *DefinitionService) writeCompose(serviceName string, scope definition.Scope, configOptions []string, envFile string, idFile string) error {
+func (s *Datastore) writeCompose(serviceName string, scope definition.Scope, configOptions []string, envFile string, idFile string) error {
 	environment, err := common.FileToSlice(envFile)
 	if err != nil {
 		return fmt.Errorf("unable to read the custom environment from %s: %w", envFile, err)
@@ -384,9 +385,9 @@ func (s *DefinitionService) writeCompose(serviceName string, scope definition.Sc
 	err = common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   string(rendered),
 		Filename:  filename,
-		GroupName: SystemGroup(),
+		GroupName: hostenv.SystemGroup(),
 		Mode:      0644,
-		Username:  SystemUser(),
+		Username:  hostenv.SystemUser(),
 	})
 	if err != nil {
 		return fmt.Errorf("unable to write %s: %w", filename, err)
@@ -398,7 +399,7 @@ func (s *DefinitionService) writeCompose(serviceName string, scope definition.Sc
 // buildImage builds the definition's image when it has one to build, and reports
 // the tag the container should run. A definition that only declares its base is
 // left on the pulled image, exactly as every datastore is today.
-func (s *DefinitionService) buildImage(ctx context.Context, taggedImage string) (string, error) {
+func (s *Datastore) buildImage(ctx context.Context, taggedImage string) (string, error) {
 	if !s.Definition.Builds {
 		return taggedImage, nil
 	}
@@ -423,7 +424,7 @@ func (s *DefinitionService) buildImage(ctx context.Context, taggedImage string) 
 // runTaggedImage is the image a service's container runs, which is the built one
 // for a definition that builds. It does not build: the create path does that,
 // and a verb running against a service that exists has one already.
-func (s *DefinitionService) runTaggedImage(serviceName string) string {
+func (s *Datastore) runTaggedImage(serviceName string) string {
 	taggedImage := s.taggedImage(serviceName)
 	if !s.Definition.Builds {
 		return taggedImage
@@ -437,7 +438,13 @@ func (s *DefinitionService) runTaggedImage(serviceName string) string {
 // container runs. The two differ only for a definition that builds, and only
 // the exact built tag is unmapped: a container running anything else is
 // reported verbatim, so this never hides what is actually there.
-func (s *DefinitionService) PinnedImage(serviceName string, running string) string {
+func (s *Datastore) PinnedImage(serviceName string, running string) string {
+	// reporting the image unmapped is a worse answer than the right one, but it
+	// is a far better outcome than a read path that cannot answer at all
+	if s == nil {
+		return running
+	}
+
 	if !s.Definition.Builds || running != s.runTaggedImage(serviceName) {
 		return running
 	}
@@ -446,7 +453,7 @@ func (s *DefinitionService) PinnedImage(serviceName string, running string) stri
 }
 
 // ConnectToService opens an interactive session against a service.
-func (s *DefinitionService) ConnectToService(ctx context.Context, input ConnectToServiceInput) error {
+func (s *Datastore) ConnectToService(ctx context.Context, input ConnectToServiceInput) error {
 	return s.run(ctx, input.ServiceName, "connect", runOptions{
 		TTY:    backend.HasTerminal(os.Stdin),
 		Stdin:  os.Stdin,
@@ -456,7 +463,7 @@ func (s *DefinitionService) ConnectToService(ctx context.Context, input ConnectT
 }
 
 // ExportService writes a dump of the service's data to a writer.
-func (s *DefinitionService) ExportService(ctx context.Context, input ExportServiceInput) error {
+func (s *Datastore) ExportService(ctx context.Context, input ExportServiceInput) error {
 	// the dump is streamed to the writer rather than buffered into a string,
 	// which is what makes it safe for binary data of any size
 	return s.run(ctx, input.ServiceName, "export", runOptions{
@@ -466,7 +473,7 @@ func (s *DefinitionService) ExportService(ctx context.Context, input ExportServi
 }
 
 // ImportService replaces the service's data with what is read from a reader.
-func (s *DefinitionService) ImportService(ctx context.Context, input ImportServiceInput) error {
+func (s *Datastore) ImportService(ctx context.Context, input ImportServiceInput) error {
 	return s.run(ctx, input.ServiceName, "import", runOptions{
 		Stdin:  input.Reader,
 		Stderr: os.Stderr,
@@ -482,7 +489,7 @@ type runOptions struct {
 }
 
 // run executes one of the definition's declared commands.
-func (s *DefinitionService) run(ctx context.Context, serviceName string, name string, options runOptions) error {
+func (s *Datastore) run(ctx context.Context, serviceName string, name string, options runOptions) error {
 	return verb.Run(ctx, verb.RunInput{
 		Definition: s.Definition,
 		Scope:      s.scope(serviceName),
@@ -506,7 +513,7 @@ func (s *DefinitionService) run(ctx context.Context, serviceName string, name st
 // The payload is easy to forget here and impossible to miss at runtime: an
 // offline verb is one of the mounted scripts, so without it there is nothing to
 // exec and import fails with "not found".
-func (s *DefinitionService) volumes(serviceName string) []string {
+func (s *Datastore) volumes(serviceName string) []string {
 	serviceFolders := Folders(s, serviceName)
 
 	volumes := make([]string, 0, len(s.Definition.Service.Volumes))
@@ -524,7 +531,7 @@ func (s *DefinitionService) volumes(serviceName string) []string {
 
 // Properties projects the definition into the shape the rest of the binary
 // reads a datastore's metadata from.
-func (s *DefinitionService) Properties() ServiceStruct {
+func (s *Datastore) Properties() ServiceStruct {
 	dokku := s.Definition.Dokku
 
 	ports := make([]int, 0, len(s.Definition.Service.Ports))
@@ -560,17 +567,17 @@ func (s *DefinitionService) Properties() ServiceStruct {
 }
 
 // ServiceType returns the type of service.
-func (s *DefinitionService) ServiceType() string {
+func (s *Datastore) ServiceType() string {
 	return s.Definition.Dokku.Plugin
 }
 
 // Title returns the service name in title case.
-func (s *DefinitionService) Title() string {
+func (s *Datastore) Title() string {
 	return s.Definition.Dokku.Title
 }
 
 // URL returns the url a linked app receives.
-func (s *DefinitionService) URL(serviceName string, schemeOverride string) string {
+func (s *Datastore) URL(serviceName string, schemeOverride string) string {
 	scope := s.scope(serviceName)
 	if schemeOverride != "" {
 		scope.Scheme = schemeOverride
@@ -586,7 +593,7 @@ func (s *DefinitionService) URL(serviceName string, schemeOverride string) strin
 
 // taggedImage is the image a service runs, which is what it pinned at create
 // time and the definition's default otherwise.
-func (s *DefinitionService) taggedImage(serviceName string) string {
+func (s *Datastore) taggedImage(serviceName string) string {
 	serviceFiles := Files(s, serviceName)
 
 	image := common.ReadFirstLine(serviceFiles.Image)
@@ -609,7 +616,7 @@ func (s *DefinitionService) taggedImage(serviceName string) string {
 // The initial network is deliberately not read here. It is a plugin property
 // rather than a file, and looking one up needs a configured dokku, which
 // rendering a connection string must not: only the create path sets it.
-func (s *DefinitionService) scope(serviceName string) definition.Scope {
+func (s *Datastore) scope(serviceName string) definition.Scope {
 	serviceFolders := Folders(s, serviceName)
 	serviceFiles := Files(s, serviceName)
 	dokku := s.Definition.Dokku
@@ -668,11 +675,6 @@ func cutTaggedImage(reference string) (string, string) {
 // A datastore says what it can do by declaring the commands it has, and this is
 // the only statement of it: there is no list of what a datastore cannot do to
 // fall out of step with what it actually declares.
-func Implements(s Datastore, subcommand string) bool {
-	service, ok := s.(*DefinitionService)
-	if !ok {
-		return true
-	}
-
-	return service.Definition.Implements(subcommand)
+func Implements(s *Datastore, subcommand string) bool {
+	return s.Definition.Implements(subcommand)
 }

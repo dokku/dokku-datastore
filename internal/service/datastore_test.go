@@ -1,4 +1,4 @@
-package datastores
+package service
 
 import (
 	"os"
@@ -15,8 +15,8 @@ func TestEveryDefinitionIsRegistered(t *testing.T) {
 		t.Fatal("expected redis to be registered")
 	}
 
-	if _, ok := redis.(*DefinitionService); !ok {
-		t.Errorf("expected redis to be definition backed, got %T", redis)
+	if redis.Definition.Dokku.Plugin != "redis" {
+		t.Errorf("expected the redis definition, got %q", redis.Definition.Dokku.Plugin)
 	}
 }
 
@@ -84,9 +84,9 @@ func TestRedisTitleAndType(t *testing.T) {
 // unmapping still has to be right for a definition that needs a build a mount
 // cannot deliver, so it is exercised against one.
 func TestPinnedImage(t *testing.T) {
-	redis, ok := Datastores["redis"].(*DefinitionService)
+	redis, ok := Datastores["redis"]
 	if !ok {
-		t.Fatal("expected redis to be definition backed")
+		t.Fatal("expected redis to be registered")
 	}
 
 	// redis runs the image it pinned, so there is nothing to unmap
@@ -94,7 +94,7 @@ func TestPinnedImage(t *testing.T) {
 		t.Errorf("expected redis to run the image it pinned, got %q", actual)
 	}
 
-	building := &DefinitionService{Definition: redis.Definition}
+	building := &Datastore{Definition: redis.Definition}
 	building.Definition.Builds = true
 
 	built := building.runTaggedImage("lollipop")
@@ -118,9 +118,9 @@ func TestPinnedImage(t *testing.T) {
 // every time: a stale script left after an upgrade would be a verb running the
 // previous release's code.
 func TestWritePayloadOverwrites(t *testing.T) {
-	redis, ok := Datastores["redis"].(*DefinitionService)
+	redis, ok := Datastores["redis"]
 	if !ok {
-		t.Fatal("expected redis to be definition backed")
+		t.Fatal("expected redis to be registered")
 	}
 
 	previous := DokkuLibRoot
@@ -172,9 +172,9 @@ func TestWritePayloadOverwrites(t *testing.T) {
 // container, so it needs both the data and the payload. Leaving the payload out
 // fails only at runtime, with "dokku-redis-import: not found".
 func TestVolumesCarryTheDataAndThePayload(t *testing.T) {
-	redis, ok := Datastores["redis"].(*DefinitionService)
+	redis, ok := Datastores["redis"]
 	if !ok {
-		t.Fatal("expected redis to be definition backed")
+		t.Fatal("expected redis to be registered")
 	}
 
 	volumes := strings.Join(redis.volumes("lollipop"), " ")
@@ -195,9 +195,9 @@ func TestVolumesCarryTheDataAndThePayload(t *testing.T) {
 // which is why they are written beside the service rather than mounted into it.
 // Redis ships none, so this uses one that does.
 func TestWriteScripts(t *testing.T) {
-	redis, ok := Datastores["redis"].(*DefinitionService)
+	redis, ok := Datastores["redis"]
 	if !ok {
-		t.Fatal("expected redis to be definition backed")
+		t.Fatal("expected redis to be registered")
 	}
 
 	previous := DokkuLibRoot
@@ -206,7 +206,7 @@ func TestWriteScripts(t *testing.T) {
 		DokkuLibRoot = previous
 	})
 
-	hooked := &DefinitionService{Definition: redis.Definition}
+	hooked := &Datastore{Definition: redis.Definition}
 	hooked.Definition.Scripts = map[string][]byte{"pre-create": []byte("#!/usr/bin/env bash\n")}
 
 	serviceRoot := Folders(hooked, "lollipop").Root
@@ -233,9 +233,9 @@ func TestWriteScripts(t *testing.T) {
 
 // Redis ships no hooks, so nothing should appear for it.
 func TestWriteScriptsWritesNothingWithoutHooks(t *testing.T) {
-	redis, ok := Datastores["redis"].(*DefinitionService)
+	redis, ok := Datastores["redis"]
 	if !ok {
-		t.Fatal("expected redis to be definition backed")
+		t.Fatal("expected redis to be registered")
 	}
 
 	previous := DokkuLibRoot
@@ -250,5 +250,15 @@ func TestWriteScriptsWritesNothingWithoutHooks(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(Folders(redis, "lollipop").Root, "bin")); err == nil {
 		t.Error("expected no bin directory for a definition with no hooks")
+	}
+}
+
+// A read path that cannot answer is worse than one that answers unmapped, and
+// info is a read path.
+func TestPinnedImageSurvivesAMissingDatastore(t *testing.T) {
+	var missing *Datastore
+
+	if actual := missing.PinnedImage("lollipop", "redis:8.8.0"); actual != "redis:8.8.0" {
+		t.Errorf("expected the running image, got %q", actual)
 	}
 }

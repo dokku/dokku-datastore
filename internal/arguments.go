@@ -1,7 +1,7 @@
 package internal
 
 import (
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
 )
@@ -14,7 +14,7 @@ const serviceNameArgument = "service-name"
 func ParseArguments(args []string, arguments []command.Argument) (map[string]command.Argument, error) {
 	parsedArguments, err := command.ParseArguments(args, arguments)
 	if err != nil && missingArgument(args, arguments) == serviceNameArgument {
-		return parsedArguments, datastores.ErrMissingServiceName
+		return parsedArguments, service.ErrMissingServiceName
 	}
 
 	return parsedArguments, err

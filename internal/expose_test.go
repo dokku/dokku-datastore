@@ -5,24 +5,24 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
-// withPortFile points datastores.DokkuLibRoot at a temporary directory and, when
+// withPortFile points service.DokkuLibRoot at a temporary directory and, when
 // contents is non-nil, writes them to the service's port file. DokkuLibRoot is a
 // package level variable assigned in init(), so it has to be swapped directly
 // rather than through the environment, which means these tests cannot run in
 // parallel.
-func withPortFile(t *testing.T, s datastores.Datastore, serviceName string, contents *string) {
+func withPortFile(t *testing.T, s *service.Datastore, serviceName string, contents *string) {
 	t.Helper()
 
-	previous := datastores.DokkuLibRoot
-	datastores.DokkuLibRoot = t.TempDir()
+	previous := service.DokkuLibRoot
+	service.DokkuLibRoot = t.TempDir()
 	t.Cleanup(func() {
-		datastores.DokkuLibRoot = previous
+		service.DokkuLibRoot = previous
 	})
 
-	serviceRoot := datastores.Folders(s, serviceName).Root
+	serviceRoot := service.Folders(s, serviceName).Root
 	if err := os.MkdirAll(serviceRoot, 0755); err != nil {
 		t.Fatalf("failed to create service root: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestIsExposed(t *testing.T) {
 		},
 	}
 
-	datastore := datastores.Datastores["redis"]
+	datastore := service.Datastores["redis"]
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			withPortFile(t, datastore, "lollipop", test.portFile)
@@ -98,7 +98,7 @@ func TestConfiguredPorts(t *testing.T) {
 		},
 	}
 
-	datastore := datastores.Datastores["redis"]
+	datastore := service.Datastores["redis"]
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			withPortFile(t, datastore, "lollipop", test.portFile)
@@ -112,7 +112,7 @@ func TestConfiguredPorts(t *testing.T) {
 func TestAlreadyExposedError(t *testing.T) {
 	// The bash datastore plugins emit this exact string, and downstream plugin
 	// test suites assert on it.
-	datastore := datastores.Datastores["redis"]
+	datastore := service.Datastores["redis"]
 	withPortFile(t, datastore, "ls", ptr("6379\n"))
 
 	expected := "Service ls already exposed on port(s) 6379"

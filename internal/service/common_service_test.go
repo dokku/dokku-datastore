@@ -1,7 +1,8 @@
-package datastores
+package service
 
 import (
 	"context"
+	"github.com/dokku/dokku-datastore/internal/definition"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -13,7 +14,7 @@ import (
 // root folder for the named service. DokkuLibRoot is a package level variable
 // assigned in init(), so it has to be swapped directly rather than through the
 // environment, which means these tests cannot run in parallel.
-func withServiceRoot(t *testing.T, s Datastore, serviceName string) string {
+func withServiceRoot(t *testing.T, s *Datastore, serviceName string) string {
 	t.Helper()
 
 	// the service files are chowned to the dokku user, which does not exist on a
@@ -93,15 +94,26 @@ func TestLinkedApps(t *testing.T) {
 }
 
 // multiPortDatastore is the redis datastore with a second port, covering the
-// multi port paths that no real datastore exercises yet
-type multiPortDatastore struct {
-	Datastore
-}
+// multi port paths that no real datastore exercises yet.
+//
+// A second port is added to the definition rather than to the properties it
+// projects, so this exercises the path a real multi port datastore will take
+// rather than a shape only a test can produce.
+func multiPortDatastore(t *testing.T) *Datastore {
+	t.Helper()
 
-func (m *multiPortDatastore) Properties() ServiceStruct {
-	properties := m.Datastore.Properties()
-	properties.Ports = []int{6379, 6380}
-	return properties
+	redis, ok := Datastores["redis"]
+	if !ok {
+		t.Fatal("expected redis to be registered")
+	}
+
+	multi := &Datastore{Definition: redis.Definition}
+	multi.Definition.Service.Ports = append(
+		append([]definition.Port{}, redis.Definition.Service.Ports...),
+		definition.Port{Name: "second", Target: 6380},
+	)
+
+	return multi
 }
 
 func TestExposedHostPorts(t *testing.T) {
@@ -158,7 +170,7 @@ func TestExposedHostPorts(t *testing.T) {
 func TestExposedPorts(t *testing.T) {
 	tests := []struct {
 		name      string
-		datastore Datastore
+		datastore *Datastore
 		portFile  *string
 		expected  string
 	}{
@@ -182,7 +194,7 @@ func TestExposedPorts(t *testing.T) {
 		},
 		{
 			name:      "several ports on one line",
-			datastore: &multiPortDatastore{Datastore: Datastores["redis"]},
+			datastore: multiPortDatastore(t),
 			portFile:  ptr("33201 33202\n"),
 			expected:  "6379->33201 6380->33202",
 		},

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 // LinkedServicesInput is the input for the LinkedServices function
@@ -14,7 +14,7 @@ type LinkedServicesInput struct {
 	AppName string
 
 	// Datastore is the service to list the linked services for
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 }
 
 // LinkedServices lists all services that are linked to a given app
@@ -33,7 +33,7 @@ func LinkedServices(ctx context.Context, input LinkedServicesInput) ([]string, e
 
 	linkedServices := []string{}
 	for _, serviceName := range services {
-		linkedApps := datastores.LinkedApps(ctx, datastores.LinkedAppsInput{
+		linkedApps := service.LinkedApps(ctx, service.LinkedAppsInput{
 			Datastore:   input.Datastore,
 			ServiceName: serviceName,
 		})

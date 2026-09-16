@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
 	"github.com/posener/complete"
@@ -141,7 +141,7 @@ func (c *BackupUnsetEncryptionCommand) Run(args []string) int {
 		return 1
 	}
 
-	datastore, ok := datastores.Datastores[datastoreType]
+	datastore, ok := service.Datastores[datastoreType]
 	if !ok {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
@@ -157,19 +157,19 @@ func (c *BackupUnsetEncryptionCommand) Run(args []string) int {
 	if serviceName == "" {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
-			Error:   datastores.ErrMissingServiceName,
+			Error:   service.ErrMissingServiceName,
 		})
 		return 1
 	}
 
-	if err := datastores.ValidateServiceName(serviceName); err != nil {
+	if err := service.ValidateServiceName(serviceName); err != nil {
 		logger.Error(internal.ErrorInput{
 			Error: err,
 		})
 		return 1
 	}
 
-	if !datastores.Exists(ctx, datastore, serviceName) {
+	if !service.Exists(ctx, datastore, serviceName) {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("service %s does not exist", serviceName),
 		})

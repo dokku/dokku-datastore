@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
 	"github.com/posener/complete"
@@ -147,7 +147,7 @@ func (c *ExposeCommand) Run(args []string) int {
 		return 1
 	}
 
-	datastore, ok := datastores.Datastores[datastoreType]
+	datastore, ok := service.Datastores[datastoreType]
 	if !ok {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
@@ -159,19 +159,19 @@ func (c *ExposeCommand) Run(args []string) int {
 	if serviceName == "" {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
-			Error:   datastores.ErrMissingServiceName,
+			Error:   service.ErrMissingServiceName,
 		})
 		return 1
 	}
 
-	if err := datastores.ValidateServiceName(serviceName); err != nil {
+	if err := service.ValidateServiceName(serviceName); err != nil {
 		logger.Error(internal.ErrorInput{
 			Error: err,
 		})
 		return 1
 	}
 
-	if !datastores.Exists(ctx, datastore, serviceName) {
+	if !service.Exists(ctx, datastore, serviceName) {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("service %s does not exist", serviceName),
 		})
@@ -185,8 +185,8 @@ func (c *ExposeCommand) Run(args []string) int {
 		return 1
 	}
 
-	ambassadorContainerName := datastores.AmbassadorContainerName(datastore, serviceName)
-	if datastores.ContainerExists(ctx, ambassadorContainerName) {
+	ambassadorContainerName := service.AmbassadorContainerName(datastore, serviceName)
+	if service.ContainerExists(ctx, ambassadorContainerName) {
 		logger.Warn(internal.WarnInput{
 			Warning: fmt.Sprintf("Service %s has an untracked expose container, removing", serviceName),
 		})
@@ -210,6 +210,6 @@ func (c *ExposeCommand) Run(args []string) int {
 		})
 		return 1
 	}
-	logger.Header2(fmt.Sprintf("Service %s exposed on port(s) [container->host]: %s", serviceName, datastores.ExposedPorts(datastore, serviceName))) //nolint:errcheck
+	logger.Header2(fmt.Sprintf("Service %s exposed on port(s) [container->host]: %s", serviceName, service.ExposedPorts(datastore, serviceName))) //nolint:errcheck
 	return 0
 }

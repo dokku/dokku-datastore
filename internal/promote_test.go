@@ -3,11 +3,11 @@ package internal
 import (
 	"testing"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 func TestPromotionPlan(t *testing.T) {
-	datastore := datastores.Datastores["redis"]
+	datastore := service.Datastores["redis"]
 	serviceURL := "redis://:hunter2@dokku-redis-l:6379"
 
 	tests := []struct {

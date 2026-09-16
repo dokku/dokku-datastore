@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 func TestSetPropertyRejectsUnknownKeys(t *testing.T) {
-	datastore := datastores.Datastores["redis"]
+	datastore := service.Datastores["redis"]
 
 	// an unknown key must be refused before anything is written, and the message
 	// has to name the keys that are accepted

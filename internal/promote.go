@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/config"
 )
 
@@ -16,7 +16,7 @@ type PromoteServiceInput struct {
 	AppName string
 
 	// Datastore is the datastore the service belongs to
-	Datastore datastores.Datastore
+	Datastore *service.Datastore
 
 	// ServiceName is the name of the service to promote
 	ServiceName string

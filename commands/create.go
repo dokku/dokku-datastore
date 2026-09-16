@@ -9,7 +9,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
-	"github.com/dokku/dokku-datastore/internal/datastores"
+	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/dokku/dokku/plugins/common"
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -192,12 +192,12 @@ func (c *CreateCommand) Run(args []string) int {
 	if serviceName == "" {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
-			Error:   datastores.ErrMissingServiceName,
+			Error:   service.ErrMissingServiceName,
 		})
 		return 1
 	}
 
-	datastore, ok := datastores.Datastores[datastoreType]
+	datastore, ok := service.Datastores[datastoreType]
 	if !ok {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
@@ -241,7 +241,7 @@ func (c *CreateCommand) Run(args []string) int {
 		return 1
 	}
 
-	info := datastores.Info(ctx, datastores.InfoInput{
+	info := service.Info(ctx, service.InfoInput{
 		Datastore:   datastore,
 		ServiceName: serviceName,
 	})
