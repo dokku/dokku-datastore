@@ -165,6 +165,10 @@ func (c *BackupScheduleCommand) Run(args []string) int {
 		return 1
 	}
 
+	if code, unimplemented := requireImplemented(datastore, "backup-schedule"); unimplemented {
+		return code
+	}
+
 	serviceName := arguments["service-name"].StringValue()
 	if serviceName == "" {
 		logger.Error(internal.ErrorInput{

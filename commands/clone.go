@@ -207,6 +207,10 @@ func (c *CloneCommand) Run(args []string) int {
 		return 1
 	}
 
+	if code, unimplemented := requireImplemented(datastore, "clone"); unimplemented {
+		return code
+	}
+
 	newServiceName := arguments["new-service-name"].StringValue()
 	if newServiceName == "" {
 		logger.Error(internal.ErrorInput{
