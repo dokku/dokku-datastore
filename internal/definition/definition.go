@@ -56,6 +56,13 @@ type Definition struct {
 	// the two are read by different things: bin/ runs on the host, rootfs/ runs
 	// inside the container.
 	Rootfs map[string][]byte
+
+	// Privileged are the scripts installed root owned outside the service root
+	// and granted in sudoers, keyed by path relative to privileged/. They are
+	// how a definition does the one part of an operation that needs root, and
+	// are accepted only from the embedded tree: a plugin checkout that could
+	// introduce one would be choosing what the dokku group may run as root.
+	Privileged map[string][]byte
 }
 
 // Service is the compose service. Only the keys the renderer has an opinion about

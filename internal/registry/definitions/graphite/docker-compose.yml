@@ -78,8 +78,39 @@ x-dokku:
   # own protocols, and the image ships no client and no dump tool. Clone and
   # the backup family fall out of that, which is the list the bash plugin kept
   # by hand.
-  #
-  # nginx-expose and nginx-unexpose are not here. They write a vhost under
-  # /etc/nginx and reload nginx, which needs both the host and a privilege this
-  # binary is not granted, so they stay in the plugin repo the way solr's
-  # post-extract trigger does.
+
+  custom_commands:
+    nginx-expose:
+      # on the host, because what it produces is configuration for the host's
+      # own nginx. The script runs unprivileged and hands the finished vhost to
+      # the privileged helper, which is the only part that is granted root.
+      mode: host
+      description: expose the {{.Title}} service's grafana via an nginx vhost
+      documentation: |
+        expose the {{.Title}} service's grafana via an nginx vhost
+        > NOTE: with no domain, grafana answers to grafana-<service>.<vhost> for every global vhost
+        dokku {{.CommandPrefix}}:nginx-expose lollipop
+        dokku {{.CommandPrefix}}:nginx-expose lollipop example.com
+      arguments:
+        - name: domain
+          description: a domain to expose grafana on, defaulting to the global vhosts
+          optional: true
+      exec:
+        - nginx-expose
+        # an absent domain renders empty and is dropped, so the script sees no
+        # argument at all rather than an empty one
+        - "{{ .Args.domain }}"
+      env:
+        GRAPHITE_SERVICE: "{{ .ServiceName }}"
+        GRAPHITE_CONTAINER: "{{ .ContainerName }}"
+
+    nginx-unexpose:
+      mode: host
+      description: unexpose the {{.Title}} service's grafana
+      documentation: |
+        unexpose the {{.Title}} service's grafana
+        dokku {{.CommandPrefix}}:nginx-unexpose lollipop
+      exec:
+        - nginx-unexpose
+      env:
+        GRAPHITE_SERVICE: "{{ .ServiceName }}"

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/cron"
@@ -22,14 +23,64 @@ func StagedCronFile(s *service.Datastore, serviceName string) string {
 	return filepath.Join(service.Folders(s, serviceName).Root, ".TMP_CRON_FILE")
 }
 
-// SudoersContents returns the sudoers file a datastore plugin installs
+// SudoersContents returns the sudoers file a datastore plugin installs: the
+// cron helper every datastore has, and a line for each privileged script its
+// definition ships.
+//
+// Every line names one script and constrains no argument, which is what keeps
+// the file valid under sudo-rs. A rule matching arguments would be rejected
+// outright and leave the dokku group with no privileges at all.
 func SudoersContents(s *service.Datastore) string {
-	return cron.SudoersContents(s.Properties().CommandPrefix)
+	contents := cron.SudoersContents(s.Properties().CommandPrefix)
+	for _, file := range PrivilegedFiles(s) {
+		contents += fmt.Sprintf("%%dokku ALL=(ALL) NOPASSWD:%s\n", file.Filename)
+	}
+
+	return contents
 }
 
 // SudoersFile describes the sudoers file a datastore plugin installs.
 func SudoersFile(s *service.Datastore) common.WriteStringToFileInput {
-	return cron.SudoersFile(s.Properties().CommandPrefix)
+	file := cron.SudoersFile(s.Properties().CommandPrefix)
+	file.Content = SudoersContents(s)
+
+	return file
+}
+
+// PrivilegedPath is where a definition's privileged script is installed. It is
+// the same root owned directory the cron helper goes in, and for the same
+// reason: being able to replace the script, or the directory holding it, would
+// be a way to choose what the dokku group runs as root.
+func PrivilegedPath(plugin string, name string) string {
+	return filepath.Join("/usr/local/bin", fmt.Sprintf("dokku-%s-%s", plugin, name))
+}
+
+// PrivilegedFiles describes the privileged scripts a datastore installs, sorted
+// so that the sudoers file they are granted in is written the same way twice.
+func PrivilegedFiles(s *service.Datastore) []common.WriteStringToFileInput {
+	scripts := s.Definition.Privileged
+	if len(scripts) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(scripts))
+	for name := range scripts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	files := make([]common.WriteStringToFileInput, 0, len(names))
+	for _, name := range names {
+		files = append(files, common.WriteStringToFileInput{
+			Content:   string(scripts[name]),
+			Filename:  PrivilegedPath(s.Properties().CommandPrefix, name),
+			GroupName: "root",
+			Mode:      0755,
+			Username:  "root",
+		})
+	}
+
+	return files
 }
 
 // CronHelperFile describes the helper script the sudoers file grants.
@@ -99,6 +150,13 @@ func Install(ctx context.Context, input InstallInput) error {
 	// not there yet
 	if err := common.WriteStringToFile(helperFile); err != nil {
 		return fmt.Errorf("unable to write %s: %w", helperFile.Filename, err)
+	}
+
+	// and so does anything the definition ships, for the same reason
+	for _, file := range PrivilegedFiles(input.Datastore) {
+		if err := common.WriteStringToFile(file); err != nil {
+			return fmt.Errorf("unable to write %s: %w", file.Filename, err)
+		}
 	}
 
 	sudoersFile := SudoersFile(input.Datastore)

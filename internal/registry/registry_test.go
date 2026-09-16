@@ -1074,3 +1074,77 @@ func TestEveryDefinitionCanBeWaitedFor(t *testing.T) {
 		}
 	}
 }
+
+// Graphite is the only definition that needs root for part of what it does, and
+// the split is the point: the script that runs on the host is unprivileged and
+// ships in bin/, and only the part that writes under /etc is privileged.
+func TestGraphiteSplitsThePrivilegedPart(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	graphite, ok := loaded.Definition("graphite")
+	if !ok {
+		t.Fatal("expected a graphite definition")
+	}
+
+	if _, ok := graphite.Privileged["nginx"]; !ok {
+		t.Errorf("expected a privileged nginx helper, got %v", graphite.Privileged)
+	}
+
+	for _, name := range []string{"nginx-expose", "nginx-unexpose"} {
+		script, ok := graphite.Scripts[name]
+		if !ok {
+			t.Fatalf("expected graphite to ship %s on the host", name)
+		}
+
+		// the unprivileged half asks for root rather than assuming it
+		if !strings.Contains(string(script), "sudo ") {
+			t.Errorf("expected %s to reach root through the helper", name)
+		}
+
+		declared, ok := graphite.CommandFor(name)
+		if !ok {
+			t.Fatalf("expected %s to be declared", name)
+		}
+
+		if declared.Mode != definition.ModeHost {
+			t.Errorf("expected %s to run on the host, got %q", name, declared.Mode)
+		}
+
+		if declared.Description == "" {
+			t.Errorf("expected %s to be documented", name)
+		}
+	}
+
+	// and they are extra commands rather than base verbs, so they reach users
+	// through invoke and no other datastore has to refuse them
+	if _, base := graphite.Dokku.Commands["nginx-expose"]; base {
+		t.Error("expected nginx-expose to be a custom command rather than a base verb")
+	}
+
+	if !graphite.ImplementsCustom("nginx-expose") {
+		t.Error("expected graphite to implement nginx-expose")
+	}
+}
+
+// Nothing else ships one, so the mechanism grants root to exactly one script in
+// the whole registry.
+func TestOnlyGraphiteShipsAPrivilegedScript(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	for _, name := range loaded.Names() {
+		found, ok := loaded.Definition(name)
+		if !ok {
+			t.Fatalf("expected a %s definition", name)
+		}
+
+		if len(found.Privileged) > 0 && name != "graphite" {
+			t.Errorf("%s ships a privileged script, which needs saying out loud", name)
+		}
+	}
+}

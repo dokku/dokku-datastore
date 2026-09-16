@@ -1,7 +1,10 @@
 package verb
 
 import (
+	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -294,24 +297,109 @@ func TestResolveReportsATemplateError(t *testing.T) {
 }
 
 func TestRunRefusesAModeItCannotHonour(t *testing.T) {
-	// running a host command in the service container would run it somewhere
-	// other than where the definition asked for
-	for _, mode := range []string{definition.ModeHost} {
-		t.Run(mode, func(t *testing.T) {
+	// a mode that got past parsing is still refused rather than run in the
+	// service container, which would run it somewhere other than where the
+	// definition asked for
+	input := commandInput(definition.Command{
+		Exec: []string{"true"},
+		Mode: "somewhere-else",
+	}, definition.Scope{})
+
+	err := Run(t.Context(), input)
+	if err == nil {
+		t.Fatal("expected an unknown mode to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "somewhere-else") {
+		t.Errorf("expected the error to name the mode, got %q", err)
+	}
+}
+
+// A host command runs a script the definition ships, so without somewhere to
+// find those scripts there is nothing it may run.
+func TestRunHostNeedsTheScriptsTheDefinitionShips(t *testing.T) {
+	input := commandInput(definition.Command{
+		Exec: []string{"nginx-expose"},
+		Mode: definition.ModeHost,
+	}, definition.Scope{})
+
+	err := Run(t.Context(), input)
+	if err == nil {
+		t.Fatal("expected a host command with no script root to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "scripts the definition ships") {
+		t.Errorf("expected the error to say what is missing, got %q", err)
+	}
+}
+
+// Resolving by base name is what keeps a host command to the scripts its own
+// definition ships. A path would be a way to reach anything on the host.
+func TestRunHostRefusesAPath(t *testing.T) {
+	for _, argv0 := range []string{"/bin/sh", "../../../bin/sh", "./nginx-expose"} {
+		t.Run(argv0, func(t *testing.T) {
 			input := commandInput(definition.Command{
-				Exec: []string{"true"},
-				Mode: mode,
+				Exec: []string{argv0},
+				Mode: definition.ModeHost,
 			}, definition.Scope{})
+			input.ScriptRoot = t.TempDir()
 
 			err := Run(t.Context(), input)
 			if err == nil {
-				t.Fatalf("expected mode %s to be refused", mode)
+				t.Fatalf("expected %s to be refused", argv0)
 			}
 
-			if !strings.Contains(err.Error(), mode) {
-				t.Errorf("expected the error to name the mode, got %q", err)
+			if !strings.Contains(err.Error(), "path") {
+				t.Errorf("expected the error to say it is a path, got %q", err)
 			}
 		})
+	}
+}
+
+// And a name the definition does not ship is refused rather than looked for on
+// the host's own path.
+func TestRunHostRefusesAScriptItDoesNotShip(t *testing.T) {
+	input := commandInput(definition.Command{
+		Exec: []string{"sh"},
+		Mode: definition.ModeHost,
+	}, definition.Scope{})
+	input.ScriptRoot = t.TempDir()
+
+	err := Run(t.Context(), input)
+	if err == nil {
+		t.Fatal("expected a script the definition does not ship to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "does not ship") {
+		t.Errorf("expected the error to say so, got %q", err)
+	}
+}
+
+// What it does run is the script beside it, with the declared environment.
+func TestRunHostRunsTheScriptWithItsEnvironment(t *testing.T) {
+	root := t.TempDir()
+	script := filepath.Join(root, "greet")
+	body := "#!/usr/bin/env bash\necho \"$GREETING $1\"\n"
+	if err := os.WriteFile(script, []byte(body), 0755); err != nil {
+		t.Fatalf("unable to write the script: %s", err)
+	}
+
+	input := commandInput(definition.Command{
+		Exec: []string{"greet", "{{ .ServiceName }}"},
+		Mode: definition.ModeHost,
+		Env:  map[string]string{"GREETING": "hello"},
+	}, definition.Scope{ServiceName: "lollipop"})
+	input.ScriptRoot = root
+
+	output := bytes.Buffer{}
+	input.Stdout = &output
+
+	if err := Run(t.Context(), input); err != nil {
+		t.Fatalf("expected the script to run, got %s", err)
+	}
+
+	if got := strings.TrimSpace(output.String()); got != "hello lollipop" {
+		t.Errorf("expected the script to see its environment and argument, got %q", got)
 	}
 }
 

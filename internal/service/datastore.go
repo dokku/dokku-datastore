@@ -597,12 +597,13 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 			Container:  ContainerName(s, serviceName),
 			Ambassador: AmbassadorContainerName(s, serviceName),
 		},
-		Image:   s.runTaggedImage(serviceName),
-		Volumes: s.volumes(serviceName),
-		TTY:     options.TTY,
-		Stdin:   options.Stdin,
-		Stdout:  options.Stdout,
-		Stderr:  options.Stderr,
+		Image:      s.runTaggedImage(serviceName),
+		Volumes:    s.volumes(serviceName),
+		ScriptRoot: filepath.Join(Folders(s, serviceName).Root, "bin"),
+		TTY:        options.TTY,
+		Stdin:      options.Stdin,
+		Stdout:     options.Stdout,
+		Stderr:     options.Stderr,
 	})
 }
 
