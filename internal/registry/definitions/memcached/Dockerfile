@@ -1,0 +1,2 @@
+ARG IMAGE=memcached:1.6.42
+FROM ${IMAGE}

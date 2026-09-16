@@ -67,39 +67,43 @@ fi
 
 dump="$(mktemp)"
 status=0
+round_trip=1
 "$BIN" export "$PLUGIN" "$SERVICE" >"$dump" 2>"$dump.err" || status=$?
 if [[ "$status" -ne 0 ]]; then
   # a datastore that declares no export exits the way dokku expects of a plugin
-  # that does not handle a command, and there is no round trip to make
+  # that does not handle a command, and there is no round trip to make. Every
+  # other check still applies: a cache is still created and still destroyed.
   if [[ "$status" -eq "${DOKKU_NOT_IMPLEMENTED_EXIT:-10}" ]]; then
     echo "    skipped: $PLUGIN does not implement export"
-    rm -f "$dump" "$dump.err"
-    exit 0
+    round_trip=0
+  else
+    cat "$dump.err" >&2
+    fail "export failed with status $status"
+  fi
+fi
+
+if [[ "$round_trip" -eq 1 ]]; then
+  [[ -s "$dump" ]] || fail "export produced nothing"
+
+  # overwritten first, so that finding the record afterwards means the import
+  # put it back rather than that it was never gone
+  if [[ -x "$probe" ]]; then
+    "$probe" clobber "$SERVICE"
   fi
 
-  cat "$dump.err" >&2
-  fail "export failed with status $status"
+  if ! "$BIN" import "$PLUGIN" "$SERVICE" <"$dump"; then
+    fail "import failed"
+  fi
+
+  if [[ -x "$probe" ]]; then
+    restored="$("$probe" read "$SERVICE")"
+    [[ "$restored" == "known" ]] || fail "the round trip lost the record, read '$restored'"
+  fi
+
+  running="$("$BIN" info "$PLUGIN" "$SERVICE" --status)"
+  [[ "$running" == "running" ]] || fail "expected the service to be running after an import, got '$running'"
 fi
 
-[[ -s "$dump" ]] || fail "export produced nothing"
-
-# overwritten first, so that finding the record afterwards means the import put
-# it back rather than that it was never gone
-if [[ -x "$probe" ]]; then
-  "$probe" clobber "$SERVICE"
-fi
-
-if ! "$BIN" import "$PLUGIN" "$SERVICE" <"$dump"; then
-  fail "import failed"
-fi
-
-if [[ -x "$probe" ]]; then
-  restored="$("$probe" read "$SERVICE")"
-  [[ "$restored" == "known" ]] || fail "the round trip lost the record, read '$restored'"
-fi
-
-status="$("$BIN" info "$PLUGIN" "$SERVICE" --status)"
-[[ "$status" == "running" ]] || fail "expected the service to be running after an import, got '$status'"
 rm -f "$dump" "$dump.err"
 
 echo "==> $DEFINITION: destroy leaves nothing behind"

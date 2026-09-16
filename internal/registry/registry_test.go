@@ -298,3 +298,42 @@ func keys(files map[string][]byte) []string {
 	sort.Strings(names)
 	return names
 }
+
+// What a datastore cannot do is derived from what it declares, so the list the
+// bash plugin maintained by hand is worth checking against once: memcached is a
+// cache, so it has nothing to dump and nothing built on dumping.
+func TestMemcachedImplementsOnlyWhatItCan(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	memcached, ok := loaded.Definition("memcached")
+	if !ok {
+		t.Fatal("expected a memcached definition")
+	}
+
+	for _, subcommand := range []string{
+		"backup", "backup-auth", "backup-deauth", "backup-schedule",
+		"backup-schedule-cat", "backup-set-encryption", "backup-unschedule",
+		"backup-unset-encryption", "clone", "export", "import",
+	} {
+		if memcached.Implements(subcommand) {
+			t.Errorf("expected memcached not to implement %s", subcommand)
+		}
+	}
+
+	if !memcached.Implements("connect") {
+		t.Error("expected memcached to implement connect")
+	}
+
+	// no credentials and nothing on disk, which is what makes it the simplest
+	// definition there is
+	if len(memcached.Dokku.Secrets) != 0 {
+		t.Errorf("expected no secrets, got %v", memcached.Dokku.Secrets)
+	}
+
+	if len(memcached.Service.Volumes) != 0 {
+		t.Errorf("expected no volumes, got %v", memcached.Service.Volumes)
+	}
+}
