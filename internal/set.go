@@ -10,7 +10,7 @@ import (
 )
 
 // SettableProperties are the properties a service exposes through the set command
-var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network"}
+var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", KeyserverProperty}
 
 // InvalidPropertyError reports a property the set command does not manage
 func InvalidPropertyError() error {
