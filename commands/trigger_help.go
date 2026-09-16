@@ -129,10 +129,20 @@ func (c *TriggerHelpCommand) Run(args []string) int {
 	// so a datastore never advertises something that would exit as not a command
 	implemented := []internal.PluginCommand{}
 	for _, pluginCommand := range pluginCommands(context.Background(), c.Meta, c.CommandFunc) {
+		// invoke is how a datastore's own commands are reached, not a command a
+		// datastore has: the commands themselves are listed below
+		if pluginCommand.Name() == "invoke" {
+			continue
+		}
+
 		if service.Implements(datastore, pluginCommand.Name()) {
 			implemented = append(implemented, pluginCommand)
 		}
 	}
+
+	// a datastore's own commands are its commands, so they are listed beside
+	// the rest rather than hidden behind the verb that dispatches them
+	implemented = append(implemented, internal.CustomCommands(datastore.Definition)...)
 
 	input := internal.PluginHelpInput{
 		Commands: implemented,

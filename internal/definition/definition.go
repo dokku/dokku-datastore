@@ -206,6 +206,12 @@ type Dokku struct {
 	// under the service root, keyed by the name templates refer to them by.
 	Secrets map[string]Secret `yaml:"secrets"`
 
+	// CustomCommands are the operations this datastore adds, which the tool
+	// knows nothing about beyond how to run them. They are declared apart from
+	// Commands so that being custom is a fact about the definition rather than
+	// about what other datastores happen to declare.
+	CustomCommands map[string]Command `yaml:"custom_commands"`
+
 	// Commands are the operations run against a service. The well-known keys
 	// connect, export and import drive the built-in subcommands, and a key's
 	// absence is what makes that subcommand unimplemented. Any other key becomes
@@ -250,10 +256,15 @@ type Command struct {
 	// Stdin is true when the command consumes standard input, as import does.
 	Stdin bool `yaml:"stdin"`
 
-	// Description and Arguments document an extra subcommand. The built-in verbs
-	// take theirs from the tool.
+	// Description and Arguments document a custom command. The base verbs take
+	// theirs from the tool.
 	Description string     `yaml:"description"`
 	Arguments   []Argument `yaml:"arguments"`
+
+	// Documentation is the long form prose the readme renders for a custom
+	// command, and Group is the section it appears under.
+	Documentation string `yaml:"documentation"`
+	Group         string `yaml:"group"`
 }
 
 // Argument is a positional argument of an extra subcommand.
@@ -403,4 +414,29 @@ func RootfsMode(name string) fs.FileMode {
 	}
 
 	return 0644
+}
+
+// BaseCommands are the command names the tool implements itself. A definition
+// declares what it can do by supplying these; anything else it wants belongs in
+// CustomCommands.
+var BaseCommands = map[string]bool{
+	"connect": true,
+	"export":  true,
+	"import":  true,
+}
+
+// CommandFor returns a command by name, base or custom.
+func (d Definition) CommandFor(name string) (Command, bool) {
+	if command, ok := d.Dokku.Commands[name]; ok {
+		return command, true
+	}
+
+	command, ok := d.Dokku.CustomCommands[name]
+	return command, ok
+}
+
+// ImplementsCustom reports whether a datastore adds a command by this name.
+func (d Definition) ImplementsCustom(name string) bool {
+	_, ok := d.Dokku.CustomCommands[name]
+	return ok
 }

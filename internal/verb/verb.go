@@ -67,7 +67,7 @@ func (e ErrNotImplemented) Error() string {
 // separate from Run so that what a definition turns into can be tested without
 // a docker daemon.
 func Resolve(input RunInput) (backend.ExecInput, error) {
-	command, ok := input.Definition.Dokku.Commands[input.Name]
+	command, ok := input.Definition.CommandFor(input.Name)
 	if !ok {
 		return backend.ExecInput{}, ErrNotImplemented{
 			Plugin: input.Definition.Dokku.Plugin,
@@ -110,7 +110,7 @@ func Resolve(input RunInput) (backend.ExecInput, error) {
 
 // Run executes a verb against a running service.
 func Run(ctx context.Context, input RunInput) error {
-	command := input.Definition.Dokku.Commands[input.Name]
+	command, _ := input.Definition.CommandFor(input.Name)
 
 	switch command.Mode {
 	case "", definition.ModeService:
@@ -147,7 +147,7 @@ func runSidecar(ctx context.Context, input RunInput) error {
 		return err
 	}
 
-	command := input.Definition.Dokku.Commands[input.Name]
+	command, _ := input.Definition.CommandFor(input.Name)
 
 	// the command's own image when it names one, since a sidecar exists for a
 	// tool the datastore image does not ship; otherwise the service's own

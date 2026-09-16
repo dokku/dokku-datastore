@@ -18,6 +18,11 @@ type composeFile struct {
 
 // composeService is the service as dokku runs it, rather than as the definition
 // declares it.
+//
+// There is deliberately no ports or expose key. A container exposes what its
+// image declares and nothing more, which is what the docker path produces, and
+// a datastore has never published a port itself. The port names live in the
+// definition, where the dsn, the readiness probe and the ambassador read them.
 type composeService struct {
 	// ContainerName and Hostname are pinned, which is what lets every read path
 	// address the container by name whichever backend created it.
@@ -36,12 +41,6 @@ type composeService struct {
 	// because compose interpolates ${...} in an env_file and docker does not,
 	// so a custom env containing a dollar sign would mean two different things.
 	Environment map[string]string `yaml:"environment,omitempty"`
-
-	// Expose rather than ports: a long syntax port with no published side gets
-	// an ephemeral host port, and the datastore container has never published
-	// one. The names live in the definition, where the dsn and the probe read
-	// them, and are not needed here.
-	Expose []string `yaml:"expose,omitempty"`
 
 	Volumes []string `yaml:"volumes,omitempty"`
 	ShmSize string   `yaml:"shm_size,omitempty"`
@@ -102,19 +101,6 @@ func Compose(input Input) ([]byte, error) {
 		Environment: environment(input.Environment, arguments.Env),
 		Volumes:     arguments.Volumes,
 		ShmSize:     arguments.ShmSize,
-	}
-
-	for _, port := range input.Definition.Service.Ports {
-		// always qualified with the protocol. An unqualified port becomes a
-		// key of its own on some docker versions rather than merging with the
-		// one the image already declares, which leaves the container exposing
-		// both 6379 and 6379/tcp and disagreeing with the docker path.
-		protocol := port.Protocol
-		if protocol == "" {
-			protocol = "tcp"
-		}
-
-		service.Expose = append(service.Expose, fmt.Sprintf("%d/%s", port.Target, protocol))
 	}
 
 	if arguments.Memory != "" {

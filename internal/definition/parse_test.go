@@ -158,10 +158,28 @@ func TestParseRejects(t *testing.T) {
 			expected: "not an octal file mode",
 		},
 		{
+			// the base spec is fixed: a datastore cannot extend what the tool
+			// implements by choosing a name the tool has never heard of
+			name:     "a command the tool does not implement, under commands",
+			compose:  validCompose + "\n  commands:\n    thing-expose:\n      exec: [thing-expose]\n",
+			expected: "declare it under custom_commands",
+		},
+		{
+			name:     "a command the tool implements, under custom_commands",
+			compose:  validCompose + "\n  custom_commands:\n    connect:\n      description: connect\n      exec: [thing]\n",
+			expected: "declare it under commands",
+		},
+		{
+			// the help and the readme have nothing else to describe it with
+			name:     "a custom command with no description",
+			compose:  validCompose + "\n  custom_commands:\n    thing-expose:\n      exec: [thing-expose]\n",
+			expected: `custom command "thing-expose" needs a description`,
+		},
+		{
 			// host mode runs arbitrary code outside a container, so a plugin
 			// checkout must not be able to introduce one
 			name:     "a host command from a plugin override",
-			compose:  validCompose + "\n  commands:\n    thing-expose:\n      mode: host\n      exec: [thing-expose]\n",
+			compose:  validCompose + "\n  custom_commands:\n    thing-expose:\n      description: expose the thing\n      mode: host\n      exec: [thing-expose]\n",
 			embedded: false,
 			expected: "only allowed for definitions shipped in the binary",
 		},
@@ -182,7 +200,7 @@ func TestParseRejects(t *testing.T) {
 }
 
 func TestParseAllowsAHostCommandFromTheEmbeddedTree(t *testing.T) {
-	compose := validCompose + "\n  commands:\n    thing-expose:\n      mode: host\n      exec: [thing-expose]\n"
+	compose := validCompose + "\n  custom_commands:\n    thing-expose:\n      description: expose the thing\n      mode: host\n      exec: [thing-expose]\n"
 	if _, err := parseCompose(t, compose, true); err != nil {
 		t.Errorf("unexpected error: %s", err)
 	}
