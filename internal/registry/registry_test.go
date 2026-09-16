@@ -788,3 +788,57 @@ func TestRethinkdbOffersNothingItCannotDo(t *testing.T) {
 		t.Errorf("expected no secrets, got %v", rethinkdb.Dokku.Secrets)
 	}
 }
+
+// Pushpin has five ports and the one a linked app is handed is neither the
+// first the bash plugin listed by number nor the one clients are served on.
+// Naming them is what keeps the url and the readiness wait on the port an app
+// publishes to.
+func TestPushpinPublishesWhereTheUrlPoints(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	pushpin, ok := loaded.Definition("pushpin")
+	if !ok {
+		t.Fatal("expected a pushpin definition")
+	}
+
+	expected := map[string]int{
+		"publish":   5561,
+		"http":      7999,
+		"push":      5560,
+		"subscribe": 5562,
+		"command":   5563,
+	}
+
+	for name, target := range expected {
+		port, ok := pushpin.PortFor(name)
+		if !ok {
+			t.Errorf("expected a port named %s", name)
+			continue
+		}
+
+		if port.Target != target {
+			t.Errorf("expected %s on %d, got %d", name, target, port.Target)
+		}
+	}
+
+	primary, ok := pushpin.PrimaryPort()
+	if !ok {
+		t.Fatal("expected a primary port")
+	}
+
+	if primary.Name != "publish" {
+		t.Errorf("expected the publish port to be primary, got %s", primary.Name)
+	}
+
+	if pushpin.Dokku.Wait != "publish" {
+		t.Errorf("expected readiness on the publish port, got %s", pushpin.Dokku.Wait)
+	}
+
+	// WEBSOCKET rather than PUSHPIN, which is not derivable from the name
+	if pushpin.Dokku.Alias != "WEBSOCKET" {
+		t.Errorf("expected WEBSOCKET, got %s", pushpin.Dokku.Alias)
+	}
+}
