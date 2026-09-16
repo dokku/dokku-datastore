@@ -115,3 +115,122 @@ func TestTheHelperStagesWhereTheBinaryWrites(t *testing.T) {
 		t.Errorf("the binary writes %s but the helper moves %s", actual, expected)
 	}
 }
+
+// Graphite is the only datastore that ships a privileged script. Its sudoers
+// file has to grant that script as well as the cron helper, and every line has
+// to keep the shape sudo-rs accepts.
+func TestSudoersGrantsAPrivilegedScript(t *testing.T) {
+	graphite, ok := service.Datastores["graphite"]
+	if !ok {
+		t.Fatal("expected graphite to be registered")
+	}
+
+	contents := SudoersContents(graphite)
+	lines := strings.Split(strings.TrimSpace(contents), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected the cron helper and one privileged script, got %d lines: %q", len(lines), contents)
+	}
+
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "%dokku ALL=(ALL) NOPASSWD:") {
+			t.Errorf("expected a bare grant, got %q", line)
+		}
+
+		// a rule matching arguments is rejected by sudo-rs outright, which
+		// leaves the dokku group with no privileges at all rather than fewer
+		for _, character := range []string{"*", "^", "$", "[", "\\"} {
+			if strings.Contains(line, character) {
+				t.Errorf("expected no %s in %q", character, line)
+			}
+		}
+	}
+
+	if !strings.Contains(contents, "NOPASSWD:/usr/local/bin/dokku-graphite-cron\n") {
+		t.Error("expected the cron helper to still be granted")
+	}
+
+	if !strings.Contains(contents, "NOPASSWD:/usr/local/bin/dokku-graphite-nginx\n") {
+		t.Error("expected the nginx helper to be granted")
+	}
+}
+
+// A datastore that ships no privileged script is granted exactly what it was
+// before, so adding the mechanism widened nothing for the other twenty-one.
+func TestSudoersIsUnchangedWithoutAPrivilegedScript(t *testing.T) {
+	redis, ok := service.Datastores["redis"]
+	if !ok {
+		t.Fatal("expected redis to be registered")
+	}
+
+	contents := SudoersContents(redis)
+	if lines := strings.Split(strings.TrimSpace(contents), "\n"); len(lines) != 1 {
+		t.Errorf("expected one grant, got %d: %q", len(lines), contents)
+	}
+
+	if len(PrivilegedFiles(redis)) != 0 {
+		t.Error("expected redis to ship no privileged script")
+	}
+}
+
+// The script has to belong to root and live somewhere the dokku user cannot
+// write, because the sudoers rule names it with no constraint on its arguments.
+func TestPrivilegedFileIsOwnedByRoot(t *testing.T) {
+	graphite, ok := service.Datastores["graphite"]
+	if !ok {
+		t.Fatal("expected graphite to be registered")
+	}
+
+	files := PrivilegedFiles(graphite)
+	if len(files) != 1 {
+		t.Fatalf("expected one privileged script, got %d", len(files))
+	}
+
+	file := files[0]
+	if file.Filename != "/usr/local/bin/dokku-graphite-nginx" {
+		t.Errorf("expected /usr/local/bin/dokku-graphite-nginx, got %s", file.Filename)
+	}
+
+	if file.Username != "root" || file.GroupName != "root" {
+		t.Errorf("expected root:root, got %s:%s", file.Username, file.GroupName)
+	}
+
+	if file.Mode != 0755 {
+		t.Errorf("expected 0755, got %o", file.Mode)
+	}
+
+	if !strings.HasPrefix(file.Content, "#!/usr/bin/env bash") {
+		t.Error("expected a bash script")
+	}
+
+	// the same validation discipline the cron helper has, since the grant is
+	// the same shape
+	if !strings.Contains(file.Content, `[[ ! "$service" =~ ^[A-Za-z0-9_-]+$ ]]`) {
+		t.Error("expected the service name to be validated in the script")
+	}
+}
+
+// The path is written by Go and invoked by bash, so the two derivations have to
+// be pinned against each other rather than each restating a literal.
+func TestTheScriptCallsTheHelperTheInstallWrites(t *testing.T) {
+	graphite, ok := service.Datastores["graphite"]
+	if !ok {
+		t.Fatal("expected graphite to be registered")
+	}
+
+	files := PrivilegedFiles(graphite)
+	if len(files) != 1 {
+		t.Fatalf("expected one privileged script, got %d", len(files))
+	}
+
+	installed := files[0].Filename
+	for _, name := range []string{"nginx-expose", "nginx-unexpose"} {
+		script, ok := graphite.Definition.Scripts[name]
+		if !ok {
+			t.Fatalf("expected graphite to ship %s", name)
+		}
+
+		if !strings.Contains(string(script), installed) {
+			t.Errorf("expected %s to call %s", name, installed)
+		}
+	}
+}

@@ -8,6 +8,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 
 	"github.com/dokku/dokku-datastore/internal/backend"
 	"github.com/dokku/dokku-datastore/internal/definition"
@@ -42,6 +45,12 @@ type RunInput struct {
 	// Volumes are the service's bind mounts as source:target, which an offline
 	// command needs for the same reason.
 	Volumes []string
+
+	// ScriptRoot is where the definition's own bin scripts were written for
+	// this service. A host command's argv[0] is resolved against it, so a
+	// definition runs something it ships rather than anything on the host's
+	// path.
+	ScriptRoot string
 
 	// TTY asks docker for a terminal, which only connect wants and only when
 	// the caller has one to give
@@ -134,10 +143,11 @@ func Run(ctx context.Context, input RunInput) error {
 		return runOffline(ctx, input)
 	case definition.ModeSidecar:
 		return runSidecar(ctx, input)
+	case definition.ModeHost:
+		return runHost(ctx, input)
 	default:
-		// host mode needs machinery that does not exist yet, and failing here is
-		// better than running the command somewhere other than where the
-		// definition asked for
+		// failing here is better than running the command somewhere other than
+		// where the definition asked for
 		return fmt.Errorf("the %s command runs in mode %q, which is not supported yet", input.Name, command.Mode)
 	}
 
@@ -233,4 +243,54 @@ func runOffline(ctx context.Context, input RunInput) error {
 	}
 
 	return runErr
+}
+
+// runHost runs a command on the host rather than in a container.
+//
+// Two commands need this, and what they do is write an nginx vhost and reload
+// nginx, which is not something a container can do to the machine it runs on.
+// It runs as whoever runs the binary, which is the dokku user: the part that
+// needs root is a separate script the install put somewhere dokku cannot write,
+// and the command reaches it through sudo.
+//
+// argv[0] is resolved against the scripts the definition ships rather than
+// against the host's path, and only by base name, so a definition runs what it
+// brought with it and cannot reach anything else. Parsing accepts this mode
+// only for definitions embedded in the binary, which is what stops a plugin
+// checkout from shipping host code at all.
+func runHost(ctx context.Context, input RunInput) error {
+	resolved, err := Resolve(input)
+	if err != nil {
+		return err
+	}
+
+	if input.ScriptRoot == "" {
+		return fmt.Errorf("the %s command runs on the host, which needs the scripts the definition ships", input.Name)
+	}
+
+	name := filepath.Base(resolved.Argv[0])
+	if name != resolved.Argv[0] {
+		return fmt.Errorf("the %s command runs %q, which is a path rather than one of the scripts the definition ships", input.Name, resolved.Argv[0])
+	}
+
+	script := filepath.Join(input.ScriptRoot, name)
+	if _, err := os.Stat(script); err != nil {
+		return fmt.Errorf("the %s command runs %s, which the definition does not ship: %w", input.Name, name, err)
+	}
+
+	command := exec.CommandContext(ctx, script, resolved.Argv[1:]...)
+
+	// the host environment is inherited because the script is a dokku plugin
+	// script: it reads DOKKU_ROOT and calls docker. What the definition
+	// declares is layered on top of that.
+	command.Env = os.Environ()
+	for name, value := range resolved.Env {
+		command.Env = append(command.Env, name+"="+value)
+	}
+
+	command.Stdin = input.Stdin
+	command.Stdout = input.Stdout
+	command.Stderr = input.Stderr
+
+	return command.Run()
 }

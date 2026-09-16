@@ -121,12 +121,18 @@ func parseEmbedded(name string) (definition.Definition, error) {
 		return definition.Definition{}, fmt.Errorf("%s: %w", name, err)
 	}
 
+	privileged, err := readTree(embedded, path.Join("definitions", name, "privileged"))
+	if err != nil {
+		return definition.Definition{}, fmt.Errorf("%s: %w", name, err)
+	}
+
 	return definition.Parse(definition.ParseInput{
 		Name:       name,
 		Compose:    compose,
 		Dockerfile: dockerfile,
 		Scripts:    scripts,
 		Rootfs:     rootfs,
+		Privileged: privileged,
 		Embedded:   true,
 	})
 }
@@ -220,12 +226,20 @@ func parseOverrides(root string) ([]definition.Definition, error) {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
 
+		// read rather than ignored, so that a checkout shipping one is told it
+		// is refused instead of watching it quietly do nothing
+		privileged, err := readTree(checkout, "privileged")
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+
 		one, err := definition.Parse(definition.ParseInput{
 			Name:       name,
 			Compose:    compose,
 			Dockerfile: dockerfile,
 			Scripts:    scripts,
 			Rootfs:     rootfs,
+			Privileged: privileged,
 			Embedded:   false,
 		})
 		if err != nil {

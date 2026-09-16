@@ -370,3 +370,29 @@ func TestParseReadsConfigs(t *testing.T) {
 		t.Errorf("expected 0640 1001:1001, got %s %s:%s", entry.Mode, entry.UID, entry.GID)
 	}
 }
+
+// A privileged script is granted sudo by the install, so a definition a plugin
+// checkout can write must not be able to introduce one. This is the same rule
+// host mode has, one step earlier: host mode stops a checkout running code on
+// the host, and this stops it choosing what the dokku group runs as root.
+func TestParseRefusesAPrivilegedScriptFromACheckout(t *testing.T) {
+	input := ParseInput{
+		Name:       "thing",
+		Compose:    []byte(validCompose),
+		Dockerfile: []byte("ARG IMAGE=thing:1.0\nFROM ${IMAGE}\n"),
+		Privileged: map[string][]byte{"nginx": []byte("#!/usr/bin/env bash\ntrue\n")},
+		Embedded:   false,
+	}
+
+	if _, err := Parse(input); err == nil {
+		t.Fatal("expected a privileged script from a checkout to be refused")
+	} else if !strings.Contains(err.Error(), "only allowed for definitions shipped in the binary") {
+		t.Errorf("expected the error to say why, got %q", err)
+	}
+
+	// and the same tree is fine from the embedded layer
+	input.Embedded = true
+	if _, err := Parse(input); err != nil {
+		t.Errorf("expected the embedded tree to be allowed, got %s", err)
+	}
+}
