@@ -244,7 +244,28 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		}
 	}
 
-	for name, command := range definition.Dokku.Commands {
+	for name := range definition.Dokku.Commands {
+		// the base spec is fixed: a datastore's own commands are declared apart
+		// from it, so that what the tool implements cannot be extended by a
+		// definition choosing a name the tool has never heard of
+		if !BaseCommands[name] {
+			return fail("commands.%s is not a command the tool implements; declare it under custom_commands", name)
+		}
+	}
+
+	for name, command := range definition.Dokku.CustomCommands {
+		if BaseCommands[name] {
+			return fail("custom_commands.%s is a command the tool implements; declare it under commands", name)
+		}
+
+		// a custom command nobody can discover is close to one that does not
+		// exist, and the help and the readme have nothing else to describe it
+		if command.Description == "" {
+			return fail("custom command %q needs a description", name)
+		}
+	}
+
+	for name, command := range allCommands(definition) {
 		if len(command.Exec) == 0 {
 			return fail("command %q needs an exec", name)
 		}
@@ -336,4 +357,19 @@ func argDefault(contents []byte) string {
 func cutImage(reference string) (string, string, bool) {
 	image, version, found := strings.Cut(reference, ":")
 	return image, version, found
+}
+
+// allCommands is every command a definition declares, base and custom, for the
+// checks that apply to both.
+func allCommands(definition Definition) map[string]Command {
+	commands := map[string]Command{}
+	for name, command := range definition.Dokku.Commands {
+		commands[name] = command
+	}
+
+	for name, command := range definition.Dokku.CustomCommands {
+		commands[name] = command
+	}
+
+	return commands
 }

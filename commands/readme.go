@@ -128,8 +128,23 @@ func (c *ReadmeCommand) Run(args []string) int {
 		return 1
 	}
 
+	// the readme documents what the datastore offers, filtered the same way the
+	// help is, with the datastore's own commands beside the rest
+	documented := []internal.PluginCommand{}
+	for _, pluginCommand := range pluginCommands(context.Background(), c.Meta, c.CommandFunc) {
+		if pluginCommand.Name() == "invoke" {
+			continue
+		}
+
+		if service.Implements(datastore, pluginCommand.Name()) {
+			documented = append(documented, pluginCommand)
+		}
+	}
+
+	documented = append(documented, internal.CustomCommands(datastore.Definition)...)
+
 	readme, err := internal.Readme(internal.ReadmeInput{
-		Commands: pluginCommands(context.Background(), c.Meta, c.CommandFunc),
+		Commands: documented,
 		Data: internal.NewDocumentationData(internal.DocumentationDataInput{
 			Datastore: datastore,
 			PluginDir: c.pluginDir,

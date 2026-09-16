@@ -1,0 +1,2 @@
+ARG IMAGE=mongo:8.2.9
+FROM ${IMAGE}

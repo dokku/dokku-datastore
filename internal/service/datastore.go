@@ -480,8 +480,33 @@ func (s *Datastore) ImportService(ctx context.Context, input ImportServiceInput)
 	})
 }
 
+// arguments pairs what the caller passed with the names the command declares
+// them under, so a template can read one by name rather than by position.
+func (s *Datastore) arguments(name string, values []string) map[string]string {
+	command, ok := s.Definition.CommandFor(name)
+	if !ok {
+		return nil
+	}
+
+	arguments := map[string]string{}
+	for index, declared := range command.Arguments {
+		if index < len(values) {
+			arguments[declared.Name] = values[index]
+		} else {
+			// an argument the caller left off renders empty, which the drop
+			// empty rule then removes from the command
+			arguments[declared.Name] = ""
+		}
+	}
+
+	return arguments
+}
+
 // runOptions are the streams and terminal a verb runs with.
 type runOptions struct {
+	// Arguments are the declared arguments a custom command was given
+	Arguments map[string]string
+
 	TTY    bool
 	Stdin  io.Reader
 	Stdout io.Writer
@@ -490,9 +515,12 @@ type runOptions struct {
 
 // run executes one of the definition's declared commands.
 func (s *Datastore) run(ctx context.Context, serviceName string, name string, options runOptions) error {
+	scope := s.scope(serviceName)
+	scope.Args = options.Arguments
+
 	return verb.Run(ctx, verb.RunInput{
 		Definition: s.Definition,
-		Scope:      s.scope(serviceName),
+		Scope:      scope,
 		Name:       name,
 		Names: backend.Names{
 			Container:  ContainerName(s, serviceName),
@@ -677,4 +705,32 @@ func cutTaggedImage(reference string) (string, string) {
 // fall out of step with what it actually declares.
 func Implements(s *Datastore, subcommand string) bool {
 	return s.Definition.Implements(subcommand)
+}
+
+// RunCommandInput is the input for RunCommand.
+type RunCommandInput struct {
+	// ServiceName is the service to run against
+	ServiceName string
+
+	// Name is the command the definition declares
+	Name string
+
+	// Arguments are the positional arguments after the service name, in the
+	// order the command declares them
+	Arguments []string
+}
+
+// RunCommand runs one of the definition's declared commands interactively.
+//
+// This is what an extra subcommand resolves to: a datastore may declare a
+// command the tool has never heard of, and running it needs nothing but the
+// name it was declared under.
+func (s *Datastore) RunCommand(ctx context.Context, input RunCommandInput) error {
+	return s.run(ctx, input.ServiceName, input.Name, runOptions{
+		Arguments: s.arguments(input.Name, input.Arguments),
+		TTY:       backend.HasTerminal(os.Stdin),
+		Stdin:     os.Stdin,
+		Stdout:    os.Stdout,
+		Stderr:    os.Stderr,
+	})
 }

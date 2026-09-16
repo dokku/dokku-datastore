@@ -20,13 +20,6 @@ func TestComposeForRedis(t *testing.T) {
 		"restart: always",
 		"dokku: service",
 		"dokku.service: redis",
-		// the container port, not a published one: a long syntax port with no
-		// published side would take an ephemeral host port, which a datastore
-		// container has never done
-		"expose:",
-		// qualified, or it becomes a key of its own on some docker versions
-		// instead of merging with the one the image already declares
-		"- 6379/tcp",
 		// compose would otherwise invent a project network, and a service that
 		// was on the default bridge would quietly move
 		"network_mode: bridge",
@@ -36,10 +29,14 @@ func TestComposeForRedis(t *testing.T) {
 		}
 	}
 
-	// ports belong to the definition, where the dsn and the probe read them by
-	// name; the rendered file has no use for them
-	if strings.Contains(document, "ports:") {
-		t.Errorf("expected no published ports, got:\n%s", document)
+	// a container exposes what its image declares and nothing more, which is
+	// what the docker path produces. Declaring ports here would exhibit ports
+	// the image never had, which mongo showed: it names four and its image
+	// declares one.
+	for _, absent := range []string{"ports:", "expose:"} {
+		if strings.Contains(document, absent) {
+			t.Errorf("expected no %s in the rendered file, got:\n%s", absent, document)
+		}
 	}
 }
 
