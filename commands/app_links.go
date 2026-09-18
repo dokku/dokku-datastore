@@ -59,7 +59,7 @@ func (c *AppLinksCommand) Arguments() []command.Argument {
 	args = append(args, command.Argument{
 		Name:        "app-name",
 		Description: "the name of the app to list the app links for",
-		Optional:    false,
+		Optional:    true,
 		Type:        command.ArgumentString,
 	})
 	return args
@@ -150,7 +150,7 @@ func (c *AppLinksCommand) Run(args []string) int {
 		return 1
 	}
 
-	appName := arguments["app-name"].StringValue()
+	appName := appNameOrCurrent(arguments["app-name"].StringValue())
 	if appName == "" {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),

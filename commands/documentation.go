@@ -16,7 +16,7 @@ func (c *AppLinksCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *AppLinksCommand) Usage() string {
-	return `<app>`
+	return `[<app>]`
 }
 
 // Documentation returns the long form documentation for the command
@@ -577,7 +577,7 @@ func (c *LinkedCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *LinkedCommand) Usage() string {
-	return `<service> <app>`
+	return `<service> [<app>]`
 }
 
 // Documentation returns the long form documentation for the command

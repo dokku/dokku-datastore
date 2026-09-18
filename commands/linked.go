@@ -66,7 +66,7 @@ func (c *LinkedCommand) Arguments() []command.Argument {
 	args = append(args, command.Argument{
 		Name:        "app-name",
 		Description: "the name of the app to check if the service is linked to",
-		Optional:    false,
+		Optional:    true,
 		Type:        command.ArgumentString,
 	})
 	return args
@@ -173,7 +173,7 @@ func (c *LinkedCommand) Run(args []string) int {
 		return 1
 	}
 
-	appName := arguments["app-name"].StringValue()
+	appName := appNameOrCurrent(arguments["app-name"].StringValue())
 	if appName == "" {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
