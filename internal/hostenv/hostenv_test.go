@@ -84,3 +84,41 @@ func TestSystemUserAndGroup(t *testing.T) {
 		})
 	}
 }
+
+// The base path dokku exports is the directory every plugin sits in, so a
+// plugin's own directory is that path plus its name. Without the name this
+// pointed at a sibling called datastore, where no plugin installs anything, and
+// an override was never found at runtime even though generating a readme saw it.
+func TestPluginCheckout(t *testing.T) {
+	t.Setenv("PLUGIN_BASE_PATH", "/var/lib/dokku/plugins/enabled")
+	t.Setenv("PLUGIN_COMMAND_PREFIX", "redis")
+
+	if actual := PluginCheckout(); actual != "/var/lib/dokku/plugins/enabled/redis" {
+		t.Errorf("expected the plugin's own directory, got %q", actual)
+	}
+}
+
+// Outside a dokku install there is nowhere to look, and an empty result is what
+// tells the registry to use only what it was compiled with.
+func TestPluginCheckoutIsEmptyWithoutBoth(t *testing.T) {
+	tests := []struct {
+		name   string
+		base   string
+		prefix string
+	}{
+		{name: "no base path", base: "", prefix: "redis"},
+		{name: "no command prefix", base: "/var/lib/dokku/plugins/enabled", prefix: ""},
+		{name: "neither", base: "", prefix: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("PLUGIN_BASE_PATH", test.base)
+			t.Setenv("PLUGIN_COMMAND_PREFIX", test.prefix)
+
+			if actual := PluginCheckout(); actual != "" {
+				t.Errorf("expected nowhere to look, got %q", actual)
+			}
+		})
+	}
+}

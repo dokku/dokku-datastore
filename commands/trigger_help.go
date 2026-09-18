@@ -122,7 +122,7 @@ func (c *TriggerHelpCommand) Run(args []string) int {
 
 	data := internal.NewDocumentationData(internal.DocumentationDataInput{
 		Datastore: datastore,
-		PluginDir: hostenv.PluginBasePath(),
+		PluginDir: hostenv.PluginCheckout(),
 	})
 
 	// the listing is filtered by the same rule the commands themselves apply,

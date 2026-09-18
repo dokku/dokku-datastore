@@ -86,11 +86,38 @@ func SystemGroup() string {
 	return defaultSystemUser
 }
 
-// PluginBasePath is the plugin checkout dokku is running this binary from. A
-// definition found there overrides the one compiled into the binary, which is
-// how a plugin ships a datastore this binary does not know about.
+// PluginBasePath is the directory holding every enabled plugin, which is what
+// dokku exports. It is a plugin's neighbours as much as itself, so a plugin's
+// own directory is PluginCheckout.
 func PluginBasePath() string {
 	return os.Getenv("PLUGIN_BASE_PATH")
+}
+
+// PluginCommandPrefix is the datastore type the plugin running this binary
+// serves. The plugin's config exports it, and its subcommands pass it as an
+// argument as well.
+func PluginCommandPrefix() string {
+	return os.Getenv("PLUGIN_COMMAND_PREFIX")
+}
+
+// PluginCheckout is the directory of the plugin dokku is running this binary
+// from. A definition found below it overrides the one compiled into the binary,
+// which is how a plugin ships a datastore of its own.
+//
+// The plugin's own name has to be joined onto the base path, because that path
+// is the directory every plugin sits in rather than any one of them. Without
+// the name this resolved to a sibling called datastore, so an override was
+// looked for somewhere no plugin installs anything and was never found.
+//
+// An empty result means there is nowhere to look, which is what running outside
+// a dokku install looks like.
+func PluginCheckout() string {
+	base, prefix := PluginBasePath(), PluginCommandPrefix()
+	if base == "" || prefix == "" {
+		return ""
+	}
+
+	return filepath.Join(base, prefix)
 }
 
 // Backend is the execution backend new services are created with. A service

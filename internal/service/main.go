@@ -120,7 +120,7 @@ func init() {
 	PluginPath = hostenv.PluginPath()
 	PluginDataRoot = hostenv.DataRoot()
 
-	loaded, err := registry.Load(registry.LoadInput{PluginDir: hostenv.PluginBasePath()})
+	loaded, err := registry.Load(registry.LoadInput{PluginDir: hostenv.PluginCheckout()})
 	if err != nil {
 		// a definition that does not parse is a datastore that cannot be
 		// operated, and continuing would report it as an unsupported type
