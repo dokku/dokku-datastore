@@ -1,2 +1,1 @@
-ARG IMAGE=postgres:18.4
-FROM ${IMAGE}
+FROM postgres:18.4

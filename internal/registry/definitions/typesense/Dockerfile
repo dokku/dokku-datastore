@@ -1,2 +1,1 @@
-ARG IMAGE=typesense/typesense:30.1
-FROM ${IMAGE}
+FROM typesense/typesense:30.1

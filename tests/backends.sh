@@ -18,7 +18,7 @@ export DOKKU_SYSTEM_USER="${DOKKU_SYSTEM_USER:-$(id -un)}"
 export DOKKU_SYSTEM_GROUP="${DOKKU_SYSTEM_GROUP:-$(id -gn)}"
 
 PLUGIN="$(awk '/^  plugin:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose.yml")"
-IMAGE_VERSION="$(awk -F: '/^ARG IMAGE=/ { print $2; exit }' "$DEFINITION_ROOT/Dockerfile")"
+IMAGE_VERSION="$(awk -F: '/^FROM / { print $2; exit }' "$DEFINITION_ROOT/Dockerfile")"
 
 cleanup() {
   for service in viadocker viacompose; do

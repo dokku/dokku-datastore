@@ -28,7 +28,7 @@ PLUGIN="$(awk '/^  plugin:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose
 
 # the version this definition pins, so a datastore split by major version runs
 # the variant this leg is for rather than whichever is newest
-IMAGE_VERSION="$(awk -F: '/^ARG IMAGE=/ { print $2; exit }' "$DEFINITION_ROOT/Dockerfile")"
+IMAGE_VERSION="$(awk -F: '/^FROM / { print $2; exit }' "$DEFINITION_ROOT/Dockerfile")"
 
 fail() {
   echo "FAIL: $*" >&2

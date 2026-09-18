@@ -16,7 +16,7 @@ import (
 func built() definition.Definition {
 	return definition.Definition{
 		Name:                "redis",
-		Dockerfile:          []byte("ARG IMAGE=redis:8.8.0\nFROM ${IMAGE}\nCOPY rootfs/ /\n"),
+		Dockerfile:          []byte("FROM redis:8.8.0\nCOPY rootfs/ /\n"),
 		DefaultImage:        "redis",
 		DefaultImageVersion: "8.8.0",
 		Builds:              true,
@@ -189,5 +189,91 @@ func TestBuildSkipsATrivialDefinition(t *testing.T) {
 
 	if tag != "" {
 		t.Errorf("expected no tag for a definition that is pulled, got %q", tag)
+	}
+}
+
+// A definition pins its image on a plain FROM line, because that is the only
+// shape dependabot reads. A build needs the base to be replaceable, so the build
+// argument is introduced into the context rather than committed.
+func TestWriteContextIntroducesTheBuildArgument(t *testing.T) {
+	directory := t.TempDir()
+	if err := WriteContext(built(), directory); err != nil {
+		t.Fatalf("unable to write the context: %s", err)
+	}
+
+	contents, err := os.ReadFile(filepath.Join(directory, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("unable to read the written Dockerfile: %s", err)
+	}
+
+	expected := "ARG IMAGE=redis:8.8.0\nFROM ${IMAGE}\nCOPY rootfs/ /\n"
+	if string(contents) != expected {
+		t.Errorf("expected:\n%s\ngot:\n%s", expected, contents)
+	}
+}
+
+// The pair that matters: the context declares the argument and BuildArgs supplies
+// it, so a service created at another version is built on the version it asked
+// for. A Dockerfile without the ARG would ignore the --build-arg silently, which
+// is a service running the wrong base with nothing to show for it.
+func TestABuiltServiceFollowsTheVersionItPinned(t *testing.T) {
+	directory := t.TempDir()
+	if err := WriteContext(built(), directory); err != nil {
+		t.Fatalf("unable to write the context: %s", err)
+	}
+
+	contents, err := os.ReadFile(filepath.Join(directory, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("unable to read the written Dockerfile: %s", err)
+	}
+
+	if !strings.Contains(string(contents), "FROM ${IMAGE}") {
+		t.Fatal("expected the context to take its base from the build argument")
+	}
+
+	arguments := strings.Join(BuildArgs(BuildInput{Definition: built(), ImageVersion: "7.4.1"}, directory), " ")
+	if !strings.Contains(arguments, "--build-arg IMAGE=redis:7.4.1") {
+		t.Errorf("expected the pinned version to be passed, got %s", arguments)
+	}
+}
+
+// Every definition has to stay in the shape dependabot can read: a concrete image
+// on the FROM line and no ARG carrying a second copy of the version. Dependabot
+// only ever inspects FROM lines, so a definition written the other way is watched
+// by nothing and says so nowhere.
+func TestEveryDefinitionPinsItsImageWhereDependabotLooks(t *testing.T) {
+	loaded, err := registry.Load(registry.LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	for _, name := range loaded.Names() {
+		t.Run(name, func(t *testing.T) {
+			found, _ := loaded.Definition(name)
+
+			from := ""
+			for _, line := range strings.Split(string(found.Dockerfile), "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(strings.ToUpper(line), "ARG IMAGE=") {
+					t.Errorf("declares the image in an ARG, which dependabot does not read: %s", line)
+				}
+
+				if strings.HasPrefix(strings.ToUpper(line), "FROM ") && from == "" {
+					from = strings.TrimSpace(line[len("FROM "):])
+				}
+			}
+
+			if from == "" {
+				t.Fatal("has no FROM instruction")
+			}
+
+			if strings.ContainsAny(from, "${}") {
+				t.Errorf("takes its base from a variable, which dependabot cannot resolve: FROM %s", from)
+			}
+
+			if expected := found.DefaultImage + ":" + found.DefaultImageVersion; from != expected {
+				t.Errorf("expected FROM %s, got FROM %s", expected, from)
+			}
+		})
 	}
 }
