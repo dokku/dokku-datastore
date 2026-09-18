@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 
 	"github.com/dokku/dokku-datastore/internal/cron"
 	"github.com/dokku/dokku-datastore/internal/execx"
@@ -25,6 +26,21 @@ const (
 	endpointURLFile      = "ENDPOINT_URL"
 	encryptionKeyFile    = "ENCRYPTION_KEY"
 	publicKeyIDFile      = "ENCRYPT_WITH_PUBLIC_KEY_ID"
+)
+
+// keyserverEnv is what the backup image reads to decide where to fetch a public
+// key from, and KeyserverProperty is the service property that sets it. It is a
+// property rather than a file beside the other settings because it is set the
+// way every other property is, through the set command.
+//
+// The image defaults to keyserver.ubuntu.com when it is not told otherwise, so
+// it is passed only when a service has one.
+const (
+	keyserverEnv = "KEYSERVER"
+
+	// KeyserverProperty is named in SettableProperties, which is what makes it
+	// settable and what generates the list of valid keys
+	KeyserverProperty = "backup-keyserver"
 )
 
 // writeBackupFile writes one of the backup settings files for a service
@@ -198,6 +214,72 @@ func ScheduleBackup(ctx context.Context, input ScheduleBackupInput) error {
 	return cron.Install(ctx, commandPrefix, input.ServiceName)
 }
 
+// BackupArgsInput is the input for BackupArgs. Every value is already resolved,
+// so that building the command needs neither a filesystem nor a daemon.
+type BackupArgsInput struct {
+	// AccessKeyID and SecretAccessKey are the credentials. They are empty when
+	// the backup runs against an instance role instead.
+	AccessKeyID     string
+	SecretAccessKey string
+
+	// BucketName is the bucket the dump is shipped to
+	BucketName string
+
+	// BackupName is what the object is named after, ahead of the timestamp the
+	// image appends
+	BackupName string
+
+	// BackupDir is the host directory holding the dump, mounted at /backup
+	BackupDir string
+
+	// Settings are the values read from the backup settings files, keyed by the
+	// environment variable each file is named after
+	Settings map[string]string
+
+	// Keyserver is where the image fetches a public key from, passed only when
+	// a service sets one so that the image otherwise keeps its own default
+	Keyserver string
+
+	// Image is the image the backup runs in
+	Image string
+}
+
+// BackupArgs builds the argv for the container that ships a dump to s3.
+func BackupArgs(input BackupArgsInput) []string {
+	args := []string{"container", "run", "--rm"}
+
+	if input.AccessKeyID != "" {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", accessKeyIDFile, input.AccessKeyID))
+	}
+
+	if input.SecretAccessKey != "" {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", secretAccessKeyFile, input.SecretAccessKey))
+	}
+
+	args = append(args,
+		"-e", fmt.Sprintf("BUCKET_NAME=%s", input.BucketName),
+		"-e", fmt.Sprintf("BACKUP_NAME=%s", input.BackupName),
+		"-v", fmt.Sprintf("%s:/backup", input.BackupDir),
+	)
+
+	// sorted, because a map would otherwise emit a different command each run
+	names := make([]string, 0, len(input.Settings))
+	for name := range input.Settings {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", name, input.Settings[name]))
+	}
+
+	if input.Keyserver != "" {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", keyserverEnv, input.Keyserver))
+	}
+
+	return append(args, input.Image)
+}
+
 // BackupInput is the input for the Backup function
 type BackupInput struct {
 	BucketName  string
@@ -211,7 +293,13 @@ func Backup(ctx context.Context, input BackupInput) error {
 	serviceFolders := service.Folders(input.Datastore, input.ServiceName)
 	commandPrefix := input.Datastore.Properties().CommandPrefix
 
-	dockerArgs := []string{"container", "run", "--rm"}
+	arguments := BackupArgsInput{
+		BucketName: input.BucketName,
+		BackupName: fmt.Sprintf("%s-%s", commandPrefix, input.ServiceName),
+		Keyserver:  common.PropertyGet(commandPrefix, input.ServiceName, KeyserverProperty),
+		Image:      hostenv.S3BackupImage,
+		Settings:   map[string]string{},
+	}
 
 	if !input.UseIAM {
 		accessKeyID := filepath.Join(serviceFolders.Backup, accessKeyIDFile)
@@ -224,10 +312,8 @@ func Backup(ctx context.Context, input BackupInput) error {
 			return errors.New("Missing AWS_SECRET_ACCESS_KEY file") //nolint:staticcheck // matches the bash datastore plugins
 		}
 
-		dockerArgs = append(dockerArgs,
-			"-e", fmt.Sprintf("AWS_ACCESS_KEY_ID=%s", common.ReadFirstLine(accessKeyID)),
-			"-e", fmt.Sprintf("AWS_SECRET_ACCESS_KEY=%s", common.ReadFirstLine(secretAccessKey)),
-		)
+		arguments.AccessKeyID = common.ReadFirstLine(accessKeyID)
+		arguments.SecretAccessKey = common.ReadFirstLine(secretAccessKey)
 	}
 
 	containerID := service.ContainerID(input.Datastore, input.ServiceName)
@@ -264,11 +350,7 @@ func Backup(ctx context.Context, input BackupInput) error {
 		return fmt.Errorf("unable to close %s: %w", exportFile, err)
 	}
 
-	dockerArgs = append(dockerArgs,
-		"-e", fmt.Sprintf("BUCKET_NAME=%s", input.BucketName),
-		"-e", fmt.Sprintf("BACKUP_NAME=%s-%s", commandPrefix, input.ServiceName),
-		"-v", fmt.Sprintf("%s:/backup", backupDir),
-	)
+	arguments.BackupDir = backupDir
 
 	for folder, names := range map[string][]string{
 		serviceFolders.Backup:           {defaultRegionFile, signatureVersionFile, endpointURLFile},
@@ -277,16 +359,14 @@ func Backup(ctx context.Context, input BackupInput) error {
 		for _, name := range names {
 			filename := filepath.Join(folder, name)
 			if common.FileExists(filename) {
-				dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("%s=%s", name, common.ReadFirstLine(filename)))
+				arguments.Settings[name] = common.ReadFirstLine(filename)
 			}
 		}
 	}
 
-	dockerArgs = append(dockerArgs, hostenv.S3BackupImage)
-
 	if _, err := execx.Run(ctx, common.ExecCommandInput{
 		Command:      common.DockerBin(),
-		Args:         dockerArgs,
+		Args:         BackupArgs(arguments),
 		StreamStderr: true,
 		StreamStdout: true,
 	}); err != nil {

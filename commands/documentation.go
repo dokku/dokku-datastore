@@ -189,7 +189,9 @@ func (c *BackupSetPublicKeyEncryptionCommand) Usage() string {
 func (c *BackupSetPublicKeyEncryptionCommand) Documentation() string {
 	return `set the GPG Public Key for encrypting backups
 dokku {{.CommandPrefix}}:backup-set-public-key-encryption lollipop
-this method currently requires the <public-key-id> to be present on the keyserver 'keyserver.ubuntu.com'`
+the <public-key-id> is fetched from a keyserver, 'keyserver.ubuntu.com' unless the service names another
+set the keyserver the public key is fetched from
+dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com`
 }
 
 // Group is the readme usage section the command is documented under
@@ -757,7 +759,9 @@ dokku {{.CommandPrefix}}:set lollipop post-create-network custom-network
 set multiple networks
 dokku {{.CommandPrefix}}:set lollipop post-create-network custom-network,other-network
 unset the post-create-network value
-dokku {{.CommandPrefix}}:set lollipop post-create-network`
+dokku {{.CommandPrefix}}:set lollipop post-create-network
+set the keyserver a public key for backup encryption is fetched from
+dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com`
 }
 
 // Group is the readme usage section the command is documented under
