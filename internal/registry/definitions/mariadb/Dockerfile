@@ -1,2 +1,1 @@
-ARG IMAGE=mariadb:12.2.2
-FROM ${IMAGE}
+FROM mariadb:12.2.2

@@ -1,2 +1,1 @@
-ARG IMAGE=couchdb:3.5.1
-FROM ${IMAGE}
+FROM couchdb:3.5.1

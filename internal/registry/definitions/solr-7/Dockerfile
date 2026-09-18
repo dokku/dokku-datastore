@@ -1,2 +1,1 @@
-ARG IMAGE=solr:7.7.3
-FROM ${IMAGE}
+FROM solr:7.7.3

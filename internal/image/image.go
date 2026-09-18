@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/execx"
@@ -124,7 +125,7 @@ func Build(ctx context.Context, input BuildInput) (string, error) {
 // and the rootfs payload the Dockerfile copies in.
 func WriteContext(subject definition.Definition, directory string) error {
 	dockerfile := filepath.Join(directory, "Dockerfile")
-	if err := os.WriteFile(dockerfile, subject.Dockerfile, fileMode); err != nil {
+	if err := os.WriteFile(dockerfile, buildDockerfile(subject), fileMode); err != nil {
 		return fmt.Errorf("unable to write %s: %w", dockerfile, err)
 	}
 
@@ -147,6 +148,40 @@ func WriteContext(subject definition.Definition, directory string) error {
 	}
 
 	return nil
+}
+
+// buildDockerfile is the definition's Dockerfile as the build context needs it,
+// with the base declared as a build argument.
+//
+// A definition pins its image on a plain FROM line, because that is the only form
+// dependabot reads and one line is the only way two of them cannot disagree. A
+// build needs the opposite: the base has to be replaceable, so that a service
+// created at a version other than the default is built on the version it asked
+// for rather than on the pinned one.
+//
+// So the argument is introduced here, in a directory that exists for the length
+// of one build, rather than committed. BuildArgs passes the matching
+// --build-arg IMAGE=, and a Dockerfile without the ARG would silently ignore it.
+func buildDockerfile(subject definition.Definition) []byte {
+	image, version, _, err := definition.ImageFromDockerfile(subject.Dockerfile)
+	if err != nil {
+		// a definition that does not parse never reaches a build: the registry
+		// refuses to load it. Leaving it alone keeps this from inventing a
+		// Dockerfile for something it could not read.
+		return subject.Dockerfile
+	}
+
+	rewritten := []string{fmt.Sprintf("ARG IMAGE=%s:%s", image, version)}
+	for _, line := range strings.Split(string(subject.Dockerfile), "\n") {
+		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(line)), "FROM ") {
+			rewritten = append(rewritten, "FROM ${IMAGE}")
+			continue
+		}
+
+		rewritten = append(rewritten, line)
+	}
+
+	return []byte(strings.Join(rewritten, "\n"))
 }
 
 // ModeFor is the mode a rootfs file is written with. The rule lives on the

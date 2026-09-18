@@ -1,0 +1,25 @@
+---
+version: 2
+updates:
+  # each definition pins its datastore's image on the FROM line of its own
+  # Dockerfile. The plural key is used rather than one entry per definition
+  # because it takes a glob, so a definition added later is watched without
+  # anyone remembering to add it here.
+  - package-ecosystem: "docker"
+    directories:
+      - "/internal/registry/definitions/*"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 10
