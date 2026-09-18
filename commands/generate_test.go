@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/registry"
 	"github.com/dokku/dokku-datastore/internal/service"
 )
@@ -138,28 +139,69 @@ func TestGenerateWritesPayloadScriptsExecutable(t *testing.T) {
 	}
 }
 
-// Not everything the binary carries can be handed to a plugin: a host mode
-// command or a privileged script is trusted because it was compiled in. Writing
-// one would produce a plugin that fails every command, so generate refuses while
-// it can still be acted on.
-func TestGenerateRefusesADefinitionAPluginCannotLoad(t *testing.T) {
-	for _, datastoreType := range []string{"solr", "graphite"} {
+// Every definition the binary carries can be shipped by its plugin, solr and
+// graphite included. A host mode command runs as the dokku user, who already owns
+// every script in the plugin tree, and a privileged script is installed by an
+// install trigger that root already runs from that same tree: neither is a
+// privilege a plugin did not already have.
+func TestGeneratedDefinitionsLoadBackForEveryDatastore(t *testing.T) {
+	for _, datastoreType := range []string{"solr", "graphite", "redis", "postgres", "elasticsearch"} {
 		t.Run(datastoreType, func(t *testing.T) {
-			command := &GenerateCommand{pluginDir: t.TempDir()}
+			pluginDir := generated(t, datastoreType)
 
-			_, err := command.writeDefinitions(service.Datastores[datastoreType])
-			if err == nil {
-				t.Fatal("expected generate to refuse")
+			loaded, err := registry.Load(registry.LoadInput{PluginDir: pluginDir})
+			if err != nil {
+				t.Fatalf("the generated tree does not load: %s", err)
 			}
 
-			if !strings.Contains(err.Error(), "cannot be shipped by its plugin") {
-				t.Errorf("expected the error to say why, got %q", err)
-			}
-
-			if entries, _ := os.ReadDir(filepath.Join(command.pluginDir, "datastore")); len(entries) != 0 {
-				t.Error("expected nothing to be written when the datastore is refused")
+			if len(loaded.NamesFor(datastoreType)) == 0 {
+				t.Errorf("expected %s to come back from its own checkout", datastoreType)
 			}
 		})
+	}
+}
+
+// Solr's post-extract trigger runs on the host, which is the whole reason solr
+// could not ship its own definition before.
+func TestGeneratedSolrKeepsItsHostTrigger(t *testing.T) {
+	pluginDir := generated(t, "solr")
+
+	loaded, err := registry.Load(registry.LoadInput{PluginDir: pluginDir})
+	if err != nil {
+		t.Fatalf("the generated tree does not load: %s", err)
+	}
+
+	found, err := loaded.For("solr", "")
+	if err != nil {
+		t.Fatalf("unable to resolve solr: %s", err)
+	}
+
+	trigger, ok := found.TriggerFor("post-extract")
+	if !ok {
+		t.Fatal("expected the post-extract trigger to survive")
+	}
+
+	if trigger.Mode != definition.ModeHost {
+		t.Errorf("expected host mode, got %q", trigger.Mode)
+	}
+}
+
+// Graphite installs a privileged script, which is the other reason.
+func TestGeneratedGraphiteKeepsItsPrivilegedScript(t *testing.T) {
+	pluginDir := generated(t, "graphite")
+
+	loaded, err := registry.Load(registry.LoadInput{PluginDir: pluginDir})
+	if err != nil {
+		t.Fatalf("the generated tree does not load: %s", err)
+	}
+
+	found, err := loaded.For("graphite", "")
+	if err != nil {
+		t.Fatalf("unable to resolve graphite: %s", err)
+	}
+
+	if len(found.Privileged) == 0 {
+		t.Error("expected the privileged scripts to survive")
 	}
 }
 

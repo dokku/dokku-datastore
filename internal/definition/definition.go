@@ -66,9 +66,12 @@ type Definition struct {
 
 	// Privileged are the scripts installed root owned outside the service root
 	// and granted in sudoers, keyed by path relative to privileged/. They are
-	// how a definition does the one part of an operation that needs root, and
-	// are accepted only from the embedded tree: a plugin checkout that could
-	// introduce one would be choosing what the dokku group may run as root.
+	// how a definition does the one part of an operation that needs root.
+	//
+	// A plugin may ship one. Installing a plugin is a root action, and after it
+	// the whole plugin tree - its scripts and its definitions alike - is owned by
+	// the dokku user and its install script is run by root, so a definition is
+	// trusted exactly as far as the plugin carrying it already was.
 	Privileged map[string][]byte
 }
 

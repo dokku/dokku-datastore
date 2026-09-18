@@ -8,7 +8,6 @@ import (
 
 	"github.com/dokku/dokku-datastore/internal"
 	"github.com/dokku/dokku-datastore/internal/definition"
-	"github.com/dokku/dokku-datastore/internal/registry"
 	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -214,14 +213,6 @@ func (c *GenerateCommand) writeTriggers(datastore *service.Datastore) ([]string,
 // divergence an edit to the Makefile rather than a quiet edit to a file that
 // regenerating would silently undo.
 func (c *GenerateCommand) writeDefinitions(datastore *service.Datastore) ([]string, error) {
-	// checked before anything is written, so a datastore that cannot be shipped
-	// says so instead of leaving a tree behind that fails every later command
-	for _, found := range datastore.Definitions() {
-		if err := registry.Shippable(found); err != nil {
-			return nil, fmt.Errorf("%s cannot be shipped by its plugin: %w", found.Name, err)
-		}
-	}
-
 	written := []string{}
 
 	for _, found := range datastore.Definitions() {

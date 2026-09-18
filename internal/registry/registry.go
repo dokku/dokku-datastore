@@ -206,7 +206,6 @@ func parseEmbedded(name string) (definition.Definition, error) {
 		Scripts:    scripts,
 		Rootfs:     rootfs,
 		Privileged: privileged,
-		Embedded:   true,
 	})
 }
 
@@ -299,8 +298,6 @@ func parseOverrides(root string) ([]definition.Definition, error) {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
 
-		// read rather than ignored, so that a checkout shipping one is told it
-		// is refused instead of watching it quietly do nothing
 		privileged, err := readTree(checkout, "privileged")
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
@@ -313,7 +310,6 @@ func parseOverrides(root string) ([]definition.Definition, error) {
 			Scripts:    scripts,
 			Rootfs:     rootfs,
 			Privileged: privileged,
-			Embedded:   false,
 		})
 		if err != nil {
 			return nil, err
@@ -323,28 +319,6 @@ func parseOverrides(root string) ([]definition.Definition, error) {
 	}
 
 	return parsed, nil
-}
-
-// Shippable reports whether a plugin could carry its own copy of a definition,
-// by putting it through exactly the parse a checkout's copy would get.
-//
-// Not everything the binary carries can be handed to a plugin. A definition that
-// runs a command on the host or installs a privileged script is trusted because
-// it was compiled in, and the same definition read from a checkout is refused. A
-// plugin shipping one would parse it on every command and fail every one of them,
-// so this is what lets generate say so while it can still be acted on.
-func Shippable(found definition.Definition) error {
-	_, err := definition.Parse(definition.ParseInput{
-		Name:       found.Name,
-		Compose:    found.Compose,
-		Dockerfile: found.Dockerfile,
-		Scripts:    found.Scripts,
-		Rootfs:     found.Rootfs,
-		Privileged: found.Privileged,
-		Embedded:   false,
-	})
-
-	return err
 }
 
 // Definition returns a definition by name.
