@@ -13,6 +13,7 @@ import (
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/image"
+	"github.com/dokku/dokku-datastore/internal/registry"
 	"github.com/dokku/dokku-datastore/internal/render"
 	"github.com/dokku/dokku-datastore/internal/seed"
 	"github.com/dokku/dokku-datastore/internal/verb"
@@ -26,8 +27,16 @@ import (
 // the forty command files that look a datastore up in the map need no change: a
 // datastore becomes data, and this is the only thing that has to know that.
 type Datastore struct {
-	// Definition is the parsed definition backing this datastore.
+	// Definition is the parsed definition backing this datastore. Where a
+	// datastore is split by major version this is the newest of them, and a
+	// service that runs an older one is addressed through ForService.
 	Definition definition.Definition
+
+	// registry is every definition the binary loaded, kept so that a datastore
+	// split by major version can still reach the one a given service runs. A
+	// datastore assembled without one resolves to its Definition and nothing
+	// else, which is what a single definition datastore does anyway.
+	registry *registry.Registry
 }
 
 // CreateService writes the credentials and config files a service needs before
@@ -836,8 +845,19 @@ func cutTaggedImage(reference string) (string, string) {
 // A datastore says what it can do by declaring the commands it has, and this is
 // the only statement of it: there is no list of what a datastore cannot do to
 // fall out of step with what it actually declares.
+//
+// Asked of the datastore rather than of one of its services, because dokku asks
+// it before a service is named: a command no definition declares has to exit
+// not-implemented, and exiting anything else there stops dokku's dispatch loop
+// rather than passing the command to the plugin that does implement it.
 func Implements(s *Datastore, subcommand string) bool {
-	return s.Definition.Implements(subcommand)
+	for _, found := range s.Definitions() {
+		if found.Implements(subcommand) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // RunCommandInput is the input for RunCommand.

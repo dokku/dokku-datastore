@@ -204,6 +204,12 @@ type ServiceFiles struct {
 	// Image is the image file for the service
 	Image string
 
+	// Definition is the file naming the definition a service runs. A datastore
+	// split by major version has several, and which one a service was created
+	// with decides where its data is mounted, so it is recorded rather than
+	// worked out again each time from the image tag.
+	Definition string
+
 	// ImageVersion is the image version file for the service
 	ImageVersion string
 
@@ -238,6 +244,7 @@ func Files(s *Datastore, serviceName string) ServiceFiles {
 		ID:            filepath.Join(folders.Root, "ID"),
 		Links:         filepath.Join(folders.Root, "LINKS"),
 		Image:         filepath.Join(folders.Root, "IMAGE"),
+		Definition:    filepath.Join(folders.Root, "DEFINITION"),
 		ImageVersion:  filepath.Join(folders.Root, "IMAGE_VERSION"),
 		Memory:        filepath.Join(folders.Root, "MEMORY"),
 		Password:      filepath.Join(folders.Root, "PASSWORD"),

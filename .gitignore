@@ -24,3 +24,6 @@ validation/*
 .env*
 
 dokku-datastore
+
+# claude scratch space
+tmp/claude/

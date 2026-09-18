@@ -142,7 +142,7 @@ func (c *TriggerHelpCommand) Run(args []string) int {
 
 	// a datastore's own commands are its commands, so they are listed beside
 	// the rest rather than hidden behind the verb that dispatches them
-	implemented = append(implemented, internal.CustomCommands(datastore.Definition)...)
+	implemented = append(implemented, internal.CustomCommands(datastore)...)
 
 	input := internal.PluginHelpInput{
 		Commands: implemented,

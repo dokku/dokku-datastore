@@ -54,6 +54,10 @@ dsn="$("$BIN" info "$PLUGIN" "$SERVICE" --dsn)"
 scheme="$(awk '/^  scheme:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose.yml")"
 [[ "$dsn" == "$scheme://"* ]] || fail "expected a $scheme connection string, got '$dsn'"
 
+echo "==> $DEFINITION: the service records the definition it was created with"
+pinned="$(cat "$DOKKU_LIB_ROOT/services/$PLUGIN/$SERVICE/DEFINITION")"
+[[ "$pinned" == "$DEFINITION" ]] || fail "expected the service to be pinned to $DEFINITION, got '$pinned'"
+
 echo "==> $DEFINITION: the rendered compose file is valid"
 compose="$DOKKU_LIB_ROOT/services/$PLUGIN/$SERVICE/docker-compose.yml"
 [[ -f "$compose" ]] || fail "no compose file was written"

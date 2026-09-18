@@ -5,20 +5,15 @@ import (
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
-	"github.com/dokku/dokku-datastore/internal/registry"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
-func mongoDefinition(t *testing.T) definition.Definition {
+func mongoDatastore(t *testing.T) *service.Datastore {
 	t.Helper()
 
-	loaded, err := registry.Load(registry.LoadInput{})
-	if err != nil {
-		t.Fatalf("unable to load the registry: %s", err)
-	}
-
-	mongo, ok := loaded.Definition("mongo")
+	mongo, ok := service.Datastores["mongo"]
 	if !ok {
-		t.Fatal("expected a mongo definition")
+		t.Fatal("expected a mongo datastore")
 	}
 
 	return mongo
@@ -27,7 +22,7 @@ func mongoDefinition(t *testing.T) definition.Definition {
 // A datastore's own commands are still its commands, so the help and the readme
 // list them beside the rest rather than behind the verb that dispatches them.
 func TestCustomCommandsForMongo(t *testing.T) {
-	commands := CustomCommands(mongoDefinition(t))
+	commands := CustomCommands(mongoDatastore(t))
 
 	if len(commands) != 1 {
 		t.Fatalf("expected one custom command, got %d", len(commands))
@@ -72,20 +67,14 @@ func TestCustomCommandUsageShowsArguments(t *testing.T) {
 
 // Redis adds nothing of its own, so it has nothing extra to document.
 func TestCustomCommandsForADatastoreWithNone(t *testing.T) {
-	loaded, err := registry.Load(registry.LoadInput{})
-	if err != nil {
-		t.Fatalf("unable to load the registry: %s", err)
-	}
-
-	redis, _ := loaded.Definition("redis")
-	if commands := CustomCommands(redis); len(commands) != 0 {
+	if commands := CustomCommands(service.Datastores["redis"]); len(commands) != 0 {
 		t.Errorf("expected no custom commands, got %v", commands)
 	}
 }
 
 func TestPluginSubcommandDispatchesThroughInvoke(t *testing.T) {
-	mongo := mongoDefinition(t)
-	script, err := PluginSubcommand("connect-admin", mongo.Dokku.CustomCommands["connect-admin"], DocumentationData{
+	mongo := mongoDatastore(t)
+	script, err := PluginSubcommand("connect-admin", mongo.CustomCommands()["connect-admin"], DocumentationData{
 		CommandPrefix: "mongo",
 		Title:         "MongoDB",
 	})

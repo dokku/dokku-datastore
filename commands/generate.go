@@ -160,7 +160,7 @@ func (c *GenerateCommand) Run(args []string) int {
 // where dokku looks for a trigger: it finds one by the name of a file, with no
 // manifest to consult.
 func (c *GenerateCommand) writeTriggers(datastore *service.Datastore) ([]string, error) {
-	names := datastore.Definition.TriggerNames()
+	names := datastore.TriggerNames()
 	if len(names) == 0 {
 		return nil, nil
 	}
@@ -190,7 +190,7 @@ func (c *GenerateCommand) writeTriggers(datastore *service.Datastore) ([]string,
 
 // writeSubcommands writes one script per command the datastore adds for itself.
 func (c *GenerateCommand) writeSubcommands(datastore *service.Datastore, data internal.DocumentationData) ([]string, error) {
-	custom := datastore.Definition.Dokku.CustomCommands
+	custom := datastore.CustomCommands()
 	if len(custom) == 0 {
 		return nil, nil
 	}
@@ -201,7 +201,7 @@ func (c *GenerateCommand) writeSubcommands(datastore *service.Datastore, data in
 	}
 
 	written := []string{}
-	for _, pluginCommand := range internal.CustomCommands(datastore.Definition) {
+	for _, pluginCommand := range internal.CustomCommands(datastore) {
 		name := pluginCommand.Name()
 		contents, err := internal.PluginSubcommand(name, custom[name], data)
 		if err != nil {

@@ -134,6 +134,9 @@ func init() {
 			panic(err)
 		}
 
-		Datastores[name] = &Datastore{Definition: found}
+		// the registry is kept rather than discarded here: a datastore split by
+		// major version resolves to its newest definition until a service says
+		// otherwise, and the service is not known yet
+		Datastores[name] = &Datastore{Definition: found, registry: loaded}
 	}
 }

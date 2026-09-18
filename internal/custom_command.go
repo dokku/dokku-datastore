@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
+	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
 	flag "github.com/spf13/pflag"
@@ -94,9 +95,17 @@ func (c CustomCommand) FlagSet() *flag.FlagSet {
 
 // CustomCommands are a datastore's own commands, as documentable commands,
 // sorted by name.
-func CustomCommands(subject definition.Definition) []PluginCommand {
-	names := make([]string, 0, len(subject.Dokku.CustomCommands))
-	for name := range subject.Dokku.CustomCommands {
+//
+// Taken across every definition the datastore is made of rather than the newest
+// alone: a command one major version adds is still a command the plugin has to
+// ship a subcommand file for and document, since a service on that version can
+// be asked to run it. Where two definitions declare the same name the newest
+// wins, which is the one a plugin generating its files is documenting.
+func CustomCommands(s *service.Datastore) []PluginCommand {
+	declared := s.CustomCommands()
+
+	names := make([]string, 0, len(declared))
+	for name := range declared {
 		names = append(names, name)
 	}
 
@@ -106,7 +115,7 @@ func CustomCommands(subject definition.Definition) []PluginCommand {
 	for _, name := range names {
 		commands = append(commands, CustomCommand{
 			CommandName: name,
-			Declared:    subject.Dokku.CustomCommands[name],
+			Declared:    declared[name],
 		})
 	}
 

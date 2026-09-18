@@ -151,7 +151,7 @@ func (c *TriggerCommand) Run(args []string) int {
 
 	// a trigger this datastore does not implement is not a failure: dokku runs
 	// every plugin's trigger for every event, and most of them do not apply
-	if _, ok := datastore.Definition.TriggerFor(triggerName); !ok {
+	if !datastore.HandlesTrigger(triggerName) {
 		return 0
 	}
 
@@ -177,7 +177,7 @@ func (c *TriggerCommand) Run(args []string) int {
 	}
 
 	for _, serviceName := range services {
-		err := datastore.RunTrigger(ctx, service.RunTriggerInput{
+		err := datastore.ForService(serviceName).RunTrigger(ctx, service.RunTriggerInput{
 			ServiceName: serviceName,
 			Name:        triggerName,
 			Arguments:   triggerArguments,
