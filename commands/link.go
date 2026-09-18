@@ -186,7 +186,7 @@ func (c *LinkCommand) Run(args []string) int {
 		return 1
 	}
 
-	appName := arguments["app-name"].StringValue()
+	appName := appNameOrCurrent(arguments["app-name"].StringValue())
 	if appName == "" {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
