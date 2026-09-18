@@ -165,6 +165,10 @@ func (c *DestroyCommand) Run(args []string) int {
 		return 1
 	}
 
+	// a service runs the definition it was created with, which for a datastore
+	// split by major version is not always the newest one
+	datastore = datastore.ForService(serviceName)
+
 	// check if the service exists
 	if !service.Exists(ctx, datastore, serviceName) {
 		logger.Error(internal.ErrorInput{

@@ -283,6 +283,11 @@ func (r *Registry) For(plugin string, imageVersion string) (definition.Definitio
 	return r.definitions[names[len(names)-1]], nil
 }
 
+// NamesFor returns every definition belonging to a datastore type, oldest first.
+func (r *Registry) NamesFor(plugin string) []string {
+	return append([]string{}, r.byPlugin[plugin]...)
+}
+
 // Plugins returns every datastore type, sorted.
 func (r *Registry) Plugins() []string {
 	plugins := make([]string, 0, len(r.byPlugin))

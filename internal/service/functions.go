@@ -133,7 +133,66 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 		return fmt.Errorf("failed to write shm size to %s: %w", serviceFiles.ShmSize, err)
 	}
 
-	err = common.WriteStringToFile(common.WriteStringToFileInput{
+	err = RecordImage(RecordImageInput{
+		Datastore:    input.Datastore,
+		Image:        input.Image,
+		ImageVersion: input.ImageVersion,
+		ServiceName:  input.ServiceName,
+	})
+	if err != nil {
+		return err
+	}
+
+	// recorded beside the version it was resolved from, so that a release adding
+	// a newer definition does not move a service that already exists onto it
+	if err := PinDefinition(input.Datastore, input.ServiceName); err != nil {
+		return err
+	}
+
+	properties := input.Datastore.Properties()
+	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, "initial-network", input.InitialNetwork)
+	if err != nil {
+		return fmt.Errorf("failed to write initial-network property: %w", err)
+	}
+
+	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, "post-create-network", strings.Join(input.PostCreateNetworks, ","))
+	if err != nil {
+		return fmt.Errorf("failed to write post create network property: %w", err)
+	}
+
+	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, "post-start-network", strings.Join(input.PostStartNetworks, ","))
+	if err != nil {
+		return fmt.Errorf("failed to write post start network property: %w", err)
+	}
+
+	return nil
+}
+
+// RecordImageInput is the input for the RecordImage function
+type RecordImageInput struct {
+	// Datastore is the datastore the service belongs to
+	Datastore *Datastore
+
+	// Image is the image the service runs
+	Image string
+
+	// ImageVersion is the version of that image
+	ImageVersion string
+
+	// ServiceName is the name of the service to record the image for
+	ServiceName string
+}
+
+// RecordImage writes the image a service runs.
+//
+// These two files are what a container rebuilt later is placed by, so they are
+// written whenever the image a service runs changes rather than only at create:
+// an upgrade that left them alone would come back on the old image the next time
+// the container had to be made again.
+func RecordImage(input RecordImageInput) error {
+	serviceFiles := Files(input.Datastore, input.ServiceName)
+
+	err := common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   input.Image,
 		Filename:  serviceFiles.Image,
 		GroupName: hostenv.SystemGroup(),
@@ -153,22 +212,6 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to write image version to %s: %w", serviceFiles.ImageVersion, err)
-	}
-
-	properties := input.Datastore.Properties()
-	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, "initial-network", input.InitialNetwork)
-	if err != nil {
-		return fmt.Errorf("failed to write initial-network property: %w", err)
-	}
-
-	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, "post-create-network", strings.Join(input.PostCreateNetworks, ","))
-	if err != nil {
-		return fmt.Errorf("failed to write post create network property: %w", err)
-	}
-
-	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, "post-start-network", strings.Join(input.PostStartNetworks, ","))
-	if err != nil {
-		return fmt.Errorf("failed to write post start network property: %w", err)
 	}
 
 	return nil

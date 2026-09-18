@@ -62,6 +62,22 @@ Available commands are:
     version                               Return the version of the binary
 ```
 
+## Datastores split by major version
+
+A datastore whose data format changes between major versions has more than one definition - `postgres-17` and `postgres-18`, `solr-7` and `solr-8` - because the two are not interchangeable: postgres moved its data directory up one level in eighteen, so the same bind mount points at an empty directory under the other definition.
+
+A service records which one it was created with, in a `DEFINITION` file beside its `IMAGE` and `IMAGE_VERSION`, and keeps it. A release that adds a newer definition does not move services that already exist onto it, and a service created before this file existed takes the definition its recorded image version resolves to.
+
+```shell
+# creates a service on the postgres-17 definition
+dokku-datastore create postgres db --image-version 17.8
+
+# and on postgres-18, which is the newest
+dokku-datastore create postgres db --image-version 18.4
+```
+
+`upgrade` across a major version moves the service onto the other definition, which moves where its data is mounted along with it. That is the upgrade a major version asks for rather than something to work around, but it is not a tag change and it is not reversible by pointing the version back.
+
 ## Plugin documentation
 
 `trigger-help` and `readme` render the documentation a dokku datastore plugin ships, so that the plugin help and its readme cannot drift apart. Both read the description, argument sketch, long form prose and readme section that every command declares, alongside the arguments and flags the command already accepts.

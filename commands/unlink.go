@@ -179,6 +179,10 @@ func (c *UnlinkCommand) Run(args []string) int {
 		return 1
 	}
 
+	// a service runs the definition it was created with, which for a datastore
+	// split by major version is not always the newest one
+	datastore = datastore.ForService(serviceName)
+
 	appName := appNameOrCurrent(arguments["app-name"].StringValue())
 	if appName == "" {
 		logger.Error(internal.ErrorInput{

@@ -57,8 +57,18 @@ func PrivilegedPath(plugin string, name string) string {
 
 // PrivilegedFiles describes the privileged scripts a datastore installs, sorted
 // so that the sudoers file they are granted in is written the same way twice.
+//
+// Taken across every definition the datastore is made of, because installing is
+// a plugin wide step that happens before any service is named: a script only one
+// major version ships still has to be there for the services on that version.
 func PrivilegedFiles(s *service.Datastore) []common.WriteStringToFileInput {
-	scripts := s.Definition.Privileged
+	scripts := map[string][]byte{}
+	for _, found := range s.Definitions() {
+		for name, contents := range found.Privileged {
+			scripts[name] = contents
+		}
+	}
+
 	if len(scripts) == 0 {
 		return nil
 	}
@@ -204,6 +214,15 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 					return err
 				}
 			}
+		}
+
+		// a service created before the pin existed gets the definition its
+		// recorded version resolves to, which for a datastore split by major
+		// version is not the one it has been running: every such service was
+		// placed on the newest definition whatever it was created with
+		pinned := input.Datastore.ForService(serviceName)
+		if err := service.PinDefinition(pinned, serviceName); err != nil {
+			return err
 		}
 
 		// the config options file used to be named after the plugin variable

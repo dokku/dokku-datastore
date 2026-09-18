@@ -94,8 +94,12 @@ func StartLinkedServices(ctx context.Context, input TriggerInput, appName string
 		input.Logger.Warn(WarnInput{
 			Warning: fmt.Sprintf("%s service %s is not running, issuing service start", serviceType, serviceName),
 		})
+
+		// a start with no container left to start makes one, so it is the
+		// service's own definition that has to make it rather than the
+		// datastore's newest
 		if err := service.Start(ctx, service.StartInput{
-			Datastore:   input.Datastore,
+			Datastore:   input.Datastore.ForService(serviceName),
 			ServiceName: serviceName,
 		}); err != nil {
 			return err

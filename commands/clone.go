@@ -207,6 +207,10 @@ func (c *CloneCommand) Run(args []string) int {
 		return 1
 	}
 
+	// a service runs the definition it was created with, which for a datastore
+	// split by major version is not always the newest one
+	datastore = datastore.ForService(serviceName)
+
 	if code, unimplemented := requireImplemented(datastore, "clone"); unimplemented {
 		return code
 	}

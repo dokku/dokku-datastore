@@ -88,6 +88,11 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return err
 	}
 
+	// the version decides the definition before anything else is settled: a
+	// datastore split by major version mounts its data somewhere different in
+	// each, and the requirements checked below are the definition's own
+	input.Datastore = input.Datastore.ForImageVersion(input.ImageVersion)
+
 	// before anything is made, so that a host which cannot run this datastore
 	// says so rather than leaving a half made service behind
 	if err := CheckRequirements(input.Datastore.Definition.Dokku.Requirements); err != nil {

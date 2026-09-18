@@ -170,6 +170,10 @@ func (c *ImportCommand) Run(args []string) int {
 		return 1
 	}
 
+	// a service runs the definition it was created with, which for a datastore
+	// split by major version is not always the newest one
+	datastore = datastore.ForService(serviceName)
+
 	if !service.Exists(ctx, datastore, serviceName) {
 		logger.Error(internal.ErrorInput{
 			Error: fmt.Errorf("service %s does not exist", serviceName),

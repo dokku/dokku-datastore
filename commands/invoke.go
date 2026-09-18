@@ -157,7 +157,7 @@ func (c *InvokeCommand) Run(args []string) int {
 	// a command this datastore does not add exits the way dokku expects of a
 	// plugin that does not handle one, so another datastore's command is not a
 	// command here
-	if !datastore.Definition.ImplementsCustom(commandName) {
+	if !datastore.ImplementsCustom(commandName) {
 		return notImplementedExit()
 	}
 
@@ -174,6 +174,10 @@ func (c *InvokeCommand) Run(args []string) int {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}
+
+	// a service runs the definition it was created with, which for a datastore
+	// split by major version is not always the newest one
+	datastore = datastore.ForService(serviceName)
 
 	if !service.Exists(ctx, datastore, serviceName) {
 		logger.Error(internal.ErrorInput{

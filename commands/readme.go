@@ -141,7 +141,7 @@ func (c *ReadmeCommand) Run(args []string) int {
 		}
 	}
 
-	documented = append(documented, internal.CustomCommands(datastore.Definition)...)
+	documented = append(documented, internal.CustomCommands(datastore)...)
 
 	readme, err := internal.Readme(internal.ReadmeInput{
 		Commands: documented,

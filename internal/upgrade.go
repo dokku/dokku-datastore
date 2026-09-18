@@ -96,6 +96,26 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		return err
 	}
 
+	// an upgrade that crosses a major version moves the service onto the other
+	// definition, which is a different data path rather than a different tag.
+	// Recorded together with the image it was resolved from: a container rebuilt
+	// later is placed by these two files and nothing else, so a pin that moved
+	// without the image would mount the new path at the old version.
+	image, imageVersion, _ := strings.Cut(taggedImage, ":")
+	if err := service.RecordImage(service.RecordImageInput{
+		Datastore:    input.Datastore,
+		Image:        image,
+		ImageVersion: imageVersion,
+		ServiceName:  input.ServiceName,
+	}); err != nil {
+		return err
+	}
+
+	input.Datastore = input.Datastore.ForImageVersion(imageVersion)
+	if err := service.PinDefinition(input.Datastore, input.ServiceName); err != nil {
+		return err
+	}
+
 	if err := input.Datastore.CreateServiceContainer(ctx, service.CreateServiceContainerInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
