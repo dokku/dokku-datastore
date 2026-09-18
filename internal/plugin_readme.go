@@ -9,8 +9,11 @@ import (
 	"unicode"
 )
 
-// DokkuVersion is the dokku version the generated readme tells people to install on
-const DokkuVersion = "0.19.x+"
+// DokkuVersion is the dokku version the generated readme tells people to install
+// on. It is the lower leg of each plugin's test matrix, and the two are meant to
+// be changed together: the matrix is the only thing that can notice this drifting
+// out of date, which is how it came to say 0.19 while the code needed 0.38.
+const DokkuVersion = "0.35.x+"
 
 // readmeSections are the readme usage sections, in the order they are written
 // out, along with the prose that introduces each one

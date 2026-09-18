@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 )
@@ -128,7 +129,7 @@ func changeAppState(ctx context.Context, action string, appNames []string) error
 			continue
 		}
 
-		if _, err := common.CallExecCommandWithContext(ctx, common.ExecCommandInput{
+		if _, err := execx.Run(ctx, common.ExecCommandInput{
 			Command:      "dokku",
 			Args:         []string{fmt.Sprintf("ps:%s", action), appName},
 			StreamStderr: true,
