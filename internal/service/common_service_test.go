@@ -288,3 +288,39 @@ func TestRemoveLinkedAppWithoutALinksFile(t *testing.T) {
 		t.Errorf("expected removing from a missing links file to succeed, got: %v", err)
 	}
 }
+
+// Info on a service whose container is gone used to crash. Two of its entries
+// asked for a container id without passing the datastore needed to name one, so
+// the lookup they fell into dereferenced nothing the moment there was no
+// container to short circuit it - which is every stopped service.
+func TestInfoOnAServiceWithNoContainer(t *testing.T) {
+	redis := Datastores["redis"]
+	withServiceRoot(t, redis, "gone")
+
+	// the property lookups Info makes read the environment rather than the
+	// package variable withServiceRoot swaps
+	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
+
+	info := Info(context.Background(), InfoInput{Datastore: redis, ServiceName: "gone"})
+
+	if info["id"] != "" {
+		t.Errorf("expected no container id, got %q", info["id"])
+	}
+
+	if info["internal-ip"] != "" {
+		t.Errorf("expected no internal ip, got %q", info["internal-ip"])
+	}
+
+	// the entries that do not need a container are still answered
+	if info["service-root"] == "" {
+		t.Error("expected the service root to be reported")
+	}
+}
+
+// A lookup with nothing to name a container with finds nothing, which is the
+// same answer a stopped service gives.
+func TestLiveContainerIDWithoutADatastore(t *testing.T) {
+	if id := LiveContainerID(context.Background(), LiveContainerIDInput{ServiceName: "gone"}); id != "" {
+		t.Errorf("expected no container id, got %q", id)
+	}
+}

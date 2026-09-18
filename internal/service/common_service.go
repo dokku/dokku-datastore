@@ -321,13 +321,13 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 		"dsn":                 input.Datastore.URL(input.ServiceName, ""),
 		"exposed-ports":       ExposedPorts(input.Datastore, input.ServiceName),
 		"id":                  containerID,
-		"internal-ip":         ContainerIP(ctx, ContainerIPInput{ContainerID: containerID}),
+		"internal-ip":         ContainerIP(ctx, ContainerIPInput{ContainerID: containerID, Datastore: input.Datastore, ServiceName: input.ServiceName}),
 		"initial-network":     InitialNetwork(input.Datastore, input.ServiceName),
 		"links":               strings.Join(LinkedApps(ctx, LinkedAppsInput{Datastore: input.Datastore, ServiceName: input.ServiceName}), ","),
 		"post-create-network": PostCreateNetwork(input.Datastore, input.ServiceName),
 		"post-start-network":  PostStartNetwork(input.Datastore, input.ServiceName),
 		"service-root":        serviceFolders.Root,
-		"status":              Status(ctx, StatusInput{ContainerID: containerID}),
+		"status":              Status(ctx, StatusInput{ContainerID: containerID, Datastore: input.Datastore, ServiceName: input.ServiceName}),
 		"version":             Version(ctx, VersionInput{ContainerID: containerID, Datastore: input.Datastore, ServiceName: input.ServiceName}),
 	}
 }
@@ -447,7 +447,16 @@ type LiveContainerIDInput struct {
 }
 
 // LiveContainerID gets the live container ID for a service, regardless of what is set in the ID file
+//
+// A lookup with no datastore to name a container with finds nothing, which is
+// the same answer a stopped service gives. It is reported that way rather than
+// crashing, because the callers that reach here without one are asking about a
+// service whose container is already gone.
 func LiveContainerID(ctx context.Context, input LiveContainerIDInput) string {
+	if input.Datastore == nil || input.ServiceName == "" {
+		return ""
+	}
+
 	return backend.LiveContainerID(ctx, backend.LiveContainerIDInput{
 		ContainerName: ContainerName(input.Datastore, input.ServiceName),
 		Filter:        input.Filter,
