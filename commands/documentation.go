@@ -525,7 +525,7 @@ func (c *LinkCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *LinkCommand) Usage() string {
-	return `<service> <app> [--link-flags...]`
+	return `<service> [<app>] [--link-flags...]`
 }
 
 // Documentation returns the long form documentation for the command
@@ -691,7 +691,7 @@ func (c *PromoteCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *PromoteCommand) Usage() string {
-	return `<service> <app>`
+	return `<service> [<app>]`
 }
 
 // Documentation returns the long form documentation for the command
@@ -842,7 +842,7 @@ func (c *UnlinkCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *UnlinkCommand) Usage() string {
-	return `<service> <app> [-n|--no-restart]`
+	return `<service> [<app>] [-n|--no-restart]`
 }
 
 // Documentation returns the long form documentation for the command
