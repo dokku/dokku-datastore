@@ -63,7 +63,12 @@ func TestForServiceReadsThePin(t *testing.T) {
 	writeServiceFile(t, filepath.Join(serviceRoot, "DEFINITION"), "postgres-17")
 	writeServiceFile(t, filepath.Join(serviceRoot, "IMAGE_VERSION"), "18.4")
 
-	if name := postgres.ForService("pinned").DefinitionName(); name != "postgres-17" {
+	resolved, err := postgres.ForService("pinned")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if name := resolved.DefinitionName(); name != "postgres-17" {
 		t.Errorf("expected the pinned postgres-17, got %s", name)
 	}
 }
@@ -75,7 +80,11 @@ func TestForServiceDerivesFromTheImageVersion(t *testing.T) {
 	serviceRoot := withServiceRoot(t, postgres, "unpinned")
 	writeServiceFile(t, filepath.Join(serviceRoot, "IMAGE_VERSION"), "17.8")
 
-	resolved := postgres.ForService("unpinned")
+	resolved, err := postgres.ForService("unpinned")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
 	if name := resolved.DefinitionName(); name != "postgres-17" {
 		t.Fatalf("expected postgres-17 derived from 17.8, got %s", name)
 	}
@@ -94,16 +103,31 @@ func TestForServiceDerivesFromTheImageVersion(t *testing.T) {
 	}
 }
 
-// A pin naming a definition that is no longer loaded - a plugin that shipped its
-// own and has since dropped one - falls back to the image rather than to nothing.
-func TestForServiceIgnoresAnUnknownPin(t *testing.T) {
+// A pin naming a definition this binary does not have is reported rather than
+// quietly satisfied with another one. It means a plugin shipped its own
+// definitions and dropped one a service is still pinned to, and running that
+// service on the newest instead is the failure the pin exists to prevent.
+func TestForServiceRefusesAnUnknownPin(t *testing.T) {
 	postgres := postgresDatastore(t)
 	serviceRoot := withServiceRoot(t, postgres, "stale")
 	writeServiceFile(t, filepath.Join(serviceRoot, "DEFINITION"), "postgres-16")
 	writeServiceFile(t, filepath.Join(serviceRoot, "IMAGE_VERSION"), "17.8")
 
-	if name := postgres.ForService("stale").DefinitionName(); name != "postgres-17" {
-		t.Errorf("expected postgres-17, got %s", name)
+	resolved, err := postgres.ForService("stale")
+	if err == nil {
+		t.Fatal("expected an unknown pin to be reported")
+	}
+
+	for _, expected := range []string{"stale", "postgres-16", "does not ship"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Errorf("expected the error to mention %q, got %q", expected, err)
+		}
+	}
+
+	// still usable, because destroy has to be able to remove a service that
+	// cannot be run and info has to be able to describe it
+	if resolved == nil || resolved.Properties().CommandPrefix != "postgres" {
+		t.Error("expected a usable datastore alongside the error")
 	}
 }
 
@@ -118,7 +142,12 @@ func TestForServiceWithASingleDefinition(t *testing.T) {
 	serviceRoot := withServiceRoot(t, redis, "cache")
 	writeServiceFile(t, filepath.Join(serviceRoot, "IMAGE_VERSION"), "7.4.0")
 
-	if name := redis.ForService("cache").DefinitionName(); name != "redis" {
+	resolved, err := redis.ForService("cache")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if name := resolved.DefinitionName(); name != "redis" {
 		t.Errorf("expected redis, got %s", name)
 	}
 }

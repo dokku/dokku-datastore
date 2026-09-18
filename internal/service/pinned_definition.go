@@ -20,10 +20,18 @@ import (
 //
 // So the definition is read from the service rather than decided for it. A
 // datastore with a single definition resolves to that definition whatever any of
-// this says, which is every datastore but postgres and solr.
-func (s *Datastore) ForService(serviceName string) *Datastore {
+// this says, which is every datastore but postgres, solr and elasticsearch.
+//
+// A service naming a definition this binary does not have is reported rather than
+// quietly placed on another one. That happens when a plugin ships its own
+// definitions and drops one a service is still pinned to, and running such a
+// service on the newest instead is the exact failure the pin exists to prevent.
+// The datastore that comes back is still usable, because the commands that
+// inspect a service and the command that removes one have to work on a service
+// that cannot be run; every other caller treats the error as fatal.
+func (s *Datastore) ForService(serviceName string) (*Datastore, error) {
 	if s == nil || s.registry == nil || serviceName == "" {
-		return s
+		return s, nil
 	}
 
 	serviceFiles := Files(s, serviceName)
@@ -33,14 +41,17 @@ func (s *Datastore) ForService(serviceName string) *Datastore {
 	pinned := common.ReadFirstLine(serviceFiles.Definition)
 	if pinned != "" {
 		if found, ok := s.registry.Definition(pinned); ok {
-			return s.withDefinition(found)
+			return s.withDefinition(found), nil
 		}
+
+		return s.ForImageVersion(common.ReadFirstLine(serviceFiles.ImageVersion)),
+			fmt.Errorf("service %s runs the %s definition, which this %s plugin does not ship",
+				serviceName, pinned, s.Definition.Dokku.Plugin)
 	}
 
-	// a service created before the pin existed, or by a plugin that has since
-	// dropped the definition it named, is placed by the image it recorded, which
-	// is what the pin would have held
-	return s.ForImageVersion(common.ReadFirstLine(serviceFiles.ImageVersion))
+	// a service created before the pin existed is placed by the image it
+	// recorded, which is what the pin would have held
+	return s.ForImageVersion(common.ReadFirstLine(serviceFiles.ImageVersion)), nil
 }
 
 // ForImageVersion returns the datastore as a service on a given image version

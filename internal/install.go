@@ -220,8 +220,15 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 		// recorded version resolves to, which for a datastore split by major
 		// version is not the one it has been running: every such service was
 		// placed on the newest definition whatever it was created with
-		pinned := input.Datastore.ForService(serviceName)
-		if err := service.PinDefinition(pinned, serviceName); err != nil {
+		//
+		// A service already naming a definition this plugin does not ship keeps
+		// the name it has. Overwriting it with the fallback would throw away the
+		// only record of what the service was created with, which is the one
+		// thing needed to put it right.
+		pinned, unresolved := input.Datastore.ForService(serviceName)
+		if unresolved != nil {
+			input.Logger.Warn(WarnInput{Warning: unresolved.Error()})
+		} else if err := service.PinDefinition(pinned, serviceName); err != nil {
 			return err
 		}
 

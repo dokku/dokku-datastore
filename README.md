@@ -89,6 +89,8 @@ dokku-datastore create postgres db --image-version 17.8
 dokku-datastore create postgres db --image-version 18.4
 ```
 
+If a service names a definition the plugin no longer ships, commands that would run it refuse rather than quietly placing it on another one, since that is the failure the pin exists to prevent. The service stays inspectable and can still be destroyed, so it can be reported on and cleaned up; reinstalling a plugin that carries the definition makes it runnable again.
+
 `upgrade` across a major version moves the service onto the other definition, which moves where its data is mounted along with it. That is the upgrade a major version asks for rather than something to work around, but it is not a tag change and it is not reversible by pointing the version back.
 
 ## Plugin documentation
