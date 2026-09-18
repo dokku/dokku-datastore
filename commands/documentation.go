@@ -189,8 +189,7 @@ func (c *BackupSetPublicKeyEncryptionCommand) Usage() string {
 func (c *BackupSetPublicKeyEncryptionCommand) Documentation() string {
 	return `set the GPG Public Key for encrypting backups
 dokku {{.CommandPrefix}}:backup-set-public-key-encryption lollipop
-the <public-key-id> is fetched from a keyserver, 'keyserver.ubuntu.com' unless the service names another
-set the keyserver the public key is fetched from
+the <public-key-id> is fetched from 'keyserver.ubuntu.com', unless the service names another one with the backup-keyserver property
 dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com`
 }
 
