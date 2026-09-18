@@ -31,6 +31,12 @@ type Definition struct {
 	// entry names in its source.
 	Configs map[string]Config
 
+	// Compose is the docker-compose.yml exactly as it was read. A definition may
+	// use compose keys this binary does not model, and the comments in one are
+	// where a definition explains itself, so a plugin shipping its own copy is
+	// handed these bytes rather than a re-serialised parse of them.
+	Compose []byte
+
 	// Dockerfile is the definition's Dockerfile. Its FROM line is the default
 	// image, the way the bash plugins' config derives the image with awk.
 	Dockerfile []byte

@@ -85,6 +85,7 @@ func Parse(input ParseInput) (Definition, error) {
 		Service:             service.Service,
 		Configs:             file.Configs,
 		Dokku:               file.Dokku,
+		Compose:             input.Compose,
 		Dockerfile:          input.Dockerfile,
 		DefaultImage:        image,
 		DefaultImageVersion: version,

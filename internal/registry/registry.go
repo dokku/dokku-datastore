@@ -38,9 +38,11 @@ type Registry struct {
 
 // LoadInput is the input for Load.
 type LoadInput struct {
-	// PluginDir is a plugin checkout. A definition present in both the plugin and
-	// the embedded tree is taken from the plugin whole; the two are never merged,
-	// because a half merged definition is a container nobody wrote down.
+	// PluginDir is a plugin checkout. A plugin that ships definitions for a
+	// datastore supplies all of them: the embedded ones are dropped rather than
+	// merged, because a half merged datastore is a set of variants nobody wrote
+	// down, and a service pinned to one the plugin does not ship would run a
+	// definition its plugin cannot see.
 	PluginDir string
 }
 
@@ -77,7 +79,23 @@ func Load(input LoadInput) (*Registry, error) {
 			return nil, err
 		}
 
+		if err := agreeOnPlugin(overrides); err != nil {
+			return nil, err
+		}
+
+		for _, plugin := range overriddenPlugins(overrides) {
+			registry.drop(plugin)
+		}
+
 		for _, parsed := range overrides {
+			// the drop above cleared this plugin's own names, so anything still
+			// standing under one of them belongs to a different datastore, and
+			// adding over it would leave that datastore pointing at a definition
+			// that is not its own
+			if existing, taken := registry.definitions[parsed.Name]; taken {
+				return nil, fmt.Errorf("%s: a %s definition is already named this", parsed.Name, existing.Dokku.Plugin)
+			}
+
 			registry.add(parsed)
 		}
 	}
@@ -85,7 +103,62 @@ func Load(input LoadInput) (*Registry, error) {
 	return registry, nil
 }
 
-// add records a definition, replacing any of the same name.
+// agreeOnPlugin refuses a checkout whose definitions do not all belong to the
+// same datastore.
+//
+// A plugin ships the definitions for its own datastore and no other. Without
+// this a dokku-redis checkout could add a postgres definition and the redis
+// plugin would start answering for postgres, which is not a datastore it
+// installs, documents or has commands for.
+//
+// The directory name is deliberately not checked against the plugin. A variant
+// is named <plugin>-<major>, and the plugin's own name is not recoverable from
+// the path either way: at runtime the checkout is <base>/<prefix>, but under
+// generate it is whatever --plugin-dir was given, which may be a clone directory
+// named anything at all.
+func agreeOnPlugin(overrides []definition.Definition) error {
+	if len(overrides) == 0 {
+		return nil
+	}
+
+	expected := overrides[0].Dokku.Plugin
+	for _, parsed := range overrides[1:] {
+		if parsed.Dokku.Plugin != expected {
+			return fmt.Errorf("%s: declares plugin %s, but %s declares %s: a plugin ships definitions for one datastore",
+				parsed.Name, parsed.Dokku.Plugin, overrides[0].Name, expected)
+		}
+	}
+
+	return nil
+}
+
+// overriddenPlugins is every datastore a checkout supplies definitions for, in
+// the order they are first seen.
+func overriddenPlugins(overrides []definition.Definition) []string {
+	seen := map[string]bool{}
+	plugins := []string{}
+	for _, parsed := range overrides {
+		if seen[parsed.Dokku.Plugin] {
+			continue
+		}
+
+		seen[parsed.Dokku.Plugin] = true
+		plugins = append(plugins, parsed.Dokku.Plugin)
+	}
+
+	return plugins
+}
+
+// drop forgets every definition belonging to a datastore.
+func (r *Registry) drop(plugin string) {
+	for _, name := range r.byPlugin[plugin] {
+		delete(r.definitions, name)
+	}
+
+	delete(r.byPlugin, plugin)
+}
+
+// add records a definition under its name and its datastore.
 func (r *Registry) add(parsed definition.Definition) {
 	if _, exists := r.definitions[parsed.Name]; !exists {
 		r.byPlugin[parsed.Dokku.Plugin] = append(r.byPlugin[parsed.Dokku.Plugin], parsed.Name)
@@ -250,6 +323,28 @@ func parseOverrides(root string) ([]definition.Definition, error) {
 	}
 
 	return parsed, nil
+}
+
+// Shippable reports whether a plugin could carry its own copy of a definition,
+// by putting it through exactly the parse a checkout's copy would get.
+//
+// Not everything the binary carries can be handed to a plugin. A definition that
+// runs a command on the host or installs a privileged script is trusted because
+// it was compiled in, and the same definition read from a checkout is refused. A
+// plugin shipping one would parse it on every command and fail every one of them,
+// so this is what lets generate say so while it can still be acted on.
+func Shippable(found definition.Definition) error {
+	_, err := definition.Parse(definition.ParseInput{
+		Name:       found.Name,
+		Compose:    found.Compose,
+		Dockerfile: found.Dockerfile,
+		Scripts:    found.Scripts,
+		Rootfs:     found.Rootfs,
+		Privileged: found.Privileged,
+		Embedded:   false,
+	})
+
+	return err
 }
 
 // Definition returns a definition by name.

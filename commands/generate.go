@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/dokku/dokku-datastore/internal"
+	"github.com/dokku/dokku-datastore/internal/definition"
+	"github.com/dokku/dokku-datastore/internal/registry"
 	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -147,6 +150,14 @@ func (c *GenerateCommand) Run(args []string) int {
 
 	written = append(written, triggers...)
 
+	definitions, err := c.writeDefinitions(datastore)
+	if err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
+	}
+
+	written = append(written, definitions...)
+
 	for _, path := range written {
 		logger.Info(fmt.Sprintf("wrote %s", path))
 	}
@@ -186,6 +197,120 @@ func (c *GenerateCommand) writeTriggers(datastore *service.Datastore) ([]string,
 	}
 
 	return written, nil
+}
+
+// writeDefinitions writes the datastore's definitions into the plugin, one
+// directory each, exactly as the embedded tree is laid out.
+//
+// A plugin carrying its own definitions is how a datastore is developed in the
+// repository that ships it, and the loader takes a plugin's definitions in place
+// of the embedded ones entirely. Which means all of them have to be written: a
+// plugin that shipped only the newest of a datastore split by major version
+// would leave services pinned to an older one with no definition at all.
+//
+// The copy is generated output like the readme, so the drift check a plugin
+// already runs proves it matches what the binary carries. Diverging deliberately
+// means dropping this path from the plugin's generate target, which makes the
+// divergence an edit to the Makefile rather than a quiet edit to a file that
+// regenerating would silently undo.
+func (c *GenerateCommand) writeDefinitions(datastore *service.Datastore) ([]string, error) {
+	// checked before anything is written, so a datastore that cannot be shipped
+	// says so instead of leaving a tree behind that fails every later command
+	for _, found := range datastore.Definitions() {
+		if err := registry.Shippable(found); err != nil {
+			return nil, fmt.Errorf("%s cannot be shipped by its plugin: %w", found.Name, err)
+		}
+	}
+
+	written := []string{}
+
+	for _, found := range datastore.Definitions() {
+		root := filepath.Join(c.pluginDir, "datastore", found.Name)
+		if err := os.MkdirAll(root, 0755); err != nil {
+			return nil, fmt.Errorf("unable to create %s: %w", root, err)
+		}
+
+		// the compose file and the Dockerfile verbatim: the comments in a
+		// definition are where it explains itself, and a definition may use
+		// compose keys this binary does not model
+		for name, contents := range map[string][]byte{
+			"docker-compose.yml": found.Compose,
+			"Dockerfile":         found.Dockerfile,
+		} {
+			path := filepath.Join(root, name)
+			if err := writeDefinitionFile(path, contents, 0644); err != nil {
+				return nil, err
+			}
+
+			written = append(written, path)
+		}
+
+		for directory, files := range map[string]map[string][]byte{
+			"bin":        found.Scripts,
+			"rootfs":     found.Rootfs,
+			"privileged": found.Privileged,
+		} {
+			paths, err := writeDefinitionTree(filepath.Join(root, directory), directory, files)
+			if err != nil {
+				return nil, err
+			}
+
+			written = append(written, paths...)
+		}
+	}
+
+	// map iteration is unordered, so the log a run prints would otherwise differ
+	// between two runs that wrote exactly the same thing
+	sort.Strings(written)
+
+	return written, nil
+}
+
+// writeDefinitionTree writes one of a definition's file trees, keyed by path
+// relative to the directory it belongs in.
+func writeDefinitionTree(root string, directory string, files map[string][]byte) ([]string, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+
+	written := []string{}
+	for name, contents := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return nil, fmt.Errorf("unable to create %s: %w", filepath.Dir(path), err)
+		}
+
+		// bin/ and privileged/ hold scripts that are executed directly, so they
+		// are written executable whatever they are named. Inside rootfs/ the
+		// path decides, the same rule the mount uses.
+		mode := os.FileMode(0755)
+		if directory == "rootfs" {
+			mode = definition.RootfsMode(name)
+		}
+
+		if err := writeDefinitionFile(path, contents, mode); err != nil {
+			return nil, err
+		}
+
+		written = append(written, path)
+	}
+
+	return written, nil
+}
+
+// writeDefinitionFile writes one file of a definition, setting the mode
+// explicitly because WriteFile leaves the mode of a file that already exists
+// alone and a hook that cannot run is a create that fails.
+func writeDefinitionFile(path string, contents []byte, mode os.FileMode) error {
+	if err := os.WriteFile(path, contents, mode); err != nil {
+		return fmt.Errorf("unable to write %s: %w", path, err)
+	}
+
+	if err := os.Chmod(path, mode); err != nil {
+		return fmt.Errorf("unable to set the mode on %s: %w", path, err)
+	}
+
+	return nil
 }
 
 // writeSubcommands writes one script per command the datastore adds for itself.

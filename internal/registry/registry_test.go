@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1211,5 +1212,148 @@ func TestOnlySolrImplementsATrigger(t *testing.T) {
 		if len(found.TriggerNames()) > 0 && !strings.HasPrefix(name, "solr") {
 			t.Errorf("%s implements a trigger, which needs saying out loud", name)
 		}
+	}
+}
+
+// writeOverride lays out one definition in a plugin checkout.
+func writeOverride(t *testing.T, pluginDir string, name string, plugin string, image string) {
+	t.Helper()
+
+	definitionDir := filepath.Join(pluginDir, "datastore", name)
+	if err := os.MkdirAll(definitionDir, 0755); err != nil {
+		t.Fatalf("unable to create %s: %s", definitionDir, err)
+	}
+
+	compose := fmt.Sprintf(`
+services:
+  %s:
+    image: "{{ .Image }}:{{ .ImageVersion }}"
+    ports:
+      - name: native
+        target: 6379
+        primary: true
+x-dokku:
+  plugin: %s
+  title: Shipped
+  scheme: %s
+  alias: SHIPPED
+  dsn: "{{ .Scheme }}://{{ .Host }}:{{ .Port.native }}"
+  wait: native
+`, plugin, plugin, plugin)
+
+	files := map[string]string{
+		"docker-compose.yml": compose,
+		"Dockerfile":         fmt.Sprintf("ARG IMAGE=%s\nFROM ${IMAGE}\n", image),
+	}
+	for filename, contents := range files {
+		if err := os.WriteFile(filepath.Join(definitionDir, filename), []byte(contents), 0644); err != nil {
+			t.Fatalf("unable to write %s: %s", filename, err)
+		}
+	}
+}
+
+// A plugin that ships definitions ships all of them. Replacing only the ones it
+// happens to name would leave a service pinned to an embedded variant running a
+// definition its plugin never shipped and cannot see.
+func TestAnOverrideReplacesTheWholeDatastore(t *testing.T) {
+	pluginDir := t.TempDir()
+	writeOverride(t, pluginDir, "postgres-18", "postgres", "postgres:18.4")
+
+	loaded, err := Load(LoadInput{PluginDir: pluginDir})
+	if err != nil {
+		t.Fatalf("unable to load with an override: %s", err)
+	}
+
+	if _, ok := loaded.Definition("postgres-17"); ok {
+		t.Error("expected the embedded postgres-17 to be dropped for a plugin shipping its own postgres")
+	}
+
+	if names := loaded.NamesFor("postgres"); len(names) != 1 || names[0] != "postgres-18" {
+		t.Errorf("expected only the shipped postgres-18, got %v", names)
+	}
+
+	shipped, ok := loaded.Definition("postgres-18")
+	if !ok || shipped.Dokku.Title != "Shipped" {
+		t.Error("expected the plugin's own postgres-18")
+	}
+}
+
+// A plugin may support fewer or differently named versions than the binary does,
+// and a definition it ships is reachable whatever it is called. Before the
+// replacement rule a checkout shipping an unversioned name loaded it, sorted it
+// first, and never selected it.
+func TestAnOverrideNamedWithoutAVersionIsStillSelected(t *testing.T) {
+	pluginDir := t.TempDir()
+	writeOverride(t, pluginDir, "postgres", "postgres", "postgres:18.4")
+
+	loaded, err := Load(LoadInput{PluginDir: pluginDir})
+	if err != nil {
+		t.Fatalf("unable to load with an override: %s", err)
+	}
+
+	for _, imageVersion := range []string{"", "17.8", "18.4"} {
+		found, err := loaded.For("postgres", imageVersion)
+		if err != nil {
+			t.Fatalf("unable to resolve postgres at %q: %s", imageVersion, err)
+		}
+
+		if found.Name != "postgres" {
+			t.Errorf("expected the shipped postgres at %q, got %s", imageVersion, found.Name)
+		}
+	}
+}
+
+// A plugin ships the definitions for its own datastore and no other. Without
+// this a redis checkout could add a postgres definition and the redis plugin
+// would answer for a datastore it does not install or document.
+func TestOverridesMustAgreeOnThePlugin(t *testing.T) {
+	pluginDir := t.TempDir()
+	writeOverride(t, pluginDir, "redis", "redis", "redis:8.8.0")
+	writeOverride(t, pluginDir, "postgres-18", "postgres", "postgres:18.4")
+
+	_, err := Load(LoadInput{PluginDir: pluginDir})
+	if err == nil {
+		t.Fatal("expected a checkout mixing datastores to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "one datastore") {
+		t.Errorf("expected the error to explain the rule, got %q", err)
+	}
+}
+
+// The directory name is not the rule: a plugin may name its definition anything,
+// and for a variant the name is not the plugin's name anyway.
+func TestAnOverrideDirectoryNeedNotMatchThePlugin(t *testing.T) {
+	pluginDir := t.TempDir()
+	writeOverride(t, pluginDir, "valkey", "redis", "valkey/valkey:9.0.0")
+
+	loaded, err := Load(LoadInput{PluginDir: pluginDir})
+	if err != nil {
+		t.Fatalf("unable to load a differently named definition: %s", err)
+	}
+
+	found, err := loaded.For("redis", "")
+	if err != nil {
+		t.Fatalf("unable to resolve redis: %s", err)
+	}
+
+	if found.Name != "valkey" {
+		t.Errorf("expected the shipped valkey definition, got %s", found.Name)
+	}
+}
+
+// An override taking a name another datastore already holds would leave that
+// datastore pointing at a definition that is not its own.
+func TestAnOverrideCannotTakeAnotherDatastoresName(t *testing.T) {
+	pluginDir := t.TempDir()
+	writeOverride(t, pluginDir, "mongo", "redis", "redis:8.8.0")
+
+	_, err := Load(LoadInput{PluginDir: pluginDir})
+	if err == nil {
+		t.Fatal("expected a name another datastore holds to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "already named this") {
+		t.Errorf("expected the error to name the collision, got %q", err)
 	}
 }
