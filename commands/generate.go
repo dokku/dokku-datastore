@@ -139,11 +139,53 @@ func (c *GenerateCommand) Run(args []string) int {
 		return 1
 	}
 
+	triggers, err := c.writeTriggers(datastore)
+	if err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
+	}
+
+	written = append(written, triggers...)
+
 	for _, path := range written {
 		logger.Info(fmt.Sprintf("wrote %s", path))
 	}
 
 	return 0
+}
+
+// writeTriggers writes one file per dokku trigger the datastore implements.
+//
+// They go at the plugin root rather than under subcommands, because that is
+// where dokku looks for a trigger: it finds one by the name of a file, with no
+// manifest to consult.
+func (c *GenerateCommand) writeTriggers(datastore *service.Datastore) ([]string, error) {
+	names := datastore.Definition.TriggerNames()
+	if len(names) == 0 {
+		return nil, nil
+	}
+
+	if err := os.MkdirAll(c.pluginDir, 0755); err != nil {
+		return nil, fmt.Errorf("unable to create %s: %w", c.pluginDir, err)
+	}
+
+	written := []string{}
+	for _, name := range names {
+		path := filepath.Join(c.pluginDir, name)
+		if err := os.WriteFile(path, []byte(internal.PluginTrigger(name)), 0755); err != nil {
+			return nil, fmt.Errorf("unable to write %s: %w", path, err)
+		}
+
+		// applied explicitly, because WriteFile leaves the mode of a file that
+		// already exists alone and dokku will not run a trigger it cannot execute
+		if err := os.Chmod(path, 0755); err != nil {
+			return nil, fmt.Errorf("unable to set the mode on %s: %w", path, err)
+		}
+
+		written = append(written, path)
+	}
+
+	return written, nil
 }
 
 // writeSubcommands writes one script per command the datastore adds for itself.

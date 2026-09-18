@@ -396,3 +396,26 @@ func TestParseRefusesAPrivilegedScriptFromACheckout(t *testing.T) {
 		t.Errorf("expected the embedded tree to be allowed, got %s", err)
 	}
 }
+
+// A trigger runs on the host, so it falls under the same rule host mode
+// already has: a definition a plugin checkout can write must not be able to
+// introduce one, or overriding a definition would be a way to run code outside
+// a container.
+func TestParseRefusesAHostTriggerFromACheckout(t *testing.T) {
+	compose := strings.Replace(
+		validCompose,
+		"x-dokku:",
+		"x-dokku:\n  triggers:\n    post-extract:\n      mode: host\n      exec: [post-extract]\n",
+		1,
+	)
+
+	if _, err := parseCompose(t, compose, false); err == nil {
+		t.Fatal("expected a host trigger from a checkout to be refused")
+	} else if !strings.Contains(err.Error(), "only allowed for definitions shipped in the binary") {
+		t.Errorf("expected the error to say why, got %q", err)
+	}
+
+	if _, err := parseCompose(t, compose, true); err != nil {
+		t.Errorf("expected the embedded tree to be allowed, got %s", err)
+	}
+}

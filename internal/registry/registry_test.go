@@ -1148,3 +1148,68 @@ func TestOnlyGraphiteShipsAPrivilegedScript(t *testing.T) {
 		}
 	}
 }
+
+// Solr is the only datastore that implements a dokku trigger. dokku finds a
+// trigger by the name of a file in the plugin directory, so a plugin ships one
+// either way; what the definition carries is the work, so that the file can be
+// generated rather than written by hand.
+func TestSolrImplementsThePostExtractTrigger(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	for _, variant := range []string{"solr-7", "solr-8"} {
+		t.Run(variant, func(t *testing.T) {
+			solr, ok := loaded.Definition(variant)
+			if !ok {
+				t.Fatalf("expected a %s definition", variant)
+			}
+
+			declared, ok := solr.TriggerFor("post-extract")
+			if !ok {
+				t.Fatalf("expected %s to implement post-extract, got %v", variant, solr.TriggerNames())
+			}
+
+			// on the host: the build it reads is a host directory, and the core
+			// it writes to is the host side of a bind mount
+			if declared.Mode != definition.ModeHost {
+				t.Errorf("expected the trigger to run on the host, got %q", declared.Mode)
+			}
+
+			if _, ok := solr.Scripts["post-extract"]; !ok {
+				t.Errorf("expected %s to ship the script it runs, got %v", variant, solr.Scripts)
+			}
+
+			// dokku passes the app, the directory and the revision, in that order
+			names := []string{}
+			for _, argument := range declared.Arguments {
+				names = append(names, argument.Name)
+			}
+
+			if strings.Join(names, ",") != "app,directory,revision" {
+				t.Errorf("expected the arguments dokku passes, got %v", names)
+			}
+		})
+	}
+}
+
+// Nothing else implements one, so the mechanism is exercised by exactly one
+// datastore and every other plugin ships no trigger file at all.
+func TestOnlySolrImplementsATrigger(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	for _, name := range loaded.Names() {
+		found, ok := loaded.Definition(name)
+		if !ok {
+			t.Fatalf("expected a %s definition", name)
+		}
+
+		if len(found.TriggerNames()) > 0 && !strings.HasPrefix(name, "solr") {
+			t.Errorf("%s implements a trigger, which needs saying out loud", name)
+		}
+	}
+}

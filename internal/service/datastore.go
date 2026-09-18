@@ -554,6 +554,12 @@ func (s *Datastore) arguments(name string, values []string) map[string]string {
 		return nil
 	}
 
+	return bindArguments(command, values)
+}
+
+// bindArguments pairs the values a command was given with the names it declared
+// them under, in order.
+func bindArguments(command definition.Command, values []string) map[string]string {
 	arguments := map[string]string{}
 	for index, declared := range command.Arguments {
 		if index < len(values) {
@@ -845,6 +851,39 @@ type RunCommandInput struct {
 	// Arguments are the positional arguments after the service name, in the
 	// order the command declares them
 	Arguments []string
+}
+
+// RunTriggerInput is the input for RunTrigger.
+type RunTriggerInput struct {
+	// ServiceName is the linked service to run against
+	ServiceName string
+
+	// Name is the dokku trigger being handled
+	Name string
+
+	// Arguments are what dokku passed the trigger, in the order the definition
+	// declares them
+	Arguments []string
+}
+
+// RunTrigger runs what a definition declares for a dokku trigger, against one
+// of the services the app is linked to.
+//
+// A datastore that declares nothing for the trigger does nothing, which is what
+// a trigger is supposed to do when it does not apply: dokku runs every plugin's
+// trigger for every event.
+func (s *Datastore) RunTrigger(ctx context.Context, input RunTriggerInput) error {
+	declared, ok := s.Definition.TriggerFor(input.Name)
+	if !ok {
+		return nil
+	}
+
+	return s.run(ctx, input.ServiceName, "triggers."+input.Name, runOptions{
+		Command:   &declared,
+		Arguments: bindArguments(declared, input.Arguments),
+		Stdout:    os.Stdout,
+		Stderr:    os.Stderr,
+	})
 }
 
 // RunCommand runs one of the definition's declared commands interactively.

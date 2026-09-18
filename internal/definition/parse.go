@@ -404,5 +404,9 @@ func allCommands(definition Definition) map[string]Command {
 		commands[name] = command
 	}
 
+	for name, command := range definition.Dokku.Triggers {
+		commands["triggers."+name] = command
+	}
+
 	return commands
 }
