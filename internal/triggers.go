@@ -98,8 +98,13 @@ func StartLinkedServices(ctx context.Context, input TriggerInput, appName string
 		// a start with no container left to start makes one, so it is the
 		// service's own definition that has to make it rather than the
 		// datastore's newest
+		datastore, unresolved := input.Datastore.ForService(serviceName)
+		if unresolved != nil {
+			return unresolved
+		}
+
 		if err := service.Start(ctx, service.StartInput{
-			Datastore:   input.Datastore.ForService(serviceName),
+			Datastore:   datastore,
 			ServiceName: serviceName,
 		}); err != nil {
 			return err

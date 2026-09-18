@@ -92,12 +92,16 @@ func TestNewDocumentationDataPrefersTheEnvironment(t *testing.T) {
 	}
 }
 
-func TestNewDocumentationDataReadsThePluginDockerfile(t *testing.T) {
+// A plugin pins its image in the definition it ships rather than in a Dockerfile
+// of its own, so the default the readme documents comes from there. A Dockerfile
+// left at a plugin's root is no longer read, and must not be: it would be a
+// second pin, free to disagree with the one the services actually run.
+func TestNewDocumentationDataIgnoresAPluginDockerfile(t *testing.T) {
 	t.Setenv("REDIS_IMAGE", "")
 	t.Setenv("REDIS_IMAGE_VERSION", "")
 
 	pluginDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(pluginDir, "Dockerfile"), []byte("FROM redis:8.8.0\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(pluginDir, "Dockerfile"), []byte("FROM redis:1.2.3\n"), 0644); err != nil {
 		t.Fatalf("unable to write the dockerfile: %s", err)
 	}
 
@@ -106,81 +110,10 @@ func TestNewDocumentationDataReadsThePluginDockerfile(t *testing.T) {
 		PluginDir: pluginDir,
 	})
 
-	if data.Image != "redis" {
-		t.Errorf("expected the image from the dockerfile, got %q", data.Image)
-	}
-
-	if data.ImageVersion != "8.8.0" {
-		t.Errorf("expected the image version from the dockerfile, got %q", data.ImageVersion)
-	}
-}
-
-func TestImageFromDockerfile(t *testing.T) {
-	tests := []struct {
-		name            string
-		contents        string
-		expectedImage   string
-		expectedVersion string
-		expectedErr     bool
-	}{
-		{
-			name:            "a pinned version",
-			contents:        "FROM redis:8.8.0\n",
-			expectedImage:   "redis",
-			expectedVersion: "8.8.0",
-		},
-		{
-			name:            "a namespaced image",
-			contents:        "FROM dokku/wait:0.9.3\n",
-			expectedImage:   "dokku/wait",
-			expectedVersion: "0.9.3",
-		},
-		{
-			name:            "no version",
-			contents:        "FROM redis\n",
-			expectedImage:   "redis",
-			expectedVersion: "latest",
-		},
-		{
-			name:            "comments and blank lines are skipped",
-			contents:        "# a comment\n\nFROM redis:8.8.0\n",
-			expectedImage:   "redis",
-			expectedVersion: "8.8.0",
-		},
-		{
-			name:        "no from instruction",
-			contents:    "# nothing to see\n",
-			expectedErr: true,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "Dockerfile")
-			if err := os.WriteFile(path, []byte(test.contents), 0644); err != nil {
-				t.Fatalf("unable to write the dockerfile: %s", err)
-			}
-
-			image, version, err := imageFromDockerfile(path)
-			if test.expectedErr {
-				if err == nil {
-					t.Fatalf("expected an error, got %s:%s", image, version)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("unexpected error: %s", err)
-			}
-
-			if image != test.expectedImage {
-				t.Errorf("expected image %q, got %q", test.expectedImage, image)
-			}
-
-			if version != test.expectedVersion {
-				t.Errorf("expected version %q, got %q", test.expectedVersion, version)
-			}
-		})
+	redis := service.Datastores["redis"].Definition
+	if data.Image != redis.DefaultImage || data.ImageVersion != redis.DefaultImageVersion {
+		t.Errorf("expected the definition's %s:%s, got %s:%s",
+			redis.DefaultImage, redis.DefaultImageVersion, data.Image, data.ImageVersion)
 	}
 }
 

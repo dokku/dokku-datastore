@@ -209,7 +209,11 @@ func (c *CloneCommand) Run(args []string) int {
 
 	// a service runs the definition it was created with, which for a datastore
 	// split by major version is not always the newest one
-	datastore = datastore.ForService(serviceName)
+	datastore, unresolved := datastore.ForService(serviceName)
+	if unresolved != nil {
+		logger.Error(internal.ErrorInput{Error: unresolved})
+		return 1
+	}
 
 	if code, unimplemented := requireImplemented(datastore, "clone"); unimplemented {
 		return code

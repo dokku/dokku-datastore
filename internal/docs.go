@@ -1,11 +1,9 @@
 package internal
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"text/template"
@@ -102,7 +100,7 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		port = ports[0]
 	}
 
-	image, imageVersion := resolveImage(properties, input.PluginDir)
+	image, imageVersion := resolveImage(properties)
 
 	return DocumentationData{
 		CommandPrefix:  properties.CommandPrefix,
@@ -117,27 +115,16 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 	}
 }
 
-// resolveImage works out which image the plugin runs. The plugin pins it in its
-// Dockerfile and exports it as an environment variable at runtime, so both are
-// preferred over the datastore's own default.
-func resolveImage(properties service.ServiceStruct, pluginDir string) (string, string) {
+// resolveImage works out which image the plugin runs. The plugin exports it as
+// an environment variable at runtime, so that is preferred over the datastore's
+// own default; the definition supplies the rest.
+//
+// A plugin no longer pins the image in a Dockerfile of its own. It pins it in the
+// definition, which is where the default here comes from, so the two cannot say
+// different things.
+func resolveImage(properties service.ServiceStruct) (string, string) {
 	image := os.Getenv(properties.PluginVariable + "_IMAGE")
 	imageVersion := os.Getenv(properties.PluginVariable + "_IMAGE_VERSION")
-	if image != "" && imageVersion != "" {
-		return image, imageVersion
-	}
-
-	if pluginDir != "" {
-		dockerfileImage, dockerfileVersion, err := imageFromDockerfile(filepath.Join(pluginDir, "Dockerfile"))
-		if err == nil {
-			if image == "" {
-				image = dockerfileImage
-			}
-			if imageVersion == "" {
-				imageVersion = dockerfileVersion
-			}
-		}
-	}
 
 	if image == "" {
 		image = properties.DefaultImage
@@ -147,36 +134,6 @@ func resolveImage(properties service.ServiceStruct, pluginDir string) (string, s
 	}
 
 	return image, imageVersion
-}
-
-// imageFromDockerfile reads the image a plugin pins in its Dockerfile
-func imageFromDockerfile(path string) (string, string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", "", err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) < 2 || !strings.EqualFold(fields[0], "FROM") {
-			continue
-		}
-
-		image, version, found := strings.Cut(fields[1], ":")
-		if !found {
-			return image, "latest", nil
-		}
-
-		return image, version, nil
-	}
-
-	if err := scanner.Err(); err != nil {
-		return "", "", err
-	}
-
-	return "", "", fmt.Errorf("no FROM instruction in %s", path)
 }
 
 // RenderDocumentation fills a template from a command in for a datastore

@@ -36,19 +36,18 @@ func withConfigEntry(compose string, entries string) string {
 	return compose + "\nconfigs:\n  thing_conf:\n    content: |\n      thing = {{ .ServiceName }}\n"
 }
 
-func parseCompose(t *testing.T, compose string, embedded bool) (Definition, error) {
+func parseCompose(t *testing.T, compose string) (Definition, error) {
 	t.Helper()
 
 	return Parse(ParseInput{
 		Name:       "thing",
 		Compose:    []byte(compose),
 		Dockerfile: []byte("ARG IMAGE=thing:1.0\nFROM ${IMAGE}\n"),
-		Embedded:   embedded,
 	})
 }
 
 func TestParseValidDefinition(t *testing.T) {
-	parsed, err := parseCompose(t, validCompose, true)
+	parsed, err := parseCompose(t, validCompose)
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
@@ -77,7 +76,6 @@ func TestParseRejects(t *testing.T) {
 	tests := []struct {
 		name     string
 		compose  string
-		embedded bool
 		expected string
 	}{
 		{
@@ -176,14 +174,6 @@ func TestParseRejects(t *testing.T) {
 			expected: `custom command "thing-expose" needs a description`,
 		},
 		{
-			// host mode runs arbitrary code outside a container, so a plugin
-			// checkout must not be able to introduce one
-			name:     "a host command from a plugin override",
-			compose:  validCompose + "\n  custom_commands:\n    thing-expose:\n      description: expose the thing\n      mode: host\n      exec: [thing-expose]\n",
-			embedded: false,
-			expected: "only allowed for definitions shipped in the binary",
-		},
-		{
 			name:     "a protocol that is neither tcp nor udp",
 			compose:  strings.Replace(validCompose, "        target: 1234", "        target: 1234\n        protocol: sctp", 1),
 			expected: "neither tcp nor udp",
@@ -199,7 +189,7 @@ func TestParseRejects(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := parseCompose(t, test.compose, test.embedded)
+			_, err := parseCompose(t, test.compose)
 			if err == nil {
 				t.Fatal("expected an error")
 			}
@@ -208,13 +198,6 @@ func TestParseRejects(t *testing.T) {
 				t.Errorf("expected an error mentioning %q, got: %s", test.expected, err)
 			}
 		})
-	}
-}
-
-func TestParseAllowsAHostCommandFromTheEmbeddedTree(t *testing.T) {
-	compose := validCompose + "\n  custom_commands:\n    thing-expose:\n      description: expose the thing\n      mode: host\n      exec: [thing-expose]\n"
-	if _, err := parseCompose(t, compose, true); err != nil {
-		t.Errorf("unexpected error: %s", err)
 	}
 }
 
@@ -348,7 +331,7 @@ func TestRenderAllDropsEmptyElements(t *testing.T) {
 func TestParseReadsConfigs(t *testing.T) {
 	compose := withConfigEntry(validCompose, "      - source: thing_conf\n        target: /data/thing.conf\n        mode: \"0640\"\n        uid: \"1001\"\n        gid: \"1001\"\n")
 
-	parsed, err := parseCompose(t, compose, true)
+	parsed, err := parseCompose(t, compose)
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
@@ -371,37 +354,29 @@ func TestParseReadsConfigs(t *testing.T) {
 	}
 }
 
-// A privileged script is granted sudo by the install, so a definition a plugin
-// checkout can write must not be able to introduce one. This is the same rule
-// host mode has, one step earlier: host mode stops a checkout running code on
-// the host, and this stops it choosing what the dokku group runs as root.
-func TestParseRefusesAPrivilegedScriptFromACheckout(t *testing.T) {
+// A plugin may ship a definition that installs a privileged script.
+//
+// Installing a dokku plugin is a root action, and afterwards the whole plugin
+// tree is owned by the dokku user while its install script is run by root. A
+// definition in that tree is therefore trusted exactly as far as the scripts
+// beside it already were, and refusing it here protected nothing: the same code
+// could go straight into the plugin's own install file.
+func TestParseAllowsAPrivilegedScriptFromACheckout(t *testing.T) {
 	input := ParseInput{
 		Name:       "thing",
 		Compose:    []byte(validCompose),
 		Dockerfile: []byte("ARG IMAGE=thing:1.0\nFROM ${IMAGE}\n"),
 		Privileged: map[string][]byte{"nginx": []byte("#!/usr/bin/env bash\ntrue\n")},
-		Embedded:   false,
 	}
 
-	if _, err := Parse(input); err == nil {
-		t.Fatal("expected a privileged script from a checkout to be refused")
-	} else if !strings.Contains(err.Error(), "only allowed for definitions shipped in the binary") {
-		t.Errorf("expected the error to say why, got %q", err)
-	}
-
-	// and the same tree is fine from the embedded layer
-	input.Embedded = true
 	if _, err := Parse(input); err != nil {
-		t.Errorf("expected the embedded tree to be allowed, got %s", err)
+		t.Errorf("unexpected error: %s", err)
 	}
 }
 
-// A trigger runs on the host, so it falls under the same rule host mode
-// already has: a definition a plugin checkout can write must not be able to
-// introduce one, or overriding a definition would be a way to run code outside
-// a container.
-func TestParseRefusesAHostTriggerFromACheckout(t *testing.T) {
+// And a trigger that runs on the host, for the same reason. It runs as the dokku
+// user, who already owns every script in the plugin that runs as the dokku user.
+func TestParseAllowsAHostTriggerFromACheckout(t *testing.T) {
 	compose := strings.Replace(
 		validCompose,
 		"x-dokku:",
@@ -409,13 +384,7 @@ func TestParseRefusesAHostTriggerFromACheckout(t *testing.T) {
 		1,
 	)
 
-	if _, err := parseCompose(t, compose, false); err == nil {
-		t.Fatal("expected a host trigger from a checkout to be refused")
-	} else if !strings.Contains(err.Error(), "only allowed for definitions shipped in the binary") {
-		t.Errorf("expected the error to say why, got %q", err)
-	}
-
-	if _, err := parseCompose(t, compose, true); err != nil {
-		t.Errorf("expected the embedded tree to be allowed, got %s", err)
+	if _, err := parseCompose(t, compose); err != nil {
+		t.Errorf("unexpected error: %s", err)
 	}
 }

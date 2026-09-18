@@ -177,7 +177,13 @@ func (c *TriggerCommand) Run(args []string) int {
 	}
 
 	for _, serviceName := range services {
-		err := datastore.ForService(serviceName).RunTrigger(ctx, service.RunTriggerInput{
+		pinned, unresolved := datastore.ForService(serviceName)
+		if unresolved != nil {
+			logger.Error(internal.ErrorInput{Error: unresolved})
+			return 1
+		}
+
+		err := pinned.RunTrigger(ctx, service.RunTriggerInput{
 			ServiceName: serviceName,
 			Name:        triggerName,
 			Arguments:   triggerArguments,

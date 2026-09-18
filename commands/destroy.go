@@ -165,9 +165,13 @@ func (c *DestroyCommand) Run(args []string) int {
 		return 1
 	}
 
-	// a service runs the definition it was created with, which for a datastore
-	// split by major version is not always the newest one
-	datastore = datastore.ForService(serviceName)
+	// a service runs the definition it was created with. This command works on a
+	// service whose definition is missing, because otherwise there would be no
+	// way to look at one or to get rid of it.
+	datastore, unresolved := datastore.ForService(serviceName)
+	if unresolved != nil {
+		logger.Warn(internal.WarnInput{Warning: unresolved.Error()})
+	}
 
 	// check if the service exists
 	if !service.Exists(ctx, datastore, serviceName) {

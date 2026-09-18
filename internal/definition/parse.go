@@ -48,12 +48,6 @@ type ParseInput struct {
 	// Privileged are the scripts installed root owned and granted in sudoers,
 	// keyed by path relative to privileged/.
 	Privileged map[string][]byte
-
-	// Embedded records whether this definition came from the tree compiled into
-	// the binary. A host-mode command is accepted only from there, because a
-	// plugin checkout may override a definition and host mode runs arbitrary
-	// code outside a container.
-	Embedded bool
 }
 
 // Parse reads and validates a definition. It executes no templates and touches no
@@ -85,6 +79,7 @@ func Parse(input ParseInput) (Definition, error) {
 		Service:             service.Service,
 		Configs:             file.Configs,
 		Dokku:               file.Dokku,
+		Compose:             input.Compose,
 		Dockerfile:          input.Dockerfile,
 		DefaultImage:        image,
 		DefaultImageVersion: version,
@@ -116,13 +111,6 @@ func Parse(input ParseInput) (Definition, error) {
 func validate(input ParseInput, serviceKey string, service composeService, definition Definition) error {
 	fail := func(format string, args ...any) error {
 		return fmt.Errorf("%s: %s", input.Name, fmt.Sprintf(format, args...))
-	}
-
-	// the same rule host mode has, for the same reason and one step earlier: a
-	// privileged script is granted sudo by the install, so a definition a
-	// plugin checkout can write must not be able to introduce one
-	if !input.Embedded && len(input.Privileged) > 0 {
-		return fail("privileged scripts are only allowed for definitions shipped in the binary")
 	}
 
 	for key, value := range map[string]bool{
@@ -302,9 +290,8 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 			// image lacks names one, and a sidecar that only needs to run
 			// beside the service uses the service's own
 		case ModeHost:
-			if !input.Embedded {
-				return fail("command %q runs on the host, which is only allowed for definitions shipped in the binary", name)
-			}
+			// runs on the host rather than in a container, as the dokku user,
+			// which is what a trigger reading a build directory needs
 		default:
 			return fail("command %q has an unknown mode %q", name, command.Mode)
 		}
