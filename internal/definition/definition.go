@@ -8,6 +8,7 @@ package definition
 import (
 	"io/fs"
 	"path"
+	"sort"
 	"strings"
 )
 
@@ -233,6 +234,17 @@ type Dokku struct {
 	// Commands so that being custom is a fact about the definition rather than
 	// about what other datastores happen to declare.
 	CustomCommands map[string]Command `yaml:"custom_commands"`
+
+	// Triggers are the dokku plugin triggers this datastore implements, keyed
+	// by trigger name. dokku finds a trigger by looking for a file named after
+	// it in the plugin directory, so a plugin still ships one; declaring the
+	// work here is what lets that file be generated rather than written, and
+	// keeps the datastore specific half in the definition.
+	//
+	// A trigger runs once for each service the app is linked to, which is the
+	// shape every one of them has: the tool finds the services and the
+	// definition says what to do with each.
+	Triggers map[string]Command `yaml:"triggers"`
 
 	// Commands are the operations run against a service. The well-known keys
 	// connect, export and import drive the built-in subcommands, and a key's
@@ -501,6 +513,25 @@ func (d Definition) CommandFor(name string) (Command, bool) {
 
 	command, ok := d.Dokku.CustomCommands[name]
 	return command, ok
+}
+
+// TriggerFor returns the command a definition declares for a dokku trigger.
+func (d Definition) TriggerFor(name string) (Command, bool) {
+	command, ok := d.Dokku.Triggers[name]
+	return command, ok
+}
+
+// TriggerNames returns the triggers a definition implements, sorted so that
+// what a plugin ships is the same on every generation.
+func (d Definition) TriggerNames() []string {
+	names := make([]string, 0, len(d.Dokku.Triggers))
+	for name := range d.Dokku.Triggers {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	return names
 }
 
 // ImplementsCustom reports whether a datastore adds a command by this name.

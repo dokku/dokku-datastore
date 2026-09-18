@@ -50,5 +50,30 @@ x-dokku:
           target: /seed
       exec: ["chown", "-R", "8983:8983", "/seed"]
 
+  triggers:
+    # dokku hands this the app, the directory its build was extracted to, and
+    # the revision. It runs once for each service the app is linked to, so the
+    # definition only has to say what to do with one of them.
+    post-extract:
+      # on the host, because the build it reads from is a directory on the host
+      # and the core it writes to is the host side of a bind mount
+      mode: host
+      arguments:
+        - name: app
+          description: the app being deployed
+        - name: directory
+          description: the directory the build was extracted to
+        - name: revision
+          description: the revision being deployed
+          optional: true
+      exec:
+        - post-extract
+        - "{{ .Args.directory }}"
+      env:
+        SOLR_CONF: "{{ .ServiceRoot }}/data/{{ .Database }}/conf"
+        SOLR_HOST_CONF: "{{ .HostRoot }}/data/{{ .Database }}/conf"
+        SOLR_IMAGE: "{{ .TaggedImage }}"
+        SOLR_SERVICE: "{{ .ServiceName }}"
+
   # no commands: the bash plugin implements none of connect, export or import,
   # so clone and the backup family are unavailable too
