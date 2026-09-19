@@ -1,16 +1,139 @@
 ---
 version: 2
 updates:
-  # each definition pins its datastore's image on the FROM line of its own
-  # Dockerfile. The plural key is used rather than one entry per definition
-  # because it takes a glob, so a definition added later is watched without
-  # anyone remembering to add it here.
+  # one entry per definition, because a definition split by major version has
+  # to say which majors it accepts and that cannot be said for a glob. The
+  # completeness of this list is a test rather than a convention: a definition
+  # missing from here is one nothing watches.
   - package-ecosystem: "docker"
-    directories:
-      - "/internal/registry/definitions/*"
+    directory: "/internal/registry/definitions/clickhouse"
     schedule:
       interval: "daily"
-    open-pull-requests-limit: 10
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/couchdb"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/elasticsearch-7"
+    schedule:
+      interval: "daily"
+    # elasticsearch-7 exists to keep services on 7.x running what they were
+    # created with, so crossing a major here would empty it of its purpose
+    ignore:
+      - dependency-name: "elasticsearch"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/elasticsearch-8"
+    schedule:
+      interval: "daily"
+    # elasticsearch-8 exists to keep services on 8.x running what they were
+    # created with, so crossing a major here would empty it of its purpose
+    ignore:
+      - dependency-name: "elasticsearch"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/elasticsearch-9"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/graphite"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/mariadb"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/meilisearch"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/memcached"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/mongo"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/mysql"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/nats"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/omnisci"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/postgres-17"
+    schedule:
+      interval: "daily"
+    # postgres-17 exists to keep services on 17.x running what they were
+    # created with, so crossing a major here would empty it of its purpose
+    ignore:
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/postgres-18"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/pushpin"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/rabbitmq"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/redis"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/rethinkdb"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/solr-7"
+    schedule:
+      interval: "daily"
+    # solr-7 exists to keep services on 7.x running what they were
+    # created with, so crossing a major here would empty it of its purpose
+    ignore:
+      - dependency-name: "solr"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/solr-8"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/typesense"
+    schedule:
+      interval: "daily"
 
   - package-ecosystem: "gomod"
     directory: "/"

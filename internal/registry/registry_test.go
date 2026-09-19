@@ -1357,3 +1357,45 @@ func TestAnOverrideCannotTakeAnotherDatastoresName(t *testing.T) {
 		t.Errorf("expected the error to name the collision, got %q", err)
 	}
 }
+
+// A datastore split by major version keeps one definition per major so that a
+// service created on an older one goes on running it. That only holds while each
+// of those definitions stays inside its own major: postgres-17 pinned to
+// postgres 19 would be a service that asked for 17 and got a data directory
+// nineteen expects.
+//
+// The newest of each is deliberately not checked. It is the one a new service
+// gets, it is free to move ahead, and solr-8 already runs solr 10 for that
+// reason.
+func TestAnOlderVariantStaysInsideItsMajor(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	checked := 0
+	for _, plugin := range loaded.Plugins() {
+		names := loaded.NamesFor(plugin)
+		if len(names) < 2 {
+			continue
+		}
+
+		// sorted oldest first, so everything but the last is an older variant
+		for _, name := range names[:len(names)-1] {
+			checked++
+			t.Run(name, func(t *testing.T) {
+				found, _ := loaded.Definition(name)
+
+				expected := name[strings.LastIndex(name, "-")+1:]
+				if actual := majorVersion(found.DefaultImageVersion); actual != expected {
+					t.Errorf("is pinned to %s, which is major %s rather than %s",
+						found.DefaultImageVersion, actual, expected)
+				}
+			})
+		}
+	}
+
+	if checked == 0 {
+		t.Error("expected at least one older variant to check")
+	}
+}
