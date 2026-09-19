@@ -62,8 +62,14 @@ func TestRedisProperties(t *testing.T) {
 	}
 
 	// the Dockerfile pins the default rather than floating on latest, which is
-	// also how the bash plugin derives its own
-	if properties.DefaultImageVersion != "8.8.0" {
+	// also how the bash plugin derives its own. Which version it pins is the
+	// definition's business and dependabot changes it, so what is checked is
+	// that a version is pinned and that it is the one the definition carries
+	if properties.DefaultImageVersion == "" || properties.DefaultImageVersion == "latest" {
+		t.Errorf("expected a pinned version, got %q", properties.DefaultImageVersion)
+	}
+
+	if properties.DefaultImageVersion != Datastores["redis"].Definition.DefaultImageVersion {
 		t.Errorf("expected the version the definition pins, got %q", properties.DefaultImageVersion)
 	}
 }
@@ -89,8 +95,12 @@ func TestPinnedImage(t *testing.T) {
 		t.Fatal("expected redis to be registered")
 	}
 
+	// taken from the definition rather than written out, because the version it
+	// pins is changed by every image bump and a copy of it here would fail them
+	pinned := redis.Definition.DefaultImage + ":" + redis.Definition.DefaultImageVersion
+
 	// redis runs the image it pinned, so there is nothing to unmap
-	if actual := redis.runTaggedImage("lollipop"); actual != "redis:8.8.0" {
+	if actual := redis.runTaggedImage("lollipop"); actual != pinned {
 		t.Errorf("expected redis to run the image it pinned, got %q", actual)
 	}
 
@@ -98,14 +108,14 @@ func TestPinnedImage(t *testing.T) {
 	building.Definition.Builds = true
 
 	built := building.runTaggedImage("lollipop")
-	if built != "dokku/datastore-redis:8.8.0" {
-		t.Fatalf("expected a built tag, got %q", built)
+	if expected := "dokku/datastore-redis:" + redis.Definition.DefaultImageVersion; built != expected {
+		t.Fatalf("expected a built tag %q, got %q", expected, built)
 	}
 
 	// the built tag is an implementation detail, so a version report answers
 	// which redis is running rather than which wrapper dokku built
-	if actual := building.PinnedImage("lollipop", built); actual != "redis:8.8.0" {
-		t.Errorf("expected redis:8.8.0, got %q", actual)
+	if actual := building.PinnedImage("lollipop", built); actual != pinned {
+		t.Errorf("expected %s, got %q", pinned, actual)
 	}
 
 	// anything else is reported verbatim, so this never hides what is running
