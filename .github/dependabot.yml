@@ -140,6 +140,14 @@ updates:
     schedule:
       interval: "daily"
     open-pull-requests-limit: 10
+    ignore:
+      # dokku's plugins/common is a module nested in a repository whose root is
+      # not one, and it publishes no tags of its own, so it can only ever be
+      # required at a pseudo-version. Dependabot reads the repository's tags as
+      # if they were the module's, resolves github.com/dokku/dokku@v0.38.28, and
+      # fails because that is not a module containing this package - which fails
+      # the whole gomod run and takes every other go update down with it.
+      - dependency-name: "github.com/dokku/dokku/plugins/common"
 
   - package-ecosystem: "github-actions"
     directory: "/"
