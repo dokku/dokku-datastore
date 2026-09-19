@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,9 +63,10 @@ func TestProcessSentence(t *testing.T) {
 func TestReadme(t *testing.T) {
 	t.Setenv("DOKKU_NO_COLOR", "1")
 
+	data := redisDocumentationData(t)
 	readme, err := Readme(ReadmeInput{
 		Commands: helpTestCommands(),
-		Data:     redisDocumentationData(t),
+		Data:     data,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
@@ -75,10 +77,14 @@ func TestReadme(t *testing.T) {
 		expected string
 	}{
 		{name: "the title", expected: "# dokku redis "},
-		// the version a real plugin checkout pins in its own Dockerfile wins, so
-		// this fixture falls back to the definition's, which is a pinned
-		// version rather than the floating latest the Go implementation used
-		{name: "the image it installs", expected: "Currently defaults to installing [redis 8.8.0](https://hub.docker.com/_/redis/)."},
+		// the version is taken from the definition rather than written out here:
+		// it is the definition's to change, and dependabot changes it, so a copy
+		// of it in this file is a test that fails on every image bump
+		{
+			name: "the image it installs",
+			expected: fmt.Sprintf("Currently defaults to installing [%s %s](https://hub.docker.com/_/%s/).",
+				data.Image, data.ImageVersion, data.Image),
+		},
 		{name: "the install command", expected: "sudo dokku plugin:install https://github.com/dokku/dokku-redis.git --name redis"},
 		{name: "the command list", expected: "redis:list                                         # list all Redis services"},
 		{name: "a usage section", expected: "### Basic Usage"},
