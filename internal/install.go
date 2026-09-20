@@ -95,7 +95,7 @@ func PrivilegedFiles(s *service.Datastore) []common.WriteStringToFileInput {
 
 // CronHelperFile describes the helper script the sudoers file grants.
 func CronHelperFile(s *service.Datastore) common.WriteStringToFileInput {
-	return cron.HelperFile(s.Properties().CommandPrefix, filepath.Join(service.PluginDataRoot, s.Properties().CommandPrefix))
+	return cron.HelperFile(s.Properties().CommandPrefix, filepath.Join(service.PluginDataRoot, s.Properties().DataDirectory))
 }
 
 // InstallInput is the input for the Install function
@@ -143,7 +143,11 @@ func Install(ctx context.Context, input InstallInput) error {
 	}
 
 	folders := []string{
-		filepath.Join(service.PluginDataRoot, commandPrefix),
+		// where its services go, which is not always its name
+		filepath.Join(service.PluginDataRoot, properties.DataDirectory),
+		// and where dokku keeps the plugin's own config and its binary, which
+		// always are: moving these would put the binary somewhere the plugin
+		// that runs it does not look
 		filepath.Join(service.DokkuLibRoot, "config", commandPrefix),
 		filepath.Join(service.DokkuLibRoot, "data", commandPrefix),
 	}
@@ -183,7 +187,7 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 	// earlier versions staged a cron entry beside the services rather than
 	// inside one, where listing the services reported it as a service of its
 	// own. An interrupted schedule left one behind, so clear it.
-	strayCronFile := filepath.Join(service.PluginDataRoot, input.Datastore.Properties().CommandPrefix, ".TMP_CRON_FILE")
+	strayCronFile := filepath.Join(service.PluginDataRoot, input.Datastore.Properties().DataDirectory, ".TMP_CRON_FILE")
 	if common.FileExists(strayCronFile) {
 		if err := os.Remove(strayCronFile); err != nil {
 			return fmt.Errorf("unable to remove %s: %w", strayCronFile, err)

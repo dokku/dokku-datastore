@@ -16,6 +16,11 @@ type ServiceStruct struct {
 	// CommandPrefix is the command prefix for a service
 	CommandPrefix string
 
+	// DataDirectory is the directory under the services root a datastore's
+	// services live in. It is the command prefix for all but graphite, and is
+	// separate from it because the two are separate facts.
+	DataDirectory string
+
 	// DefaultAlias is the prefix of the config variable a linked app receives the
 	// service url on
 	DefaultAlias string

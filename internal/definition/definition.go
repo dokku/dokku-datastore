@@ -186,10 +186,19 @@ type Healthcheck struct {
 // Dokku is the x-dokku block: the parts of a datastore definition the compose
 // specification has no vocabulary for.
 type Dokku struct {
-	// Plugin is the command prefix, the directory under the services root, and
-	// the label on every container. Definitions differing only by major version
-	// share it.
+	// Plugin is the command prefix and the label on every container. Definitions
+	// differing only by major version share it.
 	Plugin string `yaml:"plugin"`
+
+	// DataDirectory is the directory under the services root that this
+	// datastore's services live in. It is the plugin name for every datastore
+	// but graphite, whose services have always been stored under the name of the
+	// image it runs rather than the name it is called by.
+	//
+	// Declared rather than assumed so that a datastore whose directory is not its
+	// command name can say so, instead of the services an operator already has
+	// becoming invisible the moment the binary looks somewhere else for them.
+	DataDirectory string `yaml:"data_directory"`
 
 	// Title is the datastore's name in prose. It is declared rather than derived
 	// because it is irregular: MariaDB, CouchDB, MongoDB, RabbitMQ.
@@ -418,6 +427,16 @@ const (
 	ProtocolTCP = "tcp"
 	ProtocolUDP = "udp"
 )
+
+// ServicesDirectory is the directory under the services root this datastore's
+// services live in: what it declares, or its plugin name.
+func (d Definition) ServicesDirectory() string {
+	if d.Dokku.DataDirectory != "" {
+		return d.Dokku.DataDirectory
+	}
+
+	return d.Dokku.Plugin
+}
 
 // PortFor returns a port by name.
 func (d Definition) PortFor(name string) (Port, bool) {

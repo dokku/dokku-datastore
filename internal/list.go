@@ -21,7 +21,7 @@ type ListServicesInput struct {
 // ListServices lists all services of a given datastore type
 func ListServices(ctx context.Context, input ListServicesInput) ([]string, error) {
 	// list all immediate subfolders in PluginDataRoot
-	subfolders, err := os.ReadDir(filepath.Join(service.PluginDataRoot, input.Datastore.Properties().CommandPrefix))
+	subfolders, err := os.ReadDir(filepath.Join(service.PluginDataRoot, input.Datastore.Properties().DataDirectory))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []string{}, nil

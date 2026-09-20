@@ -30,6 +30,11 @@ PLUGIN="$(awk '/^  plugin:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose
 # the variant this leg is for rather than whichever is newest
 IMAGE_VERSION="$(awk -F: '/^FROM / { print $2; exit }' "$DEFINITION_ROOT/Dockerfile")"
 
+# the directory its services live in, which is the plugin name unless the
+# definition says otherwise. Graphite's are under the name of the image it runs
+DATA_DIR="$(awk '/^  data_directory:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose.yml")"
+[[ -n "$DATA_DIR" ]] || DATA_DIR="$PLUGIN"
+
 fail() {
   echo "FAIL: $*" >&2
   exit 1
@@ -55,11 +60,11 @@ scheme="$(awk '/^  scheme:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose
 [[ "$dsn" == "$scheme://"* ]] || fail "expected a $scheme connection string, got '$dsn'"
 
 echo "==> $DEFINITION: the service records the definition it was created with"
-pinned="$(cat "$DOKKU_LIB_ROOT/services/$PLUGIN/$SERVICE/DEFINITION")"
+pinned="$(cat "$DOKKU_LIB_ROOT/services/$DATA_DIR/$SERVICE/DEFINITION")"
 [[ "$pinned" == "$DEFINITION" ]] || fail "expected the service to be pinned to $DEFINITION, got '$pinned'"
 
 echo "==> $DEFINITION: the rendered compose file is valid"
-compose="$DOKKU_LIB_ROOT/services/$PLUGIN/$SERVICE/docker-compose.yml"
+compose="$DOKKU_LIB_ROOT/services/$DATA_DIR/$SERVICE/docker-compose.yml"
 [[ -f "$compose" ]] || fail "no compose file was written"
 docker compose --file "$compose" config --quiet || fail "the rendered compose file is not valid"
 
@@ -116,6 +121,6 @@ echo "==> $DEFINITION: destroy leaves nothing behind"
 containers="$(docker container ls -a --filter "name=^/dokku\.$PLUGIN\.$SERVICE$" --format '{{.Names}}')"
 [[ -z "$containers" ]] || fail "destroy left a container: $containers"
 
-[[ ! -d "$DOKKU_LIB_ROOT/services/$PLUGIN/$SERVICE" ]] || fail "destroy left the service root behind"
+[[ ! -d "$DOKKU_LIB_ROOT/services/$DATA_DIR/$SERVICE" ]] || fail "destroy left the service root behind"
 
 echo "==> $DEFINITION: ok"

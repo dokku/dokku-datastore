@@ -719,6 +719,7 @@ func (s *Datastore) Properties() ServiceStruct {
 	return ServiceStruct{
 		AltAlias:            dokku.AltAlias,
 		CommandPrefix:       dokku.Plugin,
+		DataDirectory:       s.Definition.ServicesDirectory(),
 		ConfigSuffix:        "config",
 		ConfigVariable:      dokku.Variable + "_CONFIG_OPTIONS",
 		DefaultAlias:        dokku.Alias,

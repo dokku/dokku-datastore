@@ -20,6 +20,11 @@ export DOKKU_SYSTEM_GROUP="${DOKKU_SYSTEM_GROUP:-$(id -gn)}"
 PLUGIN="$(awk '/^  plugin:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose.yml")"
 IMAGE_VERSION="$(awk -F: '/^FROM / { print $2; exit }' "$DEFINITION_ROOT/Dockerfile")"
 
+# the directory its services live in, which is the plugin name unless the
+# definition says otherwise. Graphite's are under the name of the image it runs
+DATA_DIR="$(awk '/^  data_directory:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose.yml")"
+[[ -n "$DATA_DIR" ]] || DATA_DIR="$PLUGIN"
+
 cleanup() {
   for service in viadocker viacompose; do
     "$BIN" destroy "$PLUGIN" "$service" --force >/dev/null 2>&1 || true
@@ -36,7 +41,7 @@ DOKKU_DATASTORE_BACKEND=compose "$BIN" create "$PLUGIN" viacompose --image-versi
 # service the other way, so it has to say what actually made it
 for service in viadocker viacompose; do
   expected="${service#via}"
-  recorded="$(cat "$DOKKU_LIB_ROOT/services/$PLUGIN/$service/BACKEND")"
+  recorded="$(cat "$DOKKU_LIB_ROOT/services/$DATA_DIR/$service/BACKEND")"
   [[ "$recorded" == "$expected" ]] || {
     echo "FAIL: $service recorded backend '$recorded', expected '$expected'" >&2
     exit 1
@@ -50,7 +55,7 @@ echo "==> $DEFINITION: the two containers agree"
 # are handed over to be replaced rather than compared
 secrets=()
 for service in viadocker viacompose; do
-  for file in "$DOKKU_LIB_ROOT/services/$PLUGIN/$service"/*PASSWORD; do
+  for file in "$DOKKU_LIB_ROOT/services/$DATA_DIR/$service"/*PASSWORD; do
     [[ -f "$file" ]] && secrets+=("$(cat "$file")")
   done
 done

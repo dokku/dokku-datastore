@@ -442,3 +442,33 @@ func TestParseAllowsACustomCommandWithNoSection(t *testing.T) {
 		t.Errorf("expected no section, got %q", group)
 	}
 }
+
+// The directory is optional: a definition that names none stores its services
+// under its plugin name, which is every definition but graphite's.
+func TestServicesDirectoryDefaultsToThePlugin(t *testing.T) {
+	parsed, err := parseCompose(t, validCompose)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if parsed.Dokku.DataDirectory != "" {
+		t.Errorf("expected no directory to be declared, got %q", parsed.Dokku.DataDirectory)
+	}
+
+	if actual := parsed.ServicesDirectory(); actual != parsed.Dokku.Plugin {
+		t.Errorf("expected %s, got %s", parsed.Dokku.Plugin, actual)
+	}
+}
+
+// And a definition that names one is stored there instead.
+func TestServicesDirectoryIsDeclarable(t *testing.T) {
+	compose := strings.Replace(validCompose, "x-dokku:", "x-dokku:\n  data_directory: somewhere-else", 1)
+	parsed, err := parseCompose(t, compose)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if actual := parsed.ServicesDirectory(); actual != "somewhere-else" {
+		t.Errorf("expected somewhere-else, got %s", actual)
+	}
+}
