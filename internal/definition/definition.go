@@ -377,6 +377,41 @@ const (
 	ModeHost = "host"
 )
 
+// The readme usage sections a command can be documented under.
+//
+// Identifiers rather than the headings they render as, so that retitling a
+// section does not rebucket every command in it and a definition declaring one
+// is held to a value rather than to prose. The heading itself lives with the
+// readme, which is the only thing that needs it.
+const (
+	// GroupNone is listed in the readme command list with no usage section of
+	// its own. It is the zero value, so a command that declares nothing lands
+	// here rather than in a section by accident.
+	GroupNone = ""
+
+	GroupBasicUsage        = "basic-usage"
+	GroupServiceLifecycle  = "service-lifecycle"
+	GroupServiceAutomation = "service-automation"
+	GroupDataManagement    = "data-management"
+	GroupBackups           = "backups"
+
+	// GroupCustomCommands collects the commands a datastore adds for itself that
+	// name no section of their own. It is last in the readme, and nothing but a
+	// custom command is ever in it.
+	GroupCustomCommands = "custom-commands"
+)
+
+// Groups are the sections a custom command may declare, which is every section
+// but GroupNone and GroupCustomCommands: one means undocumented and the other is
+// where a command goes when it names nothing.
+var Groups = map[string]bool{
+	GroupBasicUsage:        true,
+	GroupServiceLifecycle:  true,
+	GroupServiceAutomation: true,
+	GroupDataManagement:    true,
+	GroupBackups:           true,
+}
+
 // The protocols a port may declare. A port that names none is tcp, which is
 // what docker assumes too.
 const (

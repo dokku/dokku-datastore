@@ -27,6 +27,18 @@ type UpgradeCommand struct {
 	imageVersion string
 	// restartApps is whether to stop and start linked apps around the upgrade
 	restartApps bool
+	// configOptions are extra arguments passed to the container create command
+	configOptions string
+	// customEnv is the environment the service is started with
+	customEnv string
+	// initialNetwork is the network the container is attached to on create
+	initialNetwork string
+	// postCreateNetwork are the networks attached after the container is created
+	postCreateNetwork []string
+	// postStartNetwork are the networks attached after the container is started
+	postStartNetwork []string
+	// shmSize is the shared memory size for the container
+	shmSize string
 }
 
 // Name returns the name of the command
@@ -87,6 +99,12 @@ func (c *UpgradeCommand) FlagSet() *flag.FlagSet {
 	f.StringVarP(&c.image, "image", "i", "", "the image to upgrade the service to")
 	f.StringVarP(&c.imageVersion, "image-version", "I", "", "the image version to upgrade the service to")
 	f.BoolVarP(&c.restartApps, "restart-apps", "R", false, "whether to stop and start the linked apps around the upgrade")
+	f.StringVarP(&c.configOptions, "config-options", "c", "", "extra arguments to pass to the container create command")
+	f.StringVarP(&c.customEnv, "custom-env", "C", "", "semi-colon delimited environment variables to start the service with")
+	f.StringVarP(&c.initialNetwork, "initial-network", "N", "", "the initial network to attach the service to")
+	f.StringSliceVarP(&c.postCreateNetwork, "post-create-network", "P", []string{}, "a comma-separated list of networks to attach the service container to after service creation")
+	f.StringSliceVarP(&c.postStartNetwork, "post-start-network", "S", []string{}, "a comma-separated list of networks to attach the service container to after service start")
+	f.StringVarP(&c.shmSize, "shm-size", "s", "", "override shared memory size for the service docker container")
 	return f
 }
 
@@ -196,6 +214,15 @@ func (c *UpgradeCommand) Run(args []string) int {
 		Logger:       logger,
 		RestartApps:  c.restartApps,
 		ServiceName:  serviceName,
+
+		// what the service already has is kept unless a flag asked otherwise,
+		// so an upgrade that only names an image does not blank the rest
+		ConfigOptions:      changedString(flags, "config-options", c.configOptions),
+		CustomEnv:          changedString(flags, "custom-env", c.customEnv),
+		InitialNetwork:     changedString(flags, "initial-network", c.initialNetwork),
+		PostCreateNetworks: changedSlice(flags, "post-create-network", c.postCreateNetwork),
+		PostStartNetworks:  changedSlice(flags, "post-start-network", c.postStartNetwork),
+		ShmSize:            changedString(flags, "shm-size", c.shmSize),
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1

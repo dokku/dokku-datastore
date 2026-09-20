@@ -102,17 +102,17 @@ func (c *CreateCommand) ParsedArguments(args []string) (map[string]command.Argum
 func (c *CreateCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
-	f.StringVar(&c.configOptions, "config-options", "", "extra arguments to pass to the container create command")
-	f.StringVar(&c.customEnv, "custom-env", "", "semi-colon delimited environment variables to start the service with")
-	f.StringVar(&c.image, "image", "", "the image name to start the service with")
-	f.StringVar(&c.imageVersion, "image-version", "", "the image version to start the service with")
-	f.IntVar(&c.memory, "memory", 0, "container memory limit in megabytes (default: unlimited)")
-	f.StringVar(&c.initialNetwork, "initial-network", "", "the initial network to attach the service to")
-	f.StringVar(&c.password, "password", "", "override the user-level service password")
-	f.StringSliceVar(&c.postCreateNetwork, "post-create-network", []string{}, "a comma-separated list of networks to attach the service container to after service creation")
-	f.StringVar(&c.rootPassword, "root-password", "", "override the root-level service password")
-	f.StringSliceVar(&c.postStartNetwork, "post-start-network", []string{}, "a comma-separated list of networks to attach the service container to after service start")
-	f.StringVar(&c.shmSize, "shm-size", "", "override shared memory size for the service docker container")
+	f.StringVarP(&c.configOptions, "config-options", "c", "", "extra arguments to pass to the container create command")
+	f.StringVarP(&c.customEnv, "custom-env", "C", "", "semi-colon delimited environment variables to start the service with")
+	f.StringVarP(&c.image, "image", "i", "", "the image name to start the service with")
+	f.StringVarP(&c.imageVersion, "image-version", "I", "", "the image version to start the service with")
+	f.IntVarP(&c.memory, "memory", "m", 0, "container memory limit in megabytes (default: unlimited)")
+	f.StringVarP(&c.initialNetwork, "initial-network", "N", "", "the initial network to attach the service to")
+	f.StringVarP(&c.password, "password", "p", "", "override the user-level service password")
+	f.StringSliceVarP(&c.postCreateNetwork, "post-create-network", "P", []string{}, "a comma-separated list of networks to attach the service container to after service creation")
+	f.StringVarP(&c.rootPassword, "root-password", "r", "", "override the root-level service password")
+	f.StringSliceVarP(&c.postStartNetwork, "post-start-network", "S", []string{}, "a comma-separated list of networks to attach the service container to after service start")
+	f.StringVarP(&c.shmSize, "shm-size", "s", "", "override shared memory size for the service docker container")
 	return f
 }
 

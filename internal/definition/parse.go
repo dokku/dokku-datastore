@@ -276,6 +276,12 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		if command.Description == "" {
 			return fail("custom command %q needs a description", name)
 		}
+
+		// a section nothing matches would leave the command documented nowhere,
+		// with the readme rendering as though it had never been declared
+		if command.Group != "" && !Groups[command.Group] {
+			return fail("custom command %q names the unknown section %q", name, command.Group)
+		}
 	}
 
 	for name, command := range allCommands(definition) {

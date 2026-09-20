@@ -14,18 +14,6 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
-// The readme usage sections a command can be documented under. A command in
-// GroupNone is listed in the readme command list but has no usage section of
-// its own.
-const (
-	GroupNone              = ""
-	GroupBasicUsage        = "Basic Usage"
-	GroupServiceLifecycle  = "Service Lifecycle"
-	GroupServiceAutomation = "Service Automation"
-	GroupDataManagement    = "Data Management"
-	GroupBackups           = "Backups"
-)
-
 // PluginCommand is implemented by the commands a dokku datastore plugin exposes
 // as subcommands. Both the plugin help and the generated plugin readme render
 // from it, which is what keeps the two in agreement.

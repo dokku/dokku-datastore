@@ -12,13 +12,29 @@ import (
 	"github.com/dokku/dokku/plugins/common"
 )
 
-// UpgradeServiceInput is the input for the UpgradeService function
+// UpgradeServiceInput is the input for the UpgradeService function.
+//
+// The settings a service already has are pointers rather than plain values,
+// because an upgrade has to tell "leave this as it is" apart from "set this to
+// nothing", and an empty string cannot say both.
 type UpgradeServiceInput struct {
 	// ConfigOptions are extra arguments passed to the container create command
-	ConfigOptions string
+	ConfigOptions *string
 
 	// CustomEnv is the environment the service is started with
-	CustomEnv string
+	CustomEnv *string
+
+	// InitialNetwork is the network the container is attached to on create
+	InitialNetwork *string
+
+	// PostCreateNetworks are attached after the container is created
+	PostCreateNetworks *[]string
+
+	// PostStartNetworks are attached after the container is started
+	PostStartNetworks *[]string
+
+	// ShmSize is the shared memory size for the container
+	ShmSize *string
 
 	// Datastore is the datastore the service belongs to
 	Datastore *service.Datastore
@@ -37,6 +53,17 @@ type UpgradeServiceInput struct {
 
 	// Logger reports progress
 	Logger Ui
+}
+
+// changesSettings reports whether the upgrade was asked to change anything about
+// the service besides the image it runs.
+func (i UpgradeServiceInput) changesSettings() bool {
+	return i.ConfigOptions != nil ||
+		i.CustomEnv != nil ||
+		i.InitialNetwork != nil ||
+		i.PostCreateNetworks != nil ||
+		i.PostStartNetworks != nil ||
+		i.ShmSize != nil
 }
 
 // UpgradeService recreates a service's container on a different image
@@ -71,7 +98,9 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})
-	if currentImage == taggedImage {
+	// an upgrade to the image a service already runs is nothing to do - unless it
+	// also asked to change a setting, which is a recreate whatever the image says
+	if currentImage == taggedImage && !input.changesSettings() {
 		input.Logger.Info(fmt.Sprintf("Service %s already running %s", input.ServiceName, taggedImage)) //nolint:errcheck
 		return nil
 	}
@@ -116,6 +145,13 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		return err
 	}
 
+	// the container about to be made is built from the service's own files and
+	// properties, so anything the upgrade was asked to change has to be written
+	// before it rather than passed to it
+	if err := applyUpgradeSettings(input); err != nil {
+		return err
+	}
+
 	if err := input.Datastore.CreateServiceContainer(ctx, service.CreateServiceContainerInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
@@ -139,6 +175,62 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	}
 
 	input.Logger.Header2("Done") //nolint:errcheck
+	return nil
+}
+
+// applyUpgradeSettings writes the settings an upgrade was asked to change, and
+// only those: a service keeps whatever it already had for the rest.
+//
+// CommitServiceConfig is not used here on purpose. It writes every field it is
+// given, so preserving what was not asked about would mean reading each value
+// back and handing it over again - and the environment would have to survive a
+// round trip through two different separators to do it.
+func applyUpgradeSettings(input UpgradeServiceInput) error {
+	serviceFiles := service.Files(input.Datastore, input.ServiceName)
+
+	files := map[string]*string{
+		serviceFiles.ConfigOptions: input.ConfigOptions,
+		serviceFiles.ShmSize:       input.ShmSize,
+	}
+	for filename, value := range files {
+		if value == nil {
+			continue
+		}
+
+		if err := writeServiceFile(filename, *value); err != nil {
+			return err
+		}
+	}
+
+	// stored one per line, and given semi-colon delimited, the same way create
+	// takes it
+	if input.CustomEnv != nil {
+		lines := strings.Join(strings.Split(*input.CustomEnv, ";"), "\n")
+		if err := writeServiceFile(serviceFiles.Env, lines); err != nil {
+			return err
+		}
+	}
+
+	plugin := input.Datastore.Properties().CommandPrefix
+	properties := map[string]*string{}
+	if input.InitialNetwork != nil {
+		properties["initial-network"] = input.InitialNetwork
+	}
+	if input.PostCreateNetworks != nil {
+		joined := strings.Join(*input.PostCreateNetworks, ",")
+		properties["post-create-network"] = &joined
+	}
+	if input.PostStartNetworks != nil {
+		joined := strings.Join(*input.PostStartNetworks, ",")
+		properties["post-start-network"] = &joined
+	}
+
+	for key, value := range properties {
+		if err := common.PropertyWrite(plugin, input.ServiceName, key, *value); err != nil {
+			return fmt.Errorf("failed to write the %s property: %w", key, err)
+		}
+	}
+
 	return nil
 }
 

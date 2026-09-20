@@ -1,6 +1,6 @@
 package commands
 
-import "github.com/dokku/dokku-datastore/internal"
+import "github.com/dokku/dokku-datastore/internal/definition"
 
 // The metadata below was migrated out of the declare desc and #A / #E / #F comment
 // annotations that the bash datastore plugins carried in each subcommand. Both the
@@ -27,7 +27,7 @@ dokku {{.CommandPrefix}}:app-links playground`
 
 // Group is the readme usage section the command is documented under
 func (c *AppLinksCommand) Group() string {
-	return internal.GroupServiceAutomation
+	return definition.GroupServiceAutomation
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -51,7 +51,7 @@ dokku {{.CommandPrefix}}:import lollipop < backup-folder/export`
 
 // Group is the readme usage section the command is documented under
 func (c *BackupCommand) Group() string {
-	return internal.GroupBackups
+	return definition.GroupBackups
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -79,7 +79,7 @@ dokku {{.CommandPrefix}}:backup-auth lollipop MINIO_ACCESS_KEY_ID MINIO_SECRET_A
 
 // Group is the readme usage section the command is documented under
 func (c *BackupAuthCommand) Group() string {
-	return internal.GroupBackups
+	return definition.GroupBackups
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -101,7 +101,7 @@ dokku {{.CommandPrefix}}:backup-deauth lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *BackupDeauthCommand) Group() string {
-	return internal.GroupBackups
+	return definition.GroupBackups
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -126,7 +126,7 @@ dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket --use
 
 // Group is the readme usage section the command is documented under
 func (c *BackupScheduleCommand) Group() string {
-	return internal.GroupBackups
+	return definition.GroupBackups
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -148,7 +148,7 @@ dokku {{.CommandPrefix}}:backup-schedule-cat lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *BackupScheduleCatCommand) Group() string {
-	return internal.GroupBackups
+	return definition.GroupBackups
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -171,7 +171,7 @@ public key encryption will take precendence over the passphrase encryption if bo
 
 // Group is the readme usage section the command is documented under
 func (c *BackupSetEncryptionCommand) Group() string {
-	return internal.GroupBackups
+	return definition.GroupBackups
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -195,7 +195,7 @@ dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com`
 
 // Group is the readme usage section the command is documented under
 func (c *BackupSetPublicKeyEncryptionCommand) Group() string {
-	return internal.GroupBackups
+	return definition.GroupBackups
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -217,7 +217,7 @@ dokku {{.CommandPrefix}}:backup-unschedule lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *BackupUnscheduleCommand) Group() string {
-	return internal.GroupBackups
+	return definition.GroupBackups
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -239,7 +239,7 @@ dokku {{.CommandPrefix}}:backup-unset-encryption lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *BackupUnsetEncryptionCommand) Group() string {
-	return internal.GroupBackups
+	return definition.GroupBackups
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -261,7 +261,7 @@ dokku {{.CommandPrefix}}:backup-unset-public-key-encryption lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *BackupUnsetPublicKeyEncryptionCommand) Group() string {
-	return internal.GroupBackups
+	return definition.GroupBackups
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -283,7 +283,7 @@ dokku {{.CommandPrefix}}:clone lollipop lollipop-2`
 
 // Group is the readme usage section the command is documented under
 func (c *CloneCommand) Group() string {
-	return internal.GroupServiceAutomation
+	return definition.GroupServiceAutomation
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -306,7 +306,7 @@ dokku {{.CommandPrefix}}:connect lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *ConnectCommand) Group() string {
-	return internal.GroupServiceLifecycle
+	return definition.GroupServiceLifecycle
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -337,7 +337,7 @@ dokku {{.CommandPrefix}}:create lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *CreateCommand) Group() string {
-	return internal.GroupBasicUsage
+	return definition.GroupBasicUsage
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -359,7 +359,7 @@ dokku {{.CommandPrefix}}:destroy lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *DestroyCommand) Group() string {
-	return internal.GroupNone
+	return definition.GroupBasicUsage
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -386,7 +386,7 @@ dokku {{.CommandPrefix}}:enter lollipop touch /tmp/test`
 
 // Group is the readme usage section the command is documented under
 func (c *EnterCommand) Group() string {
-	return internal.GroupServiceLifecycle
+	return definition.GroupServiceLifecycle
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -408,7 +408,7 @@ dokku {{.CommandPrefix}}:exists lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *ExistsCommand) Group() string {
-	return internal.GroupServiceAutomation
+	return definition.GroupServiceAutomation
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -432,7 +432,7 @@ dokku {{.CommandPrefix}}:export lollipop > data.dump`
 
 // Group is the readme usage section the command is documented under
 func (c *ExportCommand) Group() string {
-	return internal.GroupDataManagement
+	return definition.GroupDataManagement
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -456,7 +456,7 @@ dokku {{.CommandPrefix}}:expose lollipop 127.0.0.1:{{.PortList}}`
 
 // Group is the readme usage section the command is documented under
 func (c *ExposeCommand) Group() string {
-	return internal.GroupServiceLifecycle
+	return definition.GroupServiceLifecycle
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -478,7 +478,7 @@ dokku {{.CommandPrefix}}:import lollipop < data.dump`
 
 // Group is the readme usage section the command is documented under
 func (c *ImportCommand) Group() string {
-	return internal.GroupDataManagement
+	return definition.GroupDataManagement
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -514,7 +514,7 @@ dokku {{.CommandPrefix}}:info lollipop --version`
 
 // Group is the readme usage section the command is documented under
 func (c *InfoCommand) Group() string {
-	return internal.GroupBasicUsage
+	return definition.GroupBasicUsage
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -566,7 +566,7 @@ this will cause {{.DefaultAlias}}_URL to be set as:
 
 // Group is the readme usage section the command is documented under
 func (c *LinkCommand) Group() string {
-	return internal.GroupBasicUsage
+	return definition.GroupBasicUsage
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -588,7 +588,7 @@ dokku {{.CommandPrefix}}:linked lollipop playground`
 
 // Group is the readme usage section the command is documented under
 func (c *LinkedCommand) Group() string {
-	return internal.GroupServiceAutomation
+	return definition.GroupServiceAutomation
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -610,7 +610,7 @@ dokku {{.CommandPrefix}}:links lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *LinksCommand) Group() string {
-	return internal.GroupServiceAutomation
+	return definition.GroupServiceAutomation
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -632,7 +632,7 @@ dokku {{.CommandPrefix}}:list`
 
 // Group is the readme usage section the command is documented under
 func (c *ListCommand) Group() string {
-	return internal.GroupBasicUsage
+	return definition.GroupBasicUsage
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -643,7 +643,7 @@ func (c *LogsCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *LogsCommand) Usage() string {
-	return `<service> [--tail] [--num <num>]`
+	return `<service> [-t|--tail [<tail-num>]]`
 }
 
 // Documentation returns the long form documentation for the command
@@ -653,12 +653,12 @@ dokku {{.CommandPrefix}}:logs lollipop
 by default, logs will not be tailed, but you can do this with the --tail flag:
 dokku {{.CommandPrefix}}:logs lollipop --tail
 by default the last 100 lines are shown, but a different count can be specified
-dokku {{.CommandPrefix}}:logs lollipop --tail --num 5`
+dokku {{.CommandPrefix}}:logs lollipop --tail=5`
 }
 
 // Group is the readme usage section the command is documented under
 func (c *LogsCommand) Group() string {
-	return internal.GroupBasicUsage
+	return definition.GroupBasicUsage
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -680,7 +680,7 @@ dokku {{.CommandPrefix}}:pause lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *PauseCommand) Group() string {
-	return internal.GroupServiceLifecycle
+	return definition.GroupServiceLifecycle
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -715,7 +715,7 @@ you could end up with the following for example:
 
 // Group is the readme usage section the command is documented under
 func (c *PromoteCommand) Group() string {
-	return internal.GroupServiceLifecycle
+	return definition.GroupServiceLifecycle
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -737,7 +737,7 @@ dokku {{.CommandPrefix}}:restart lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *RestartCommand) Group() string {
-	return internal.GroupServiceLifecycle
+	return definition.GroupServiceLifecycle
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -765,7 +765,7 @@ dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com`
 
 // Group is the readme usage section the command is documented under
 func (c *SetCommand) Group() string {
-	return internal.GroupBasicUsage
+	return definition.GroupBasicUsage
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -787,7 +787,7 @@ dokku {{.CommandPrefix}}:start lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *StartCommand) Group() string {
-	return internal.GroupServiceLifecycle
+	return definition.GroupServiceLifecycle
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -809,7 +809,7 @@ dokku {{.CommandPrefix}}:stop lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *StopCommand) Group() string {
-	return internal.GroupServiceLifecycle
+	return definition.GroupServiceLifecycle
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -831,7 +831,7 @@ dokku {{.CommandPrefix}}:unexpose lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *UnexposeCommand) Group() string {
-	return internal.GroupServiceLifecycle
+	return definition.GroupServiceLifecycle
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -854,7 +854,7 @@ dokku {{.CommandPrefix}}:unlink lollipop playground`
 
 // Group is the readme usage section the command is documented under
 func (c *UnlinkCommand) Group() string {
-	return internal.GroupBasicUsage
+	return definition.GroupBasicUsage
 }
 
 // Description returns the one line description of the command, in the idiom of the
@@ -876,5 +876,5 @@ dokku {{.CommandPrefix}}:upgrade lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *UpgradeCommand) Group() string {
-	return internal.GroupServiceLifecycle
+	return definition.GroupServiceLifecycle
 }

@@ -7,21 +7,27 @@ import (
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal"
+	"maps"
+	"slices"
+
+	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
 	flag "github.com/spf13/pflag"
 )
 
-// knownGroups are the readme usage sections a command may be documented under
-var knownGroups = map[string]bool{
-	internal.GroupNone:              true,
-	internal.GroupBasicUsage:        true,
-	internal.GroupServiceLifecycle:  true,
-	internal.GroupServiceAutomation: true,
-	internal.GroupDataManagement:    true,
-	internal.GroupBackups:           true,
-}
+// knownGroups are the readme usage sections a command may be documented under.
+// definition.Groups is the set a definition may name; a built-in may also be in
+// GroupNone, which is documented nowhere.
+var knownGroups = func() map[string]bool {
+	groups := map[string]bool{definition.GroupNone: true}
+	for group := range definition.Groups {
+		groups[group] = true
+	}
+
+	return groups
+}()
 
 // flagPattern matches a long flag named in an argument sketch
 var flagPattern = regexp.MustCompile(`--[a-z][a-z-]*`)
@@ -181,5 +187,52 @@ func TestTriggerHelpHonoursTheDokkuExitCode(t *testing.T) {
 
 	if actual := Run([]string{"trigger-help", "redis", "nonsense"}); actual != 42 {
 		t.Errorf("expected exit code 42, got %d", actual)
+	}
+}
+
+// Every command a readme section documents has to be named in that section's
+// order, or it renders at the end of the section and nothing says so.
+//
+// GroupNone is exempt because it is not a section, and the custom command
+// section because nothing built in belongs to it.
+func TestEveryCommandIsPlacedInItsSection(t *testing.T) {
+	for _, c := range registeredPluginCommands(t) {
+		group := c.Group()
+		if group == definition.GroupNone || group == definition.GroupCustomCommands {
+			continue
+		}
+
+		t.Run(c.Name(), func(t *testing.T) {
+			order, ok := internal.SectionCommands(group)
+			if !ok {
+				t.Fatalf("is in %q, which the readme has no section for", group)
+			}
+
+			if !slices.Contains(order, c.Name()) {
+				t.Errorf("is in %q but not in its order, so it documents itself at the end: add it to readmeSections", group)
+			}
+		})
+	}
+}
+
+// And the other way: an order that names a command nothing implements is a
+// section carrying a name that will never render.
+func TestEverySectionOrderNamesARealCommand(t *testing.T) {
+	implemented := map[string]bool{}
+	for _, c := range registeredPluginCommands(t) {
+		implemented[c.Name()] = true
+	}
+
+	for _, group := range append(slices.Collect(maps.Keys(definition.Groups)), definition.GroupCustomCommands) {
+		order, ok := internal.SectionCommands(group)
+		if !ok {
+			continue
+		}
+
+		for _, name := range order {
+			if !implemented[name] {
+				t.Errorf("%s names %q, which no command implements", group, name)
+			}
+		}
 	}
 }
