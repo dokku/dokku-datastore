@@ -55,15 +55,18 @@ func (c CustomCommand) Documentation() string {
 	return c.Declared.Documentation
 }
 
-// Group is the readme usage section the command is documented under. A
-// definition that does not choose one gets the section the tool's own
-// service commands are documented in, since that is what it is.
+// Group is the readme usage section the command is documented under.
+//
+// A definition may name one, and is then documented there, after the tool's own
+// commands in that section. One that names none is collected into the custom
+// command section at the end of the readme, rather than being filed among
+// commands every datastore has.
 func (c CustomCommand) Group() string {
 	if c.Declared.Group != "" {
 		return c.Declared.Group
 	}
 
-	return GroupServiceLifecycle
+	return definition.GroupCustomCommands
 }
 
 // Arguments are the positional arguments the command accepts.

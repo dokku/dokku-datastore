@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dokku/dokku-datastore/internal/definition"
+
 	"github.com/josegonzalez/cli-skeleton/command"
 	flag "github.com/spf13/pflag"
 )
@@ -18,8 +20,8 @@ func TestSplitArguments(t *testing.T) {
 		{name: "one argument", usage: "<service>", expected: []string{"<service>"}},
 		{
 			name:     "a flag that takes a value counts once",
-			usage:    "<service> [--tail] [--num <num>]",
-			expected: []string{"<service>", "[--tail]", "[--num <num>]"},
+			usage:    "<service> [-t|--tail [<tail-num>]]",
+			expected: []string{"<service>", "[-t|--tail [<tail-num>]]"},
 		},
 		{
 			name:     "a list argument",
@@ -56,8 +58,8 @@ func TestElideArguments(t *testing.T) {
 		},
 		{
 			name:     "a flag with a value is one argument",
-			usage:    "<service> [--tail] [--num <num>]",
-			expected: "<service> [--tail] [--num <num>]",
+			usage:    "<service> [-t|--tail [<tail-num>]]",
+			expected: "<service> [-t|--tail [<tail-num>]]",
 		},
 	}
 
@@ -90,14 +92,14 @@ func helpTestCommands() []PluginCommand {
 			name:        "list",
 			description: "list all {{.Title}} services",
 			usage:       "",
-			group:       GroupBasicUsage,
+			group:       definition.GroupBasicUsage,
 			arguments:   []command.Argument{{Name: "datastore-type", Description: "the type of datastore to list"}},
 		},
 		&fakeCommand{
 			name:        "backup",
 			description: "create a backup of the {{.Title}} service to an existing s3 bucket",
 			usage:       "<service> <bucket-name> [-u|--use-iam]",
-			group:       GroupBackups,
+			group:       definition.GroupBackups,
 			arguments: []command.Argument{
 				{Name: "datastore-type", Description: "the type of datastore to back up"},
 				{Name: "service-name", Description: "the name of the service to back up"},

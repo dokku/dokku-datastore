@@ -388,3 +388,57 @@ func TestParseAllowsAHostTriggerFromACheckout(t *testing.T) {
 		t.Errorf("unexpected error: %s", err)
 	}
 }
+
+// A custom command may name the readme section it is documented under. A section
+// nothing matches would leave it documented nowhere, with the readme rendering as
+// though it had never been declared, so it is refused at parse.
+func TestParseChecksACustomCommandsSection(t *testing.T) {
+	withGroup := func(group string) string {
+		return validCompose + "\n  custom_commands:\n    thing-expose:\n      description: expose the thing\n" +
+			"      group: " + group + "\n      exec: [thing-expose]\n"
+	}
+
+	for group := range Groups {
+		t.Run(group, func(t *testing.T) {
+			parsed, err := parseCompose(t, withGroup(group))
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			if actual := parsed.Dokku.CustomCommands["thing-expose"].Group; actual != group {
+				t.Errorf("expected %q, got %q", group, actual)
+			}
+		})
+	}
+
+	// the heading rather than the identifier is the mistake worth catching, since
+	// it is what somebody reading the readme would copy
+	// a trailing space is not among them: yaml strips it from a plain scalar
+	// before the validator ever sees it
+	for _, group := range []string{"Backups", "Data Management", "nonsense"} {
+		t.Run("refuses "+group, func(t *testing.T) {
+			_, err := parseCompose(t, withGroup(group))
+			if err == nil {
+				t.Fatal("expected an unknown section to be refused")
+			}
+
+			if !strings.Contains(err.Error(), "unknown section") {
+				t.Errorf("expected the error to say why, got %q", err)
+			}
+		})
+	}
+}
+
+// A command that names no section is not refused: it is collected into the custom
+// command section at the end of the readme.
+func TestParseAllowsACustomCommandWithNoSection(t *testing.T) {
+	compose := validCompose + "\n  custom_commands:\n    thing-expose:\n      description: expose the thing\n      exec: [thing-expose]\n"
+	parsed, err := parseCompose(t, compose)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if group := parsed.Dokku.CustomCommands["thing-expose"].Group; group != "" {
+		t.Errorf("expected no section, got %q", group)
+	}
+}

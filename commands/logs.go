@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
@@ -15,6 +16,10 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
+// defaultLogLines is how many lines logs shows, and what --tail falls back to
+// when it is given without a number.
+const defaultLogLines = 100
+
 // LogsCommand is the command for getting the logs of a service
 type LogsCommand struct {
 	// Meta is the command meta
@@ -22,10 +27,10 @@ type LogsCommand struct {
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
 
-	// tail is whether to tail the logs
-	tail bool
-	// num is the number of lines to display
-	num int
+	// tail is the number of lines to display, and its presence is what asks for
+	// the logs to be followed. One flag rather than two, because that is the one
+	// the plugins have always documented: -t|--tail [<tail-num>]
+	tail int
 }
 
 // Name returns the name of the command
@@ -83,8 +88,13 @@ func (c *LogsCommand) ParsedArguments(args []string) (map[string]command.Argumen
 func (c *LogsCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
-	f.BoolVar(&c.tail, "tail", false, "tail the logs")
-	f.IntVar(&c.num, "num", 100, "the number of lines to display")
+	f.IntVarP(&c.tail, "tail", "t", defaultLogLines, "tail the logs, optionally showing this many lines")
+
+	// makes the value optional: --tail follows with the default number of lines
+	// and --tail=50 says how many. Only the = form takes a value, since a space
+	// separated one would be read as the service name
+	f.Lookup("tail").NoOptDefVal = strconv.Itoa(defaultLogLines)
+
 	return f
 }
 
@@ -201,8 +211,8 @@ func (c *LogsCommand) Run(args []string) int {
 	err = internal.Logs(ctx, internal.LogsInput{
 		Datastore:   datastore,
 		ServiceName: serviceName,
-		Num:         c.num,
-		Tail:        c.tail,
+		Num:         c.tail,
+		Tail:        flags.Changed("tail"),
 	})
 	if err != nil {
 		logger.Error(internal.ErrorInput{

@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/dokku/dokku-datastore/internal/definition"
 )
 
 // DokkuVersion is the dokku version the generated readme tells people to install
@@ -17,25 +19,47 @@ const DokkuVersion = "0.35.x+"
 
 // readmeSections are the readme usage sections, in the order they are written
 // out, along with the prose that introduces each one
+// readmeSections are the readme's usage sections, in the order they are written,
+// each with the order of the commands inside it.
+//
+// Commands is the order, not the membership: which section a command belongs to
+// is the command's own answer, from Group(). A command in a section but not named
+// here is documented after the ones that are, alphabetically, so adding a command
+// is never a crash and never a silent reordering of everything around it. That is
+// also what puts a custom command last in whichever section it declares, without
+// anything here having to know about custom commands at all.
 var readmeSections = []struct {
-	Group string
-	Intro []string
+	Group    string
+	Title    string
+	Intro    []string
+	Commands []string
 }{
-	{Group: GroupBasicUsage},
 	{
-		Group: GroupServiceLifecycle,
-		Intro: []string{"The lifecycle of each service can be managed through the following commands:"},
+		Group:    definition.GroupBasicUsage,
+		Title:    "Basic Usage",
+		Commands: []string{"create", "destroy", "info", "list", "logs", "link", "unlink", "set"},
 	},
 	{
-		Group: GroupServiceAutomation,
-		Intro: []string{"Service scripting can be executed using the following commands:"},
+		Group:    definition.GroupServiceLifecycle,
+		Title:    "Service Lifecycle",
+		Intro:    []string{"The lifecycle of each service can be managed through the following commands:"},
+		Commands: []string{"connect", "enter", "expose", "unexpose", "promote", "start", "stop", "pause", "restart", "upgrade"},
 	},
 	{
-		Group: GroupDataManagement,
-		Intro: []string{"The underlying service data can be imported and exported with the following commands:"},
+		Group:    definition.GroupServiceAutomation,
+		Title:    "Service Automation",
+		Intro:    []string{"Service scripting can be executed using the following commands:"},
+		Commands: []string{"app-links", "clone", "exists", "linked", "links"},
 	},
 	{
-		Group: GroupBackups,
+		Group:    definition.GroupDataManagement,
+		Title:    "Data Management",
+		Intro:    []string{"The underlying service data can be imported and exported with the following commands:"},
+		Commands: []string{"import", "export"},
+	},
+	{
+		Group: definition.GroupBackups,
+		Title: "Backups",
 		Intro: []string{
 			"Datastore backups are supported via AWS S3 and S3 compatible services like [minio](https://github.com/minio/minio).",
 			"You may skip the `backup-auth` step if your dokku install is running within EC2 and has access to the bucket via an IAM profile. In that case, use the `--use-iam` option with the `backup` command.",
@@ -43,7 +67,36 @@ var readmeSections = []struct {
 			"The underlying core backup script is present [here](https://github.com/dokku/docker-s3backup/blob/main/backup.sh).",
 			"Backups can be performed using the backup commands:",
 		},
+		Commands: []string{
+			"backup-auth", "backup-deauth", "backup",
+			"backup-set-encryption", "backup-set-public-key-encryption",
+			"backup-unset-encryption", "backup-unset-public-key-encryption",
+			"backup-schedule", "backup-schedule-cat", "backup-unschedule",
+		},
 	},
+	{
+		// last, and with no order of its own: a datastore's own commands are
+		// listed alphabetically among themselves
+		Group: definition.GroupCustomCommands,
+		Title: "Custom Commands",
+		Intro: []string{"This datastore adds the following commands of its own:"},
+	},
+}
+
+// SectionCommands is the order a readme usage section documents its commands in,
+// and whether the readme has such a section at all.
+//
+// Exported for the test that holds every command to being named here: a command
+// missing from its section's list still renders, at the end, so nothing else
+// would say it had been forgotten.
+func SectionCommands(group string) ([]string, bool) {
+	for _, section := range readmeSections {
+		if section.Group == group {
+			return section.Commands, true
+		}
+	}
+
+	return nil, false
 }
 
 // maxCommandColumn is how wide the command column in the readme command list
@@ -212,12 +265,12 @@ func readmeUsage(input ReadmeInput) ([]string, error) {
 	}
 
 	for _, section := range readmeSections {
-		commands := commandsInGroup(input.Commands, section.Group)
+		commands := commandsInGroup(input.Commands, section.Group, section.Commands)
 		if len(commands) == 0 {
 			continue
 		}
 
-		sections = append(sections, "### "+section.Group)
+		sections = append(sections, "### "+section.Title)
 		sections = append(sections, section.Intro...)
 
 		for _, c := range commands {
@@ -344,8 +397,19 @@ func sortedCommands(commands []PluginCommand) []PluginCommand {
 	return sorted
 }
 
-// commandsInGroup returns the commands a readme usage section documents
-func commandsInGroup(commands []PluginCommand, group string) []PluginCommand {
+// commandsInGroup returns the commands a readme usage section documents, in the
+// order the section declares.
+//
+// A command the section does not name sorts after every one it does, and
+// alphabetically among its peers. That is what keeps a newly added command from
+// silently reordering the section around it, and what places a custom command
+// after the built-ins of whichever section it declares.
+func commandsInGroup(commands []PluginCommand, group string, order []string) []PluginCommand {
+	position := map[string]int{}
+	for index, name := range order {
+		position[name] = index
+	}
+
 	matching := []PluginCommand{}
 	for _, c := range commands {
 		if c.Group() == group {
@@ -353,7 +417,24 @@ func commandsInGroup(commands []PluginCommand, group string) []PluginCommand {
 		}
 	}
 
-	return sortedCommands(matching)
+	placed := func(c PluginCommand) int {
+		if index, ok := position[c.Name()]; ok {
+			return index
+		}
+
+		return len(order)
+	}
+
+	sort.SliceStable(matching, func(i int, j int) bool {
+		left, right := placed(matching[i]), placed(matching[j])
+		if left != right {
+			return left < right
+		}
+
+		return matching[i].Name() < matching[j].Name()
+	})
+
+	return matching
 }
 
 // processSentence turns a paragraph of the terminal oriented documentation into

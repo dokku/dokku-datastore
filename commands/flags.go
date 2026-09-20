@@ -45,3 +45,24 @@ func (c *GlobalFlagCommand) AutocompleteGlobalFlags() complete.Flags {
 		"--trace":  complete.PredictNothing,
 	}
 }
+
+// changedString is a flag's value when it was given and nil when it was not.
+//
+// A command that changes only some of a service's settings needs to tell "leave
+// this alone" apart from "set this to nothing", and an empty string says both.
+func changedString(f *flag.FlagSet, name string, value string) *string {
+	if !f.Changed(name) {
+		return nil
+	}
+
+	return &value
+}
+
+// changedSlice is changedString for a list flag.
+func changedSlice(f *flag.FlagSet, name string, value []string) *[]string {
+	if !f.Changed(name) {
+		return nil
+	}
+
+	return &value
+}
