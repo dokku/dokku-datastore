@@ -284,16 +284,17 @@ type ServiceFolders struct {
 
 // Folders returns the folders for a service
 func Folders(s *Datastore, serviceName string) ServiceFolders {
-	serviceRoot := filepath.Join(DokkuLibRoot, "services", s.Properties().CommandPrefix, serviceName)
+	directory := s.Properties().DataDirectory
+	serviceRoot := filepath.Join(DokkuLibRoot, "services", directory, serviceName)
 	return ServiceFolders{
 		Root:             serviceRoot,
 		Backup:           filepath.Join(serviceRoot, "backup"),
 		BackupEncryption: filepath.Join(serviceRoot, "backup-encryption"),
 		Config:           filepath.Join(serviceRoot, "config"),
 		Data:             filepath.Join(serviceRoot, "data"),
-		HostRoot:         filepath.Join(DokkuLibHostRoot, "services", s.Properties().CommandPrefix, serviceName),
-		HostConfig:       filepath.Join(DokkuLibHostRoot, "services", s.Properties().CommandPrefix, serviceName, "config"),
-		HostData:         filepath.Join(DokkuLibHostRoot, "services", s.Properties().CommandPrefix, serviceName, "data"),
+		HostRoot:         filepath.Join(DokkuLibHostRoot, "services", directory, serviceName),
+		HostConfig:       filepath.Join(DokkuLibHostRoot, "services", directory, serviceName, "config"),
+		HostData:         filepath.Join(DokkuLibHostRoot, "services", directory, serviceName, "data"),
 	}
 }
 

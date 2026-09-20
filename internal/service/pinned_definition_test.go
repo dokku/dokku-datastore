@@ -186,3 +186,57 @@ func readServiceFile(t *testing.T, filename string) string {
 
 	return strings.TrimSpace(string(contents))
 }
+
+// A datastore's services live under its plugin name, unless the definition says
+// otherwise. Graphite's have always been under the name of the image it runs, and
+// an install that already has services there has to keep finding them: the binary
+// looking somewhere else would make every one of them invisible.
+func TestServicesLiveWhereTheDefinitionSays(t *testing.T) {
+	tests := []struct {
+		datastore string
+		expected  string
+	}{
+		{datastore: "graphite", expected: "grafana-graphite-statsd"},
+		{datastore: "redis", expected: "redis"},
+		{datastore: "postgres", expected: "postgres"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.datastore, func(t *testing.T) {
+			found, ok := Datastores[test.datastore]
+			if !ok {
+				t.Fatalf("expected a %s datastore", test.datastore)
+			}
+
+			root := Folders(found, "lollipop").Root
+			if actual := filepath.Base(filepath.Dir(root)); actual != test.expected {
+				t.Errorf("expected services under %s, got %s", test.expected, actual)
+			}
+
+			// the host side is the same directory as dockerd sees it, and a bind
+			// mount pointing at the wrong one would be a service with no data
+			host := Folders(found, "lollipop").HostRoot
+			if actual := filepath.Base(filepath.Dir(host)); actual != test.expected {
+				t.Errorf("expected host services under %s, got %s", test.expected, actual)
+			}
+		})
+	}
+}
+
+// Graphite is the only definition that declares one, and the other twenty one
+// have to keep resolving under their own plugin name: that default is what
+// seventeen plugins depend on.
+func TestOnlyGraphiteDeclaresADirectory(t *testing.T) {
+	for _, datastoreType := range []string{"redis", "postgres", "solr", "elasticsearch", "mongo"} {
+		found := Datastores[datastoreType]
+		for _, one := range found.Definitions() {
+			if one.Dokku.DataDirectory != "" {
+				t.Errorf("%s declares %q; only graphite should", one.Name, one.Dokku.DataDirectory)
+			}
+
+			if one.ServicesDirectory() != datastoreType {
+				t.Errorf("expected %s to resolve to %s, got %s", one.Name, datastoreType, one.ServicesDirectory())
+			}
+		}
+	}
+}
