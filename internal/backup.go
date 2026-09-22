@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/cron"
 	"github.com/dokku/dokku-datastore/internal/execx"
@@ -29,19 +31,13 @@ const (
 )
 
 // keyserverEnv is what the backup image reads to decide where to fetch a public
-// key from, and KeyserverProperty is the service property that sets it. It is a
-// property rather than a file beside the other settings because it is set the
-// way every other property is, through the set command.
+// key from. The property that sets it is service.KeyserverProperty, which is
+// named in SettableProperties - that is what makes it settable and what
+// generates the list of valid keys.
 //
 // The image defaults to keyserver.ubuntu.com when it is not told otherwise, so
 // it is passed only when a service has one.
-const (
-	keyserverEnv = "KEYSERVER"
-
-	// KeyserverProperty is named in SettableProperties, which is what makes it
-	// settable and what generates the list of valid keys
-	KeyserverProperty = "backup-keyserver"
-)
+const keyserverEnv = "KEYSERVER"
 
 // writeBackupFile writes one of the backup settings files for a service
 func writeBackupFile(folder string, name string, contents string) error {
@@ -175,6 +171,46 @@ func CronEntry(dokkuBin string, commandPrefix string, input ScheduleBackupInput)
 	return entry
 }
 
+// BackupSchedule is the scheduled backup a cron entry describes
+type BackupSchedule struct {
+	// Schedule is the cron schedule the backup runs on
+	Schedule string
+
+	// BucketName is the bucket the dump is shipped to
+	BucketName string
+
+	// UseIAM reports whether the backup runs against an instance role rather
+	// than against stored credentials
+	UseIAM bool
+}
+
+// ParseCronEntry reads back the schedule a cron entry was written from, and
+// reports whether the line was one CronEntry wrote.
+//
+// The fields are found by locating the backup command rather than by counting
+// from the start of the line, because the schedule is not a fixed width: a
+// service scheduled with @daily has one field where a service scheduled with
+// five stars has five.
+func ParseCronEntry(commandPrefix string, entry string) (BackupSchedule, bool) {
+	fields := strings.Fields(entry)
+	command := fmt.Sprintf("%s:backup", commandPrefix)
+
+	index := slices.Index(fields, command)
+	// the command is preceded by the schedule, the user cron runs it as, and
+	// the dokku binary, and followed by the service and the bucket
+	if index < 3 || index+2 >= len(fields) {
+		return BackupSchedule{}, false
+	}
+
+	schedule := BackupSchedule{
+		Schedule:   strings.Join(fields[:index-2], " "),
+		BucketName: fields[index+2],
+		UseIAM:     slices.Contains(fields[index+3:], "--use-iam"),
+	}
+
+	return schedule, true
+}
+
 // ScheduleBackupInput is the input for the ScheduleBackup function
 type ScheduleBackupInput struct {
 	BucketName  string
@@ -296,7 +332,7 @@ func Backup(ctx context.Context, input BackupInput) error {
 	arguments := BackupArgsInput{
 		BucketName: input.BucketName,
 		BackupName: fmt.Sprintf("%s-%s", commandPrefix, input.ServiceName),
-		Keyserver:  common.PropertyGet(commandPrefix, input.ServiceName, KeyserverProperty),
+		Keyserver:  service.Keyserver(input.Datastore, input.ServiceName),
 		Image:      hostenv.S3BackupImage,
 		Settings:   map[string]string{},
 	}
