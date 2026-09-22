@@ -36,12 +36,12 @@ func TestSettableProperties(t *testing.T) {
 // The property name is written in two places that have to agree: the list that
 // makes it settable, and the read in the backup path.
 func TestKeyserverPropertyIsSettable(t *testing.T) {
-	if !slices.Contains(SettableProperties, KeyserverProperty) {
-		t.Errorf("expected %s to be settable, got %v", KeyserverProperty, SettableProperties)
+	if !slices.Contains(SettableProperties, service.KeyserverProperty) {
+		t.Errorf("expected %s to be settable, got %v", service.KeyserverProperty, SettableProperties)
 	}
 
 	// the message listing valid keys is built from the slice, so it says so
-	if !strings.Contains(InvalidPropertyError().Error(), KeyserverProperty) {
+	if !strings.Contains(InvalidPropertyError().Error(), service.KeyserverProperty) {
 		t.Errorf("expected the error to list it, got %q", InvalidPropertyError())
 	}
 }

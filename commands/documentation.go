@@ -489,27 +489,26 @@ func (c *InfoCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *InfoCommand) Usage() string {
-	return `<service> [--info-flags...]`
+	return `[<service>] [--info-flags...]`
 }
 
 // Documentation returns the long form documentation for the command
 func (c *InfoCommand) Documentation() string {
 	return `get connection information as follows:
 dokku {{.CommandPrefix}}:info lollipop
-you can also retrieve a specific piece of service info via flags:
-dokku {{.CommandPrefix}}:info lollipop --config-dir
-dokku {{.CommandPrefix}}:info lollipop --data-dir
+alongside the connection information this reports the properties set on the service, the state it was created with, and its backup settings.
+a property that was never set, or that was unset, reports as empty.
+omit the service to report on every {{.CommandPrefix}} service:
+dokku {{.CommandPrefix}}:info
+the information can be read by machine, one json object per service:
+dokku {{.CommandPrefix}}:info lollipop --format json
+you can also retrieve a specific piece of service info via a flag, which prints it on its own:
 dokku {{.CommandPrefix}}:info lollipop --dsn
-dokku {{.CommandPrefix}}:info lollipop --exposed-ports
-dokku {{.CommandPrefix}}:info lollipop --id
-dokku {{.CommandPrefix}}:info lollipop --internal-ip
-dokku {{.CommandPrefix}}:info lollipop --initial-network
-dokku {{.CommandPrefix}}:info lollipop --links
-dokku {{.CommandPrefix}}:info lollipop --post-create-network
-dokku {{.CommandPrefix}}:info lollipop --post-start-network
-dokku {{.CommandPrefix}}:info lollipop --service-root
 dokku {{.CommandPrefix}}:info lollipop --status
-dokku {{.CommandPrefix}}:info lollipop --version`
+dokku {{.CommandPrefix}}:info lollipop --initial-network
+> NOTE: a flag cannot be combined with --format, and only one may be given
+the properties {{.CommandPrefix}}:set writes are reported under the names it takes, so a value read here can be written back:
+dokku {{.CommandPrefix}}:set lollipop initial-network my-network`
 }
 
 // Group is the readme usage section the command is documented under

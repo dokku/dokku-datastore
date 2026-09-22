@@ -63,6 +63,34 @@ echo "==> $DEFINITION: the service records the definition it was created with"
 pinned="$(cat "$DOKKU_LIB_ROOT/services/$DATA_DIR/$SERVICE/DEFINITION")"
 [[ "$pinned" == "$DEFINITION" ]] || fail "expected the service to be pinned to $DEFINITION, got '$pinned'"
 
+echo "==> $DEFINITION: info reports the state the service was created with"
+reported_definition="$("$BIN" info "$PLUGIN" "$SERVICE" --definition)"
+[[ "$reported_definition" == "$DEFINITION" ]] || fail "expected info to report the definition $DEFINITION, got '$reported_definition'"
+
+reported_version="$("$BIN" info "$PLUGIN" "$SERVICE" --image-version)"
+[[ "$reported_version" == "$IMAGE_VERSION" ]] || fail "expected info to report the image version $IMAGE_VERSION, got '$reported_version'"
+
+echo "==> $DEFINITION: a property set on the service is read back by info"
+# the keyserver is the property to set here: it needs no network to exist and
+# is only ever read when a backup runs, so setting it changes nothing else
+"$BIN" set "$PLUGIN" "$SERVICE" backup-keyserver keys.example.com
+keyserver="$("$BIN" info "$PLUGIN" "$SERVICE" --backup-keyserver)"
+[[ "$keyserver" == "keys.example.com" ]] || fail "expected the keyserver to be read back, got '$keyserver'"
+
+# the whole report has to carry it too, since that is what a machine reads.
+# captured rather than piped into grep, which would close the pipe early and
+# leave the report killed by SIGPIPE for pipefail to trip over
+report="$("$BIN" info "$PLUGIN" "$SERVICE" --format json)"
+[[ "$report" == *'"backup-keyserver":"keys.example.com"'* ]] || fail "expected the json report to carry the keyserver"
+
+"$BIN" set "$PLUGIN" "$SERVICE" backup-keyserver
+keyserver="$("$BIN" info "$PLUGIN" "$SERVICE" --backup-keyserver)"
+[[ -z "$keyserver" ]] || fail "expected an unset keyserver to read back empty, got '$keyserver'"
+
+echo "==> $DEFINITION: info reports every service when none is named"
+every_service="$("$BIN" info "$PLUGIN")"
+[[ "$every_service" == *"$SERVICE"* ]] || fail "expected $SERVICE to be reported when no service is named"
+
 echo "==> $DEFINITION: the rendered compose file is valid"
 compose="$DOKKU_LIB_ROOT/services/$DATA_DIR/$SERVICE/docker-compose.yml"
 [[ -f "$compose" ]] || fail "no compose file was written"

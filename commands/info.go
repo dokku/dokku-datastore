@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -23,32 +22,9 @@ type InfoCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
-	// configDir is the configuration directory for the service
-	configDir bool
-	// dataDir is the data directory for the service
-	dataDir bool
-	// dsn is the data source name for the service
-	dsn bool
-	// exposedPorts is the exposed ports for the service
-	exposedPorts bool
-	// id is the ID for the service
-	id bool
-	// internalIp is the internal IP for the service
-	internalIp bool
-	// initialNetwork is the initial network for the service
-	initialNetwork bool
-	// links is the links for the service
-	links bool
-	// postCreateNetwork is the post create network for the service
-	postCreateNetwork bool
-	// postStartNetwork is the post start network for the service
-	postStartNetwork bool
-	// serviceRoot is the service root for the service
-	serviceRoot bool
-	// status is the status for the service
-	status bool
-	// version is the version for the service
-	version bool
+	// infoFlags holds the flag that selects each key, built from
+	// internal.InfoKeys so that the two cannot name different things
+	infoFlags map[string]*bool
 }
 
 // Name returns the name of the command
@@ -71,6 +47,7 @@ func (c *InfoCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
 		"Gets information about a redis service named test": fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Gets information about every redis service":        fmt.Sprintf("%s %s redis", appName, c.Name()),
 	}
 }
 
@@ -85,8 +62,8 @@ func (c *InfoCommand) Arguments() []command.Argument {
 	})
 	args = append(args, command.Argument{
 		Name:        "service-name",
-		Description: "the name of the service to get information about",
-		Optional:    false,
+		Description: "the name of the service to get information about, or empty for every service",
+		Optional:    true,
 		Type:        command.ArgumentString,
 	})
 	return args
@@ -102,47 +79,55 @@ func (c *InfoCommand) ParsedArguments(args []string) (map[string]command.Argumen
 	return internal.ParseArguments(args, c.Arguments())
 }
 
-// FlagSet returns the flag set for the command
+// FlagSet returns the flag set for the command.
+//
+// The per-key flags are generated rather than declared, so that every key the
+// command answers has a flag selecting it. Declaring them by hand is how
+// config-options came to be reported without being selectable.
 func (c *InfoCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
-	f.BoolVar(&c.configDir, "config-dir", false, "show the service configuration directory")
-	f.BoolVar(&c.dataDir, "data-dir", false, "show the service data directory")
-	f.BoolVar(&c.dsn, "dsn", false, "show the service DSN")
-	f.BoolVar(&c.exposedPorts, "exposed-ports", false, "show service exposed ports")
-	f.BoolVar(&c.id, "id", false, "show the service container id")
-	f.BoolVar(&c.internalIp, "internal-ip", false, "show the service internal ip")
-	f.BoolVar(&c.initialNetwork, "initial-network", false, "show the initial network being connected to")
-	f.BoolVar(&c.links, "links", false, "show the service app links")
-	f.BoolVar(&c.postCreateNetwork, "post-create-network", false, "show the networks to attach to after service container creation")
-	f.BoolVar(&c.postStartNetwork, "post-start-network", false, "show the networks to attach to after service container start")
-	f.BoolVar(&c.serviceRoot, "service-root", false, "show the service root directory")
-	f.BoolVar(&c.status, "status", false, "show the service running status")
-	f.BoolVar(&c.version, "version", false, "show the service image version")
+	c.infoFlags = map[string]*bool{}
+	for _, key := range internal.InfoKeys {
+		c.infoFlags[key.Name] = f.Bool(key.Name, false, key.Description)
+	}
 	return f
 }
 
 // AutocompleteFlags returns the autocomplete flags for the command
 func (c *InfoCommand) AutocompleteFlags() complete.Flags {
+	keys := complete.Flags{}
+	for _, key := range internal.InfoKeys {
+		keys[key.Name] = complete.PredictNothing
+	}
+
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{
-			"config-dir":          complete.PredictNothing,
-			"data-dir":            complete.PredictNothing,
-			"dsn":                 complete.PredictNothing,
-			"exposed-ports":       complete.PredictNothing,
-			"id":                  complete.PredictNothing,
-			"internal-ip":         complete.PredictNothing,
-			"initial-network":     complete.PredictNothing,
-			"links":               complete.PredictNothing,
-			"post-create-network": complete.PredictNothing,
-			"post-start-network":  complete.PredictNothing,
-			"service-root":        complete.PredictNothing,
-			"status":              complete.PredictNothing,
-			"version":             complete.PredictNothing,
-		},
+		keys,
 	)
+}
+
+// selectedInfoFlag returns the single key flag the command was given, and an
+// error when it was given more than one. Printing one value on its own is the
+// only thing a flag can mean, so two of them have no answer.
+func (c *InfoCommand) selectedInfoFlag(datastoreType string) (string, error) {
+	selected := []string{}
+	for _, key := range internal.InfoKeys {
+		if value, ok := c.infoFlags[key.Name]; ok && *value {
+			selected = append(selected, fmt.Sprintf("--%s", key.Name))
+		}
+	}
+
+	if len(selected) > 1 {
+		return "", fmt.Errorf("%s:info command allows only a single flag", datastoreType)
+	}
+
+	if len(selected) == 0 {
+		return "", nil
+	}
+
+	return selected[0], nil
 }
 
 // Run runs the command
@@ -204,15 +189,43 @@ func (c *InfoCommand) Run(args []string) int {
 		return 1
 	}
 
-	serviceName := arguments["service-name"].StringValue()
-	if serviceName == "" {
-		logger.Error(internal.ErrorInput{
-			Message: command.CommandErrorText(c),
-			Error:   service.ErrMissingServiceName,
-		})
+	infoFlag, err := c.selectedInfoFlag(datastoreType)
+	if err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}
 
+	serviceName := arguments["service-name"].StringValue()
+	serviceNames := []string{serviceName}
+	if serviceName == "" {
+		// naming no service reports on every one of them, the way a core plugin
+		// report with no app reports every app
+		serviceNames, err = internal.ListServices(ctx, internal.ListServicesInput{
+			Datastore: datastore,
+			Trace:     c.trace,
+		})
+		if err != nil {
+			logger.Error(internal.ErrorInput{Error: err})
+			return 1
+		}
+
+		if len(serviceNames) == 0 {
+			logger.Warn(internal.WarnInput{Warning: fmt.Sprintf("There are no %s services", datastoreType)})
+			return 0
+		}
+	}
+
+	for _, name := range serviceNames {
+		if code := c.infoForService(ctx, logger, datastore, datastoreType, name, infoFlag); code != 0 {
+			return code
+		}
+	}
+
+	return 0
+}
+
+// infoForService reports on one service
+func (c *InfoCommand) infoForService(ctx context.Context, logger internal.Ui, datastore *service.Datastore, datastoreType string, serviceName string, infoFlag string) int {
 	if err := service.ValidateServiceName(serviceName); err != nil {
 		logger.Error(internal.ErrorInput{
 			Error: err,
@@ -235,85 +248,40 @@ func (c *InfoCommand) Run(args []string) int {
 		return 1
 	}
 
-	infoFlag := ""
-	if c.configDir {
-		infoFlag = "--config-dir"
-	}
-	if c.dataDir {
-		infoFlag = "--data-dir"
-	}
-	if c.dsn {
-		infoFlag = "--dsn"
-	}
-	if c.exposedPorts {
-		infoFlag = "--exposed-ports"
-	}
-	if c.id {
-		infoFlag = "--id"
-	}
-	if c.internalIp {
-		infoFlag = "--internal-ip"
-	}
-	if c.initialNetwork {
-		infoFlag = "--initial-network"
-	}
-	if c.links {
-		infoFlag = "--links"
-	}
-	if c.postCreateNetwork {
-		infoFlag = "--post-create-network"
-	}
-	if c.postStartNetwork {
-		infoFlag = "--post-start-network"
-	}
-	if c.serviceRoot {
-		infoFlag = "--service-root"
-	}
-	if c.status {
-		infoFlag = "--status"
-	}
-	if c.version {
-		infoFlag = "--version"
-	}
-
-	info := service.Info(ctx, service.InfoInput{
+	info := internal.Info(ctx, internal.InfoInput{
 		Datastore:   datastore,
 		ServiceName: serviceName,
 	})
-	if c.format == "json" {
-		if err := json.NewEncoder(os.Stdout).Encode(info); err != nil {
-			logger.Error(internal.ErrorInput{
-				Error: err,
-			})
 
-		}
-	} else {
-		flagKeys := []string{}
-
-		flags := map[string]string{}
-		for key, value := range info {
-			flagKey := fmt.Sprintf("--%s", key)
-			flagKeys = append(flagKeys, flagKey)
-			flags[flagKey] = value
-		}
-		trimPrefix := false
-		uppercaseFirstCharacter := true
-		err = common.ReportSingleApp(common.ReportSingleAppInput{
-			ReportType:              datastoreType,
-			AppName:                 serviceName,
-			InfoFlag:                infoFlag,
-			InfoFlags:               flags,
-			InfoFlagKeys:            flagKeys,
-			Format:                  c.ReportFormat(),
-			TrimPrefix:              trimPrefix,
-			UppercaseFirstCharacter: uppercaseFirstCharacter,
-		})
-		if err != nil {
-			logger.Error(internal.ErrorInput{
-				Error: err,
-			})
-			return 1
-		}
+	flags := map[string]string{}
+	for key, value := range info {
+		flags[fmt.Sprintf("--%s", key)] = value
 	}
+
+	flagKeys := []string{}
+	for _, key := range internal.InfoKeyNames() {
+		flagKeys = append(flagKeys, fmt.Sprintf("--%s", key))
+	}
+
+	// both formats go through the helper, so that asking for a single value in a
+	// format that cannot carry one is refused rather than quietly answered with
+	// everything
+	err := common.ReportSingleApp(common.ReportSingleAppInput{
+		ReportType:              datastoreType,
+		AppName:                 serviceName,
+		InfoFlag:                infoFlag,
+		InfoFlags:               flags,
+		InfoFlagKeys:            flagKeys,
+		Format:                  c.ReportFormat(),
+		TrimPrefix:              false,
+		UppercaseFirstCharacter: true,
+	})
+	if err != nil {
+		logger.Error(internal.ErrorInput{
+			Error: err,
+		})
+		return 1
+	}
+
 	return 0
 }

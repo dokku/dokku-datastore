@@ -32,6 +32,74 @@ func TestCronEntry(t *testing.T) {
 	}
 }
 
+// The schedule has to survive the round trip through the cron file, since that
+// file is the only record of what a service was scheduled with.
+func TestParseCronEntryReadsBackWhatCronEntryWrote(t *testing.T) {
+	tests := []struct {
+		name  string
+		input ScheduleBackupInput
+	}{
+		{
+			name:  "a plain schedule",
+			input: ScheduleBackupInput{Schedule: "0 3 * * *", ServiceName: "lollipop", BucketName: "my-bucket"},
+		},
+		{
+			name:  "a one field schedule",
+			input: ScheduleBackupInput{Schedule: "@daily", ServiceName: "lollipop", BucketName: "my-bucket"},
+		},
+		{
+			name:  "using an iam profile",
+			input: ScheduleBackupInput{Schedule: "0 3 * * *", ServiceName: "lollipop", BucketName: "my-bucket", UseIAM: true},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			entry := CronEntry("/usr/bin/dokku", "redis", test.input)
+
+			schedule, ok := ParseCronEntry("redis", entry)
+			if !ok {
+				t.Fatalf("expected %q to parse", entry)
+			}
+
+			if schedule.Schedule != test.input.Schedule {
+				t.Errorf("expected the schedule %q, got %q", test.input.Schedule, schedule.Schedule)
+			}
+
+			if schedule.BucketName != test.input.BucketName {
+				t.Errorf("expected the bucket %q, got %q", test.input.BucketName, schedule.BucketName)
+			}
+
+			if schedule.UseIAM != test.input.UseIAM {
+				t.Errorf("expected use iam to be %v, got %v", test.input.UseIAM, schedule.UseIAM)
+			}
+		})
+	}
+}
+
+// Anything else in the cron directory is not a schedule this wrote, and reading
+// one as if it were would report a service as scheduled when it is not.
+func TestParseCronEntryRejectsWhatItDidNotWrite(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry string
+	}{
+		{name: "nothing at all", entry: ""},
+		{name: "another plugin's backup", entry: "0 3 * * * dokku /usr/bin/dokku postgres:backup lollipop my-bucket"},
+		{name: "another command", entry: "0 3 * * * dokku /usr/bin/dokku redis:export lollipop"},
+		{name: "no bucket", entry: "0 3 * * * dokku /usr/bin/dokku redis:backup lollipop"},
+		{name: "no schedule", entry: "redis:backup lollipop my-bucket"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, ok := ParseCronEntry("redis", test.entry); ok {
+				t.Errorf("expected %q not to parse", test.entry)
+			}
+		})
+	}
+}
+
 // The keyserver reaches the backup image as an environment variable, and only
 // when a service has one: the image has a default of its own, and passing an
 // empty value would override it with nothing.

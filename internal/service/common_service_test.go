@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/dokku/dokku/plugins/common"
 )
 
 // withServiceRoot points DokkuLibRoot at a temporary directory and returns the
@@ -314,6 +316,27 @@ func TestInfoOnAServiceWithNoContainer(t *testing.T) {
 	// the entries that do not need a container are still answered
 	if info["service-root"] == "" {
 		t.Error("expected the service root to be reported")
+	}
+}
+
+// The keyserver is read in two places that have to agree about where it is
+// stored: the backup path that passes it to the image, and the info that
+// reports it back.
+func TestKeyserver(t *testing.T) {
+	redis := Datastores["redis"]
+	withServiceRoot(t, redis, "lollipop")
+	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
+
+	if keyserver := Keyserver(redis, "lollipop"); keyserver != "" {
+		t.Errorf("expected an unset keyserver to read empty, got %q", keyserver)
+	}
+
+	if err := common.PropertyWrite(redis.Properties().CommandPrefix, "lollipop", KeyserverProperty, "keys.example.com"); err != nil {
+		t.Fatalf("failed to write the property: %s", err)
+	}
+
+	if keyserver := Keyserver(redis, "lollipop"); keyserver != "keys.example.com" {
+		t.Errorf("expected the keyserver to be read back, got %q", keyserver)
 	}
 }
 
