@@ -24,8 +24,11 @@ func linkedAppsInput(s *service.Datastore, serviceName string) service.LinkedApp
 }
 
 // CopyAppLinks records the new app name against every service the old app was
-// linked to. Both the clone and rename triggers want this; a rename leaves the
-// old entry in place, which is what the bash datastore plugins do.
+// linked to, and leaves the old name where it is. Both the clone and the rename
+// trigger want that: a clone ends with two apps that both exist and are both
+// linked, and a rename ends with one, because dokku destroys the old app as soon
+// as this trigger returns and the pre-delete that fires takes the old name out
+// through RemoveAppLinks.
 func CopyAppLinks(ctx context.Context, input TriggerInput, oldAppName string, newAppName string) error {
 	services, err := ListServices(ctx, ListServicesInput{Datastore: input.Datastore})
 	if err != nil {

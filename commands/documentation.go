@@ -605,7 +605,9 @@ func (c *LinksCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *LinksCommand) Documentation() string {
 	return `list all apps linked to the 'lollipop' {{.CommandPrefix}} service.
-dokku {{.CommandPrefix}}:links lollipop`
+dokku {{.CommandPrefix}}:links lollipop
+renaming an app moves its link onto the new name, and cloning an app links the
+clone as well as the original.`
 }
 
 // Group is the readme usage section the command is documented under
