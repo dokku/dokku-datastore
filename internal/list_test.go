@@ -2,6 +2,7 @@ package internal
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 	"testing"
 
@@ -13,6 +14,20 @@ import (
 // and the two are only ever consistent by construction.
 func withDataRoot(t *testing.T) {
 	t.Helper()
+
+	// anything written under a service root is chowned to the dokku user, which
+	// exists on neither a development machine nor a CI runner, so point that at
+	// whoever is running the test
+	current, err := user.Current()
+	if err != nil {
+		t.Fatalf("failed to look up the current user: %s", err)
+	}
+	group, err := user.LookupGroupId(current.Gid)
+	if err != nil {
+		t.Fatalf("failed to look up the current group: %s", err)
+	}
+	t.Setenv("DOKKU_SYSTEM_USER", current.Username)
+	t.Setenv("DOKKU_SYSTEM_GROUP", group.Name)
 
 	root := t.TempDir()
 	previousLib, previousData := service.DokkuLibRoot, service.PluginDataRoot
