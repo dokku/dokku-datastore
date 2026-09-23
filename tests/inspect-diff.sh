@@ -28,6 +28,7 @@ normalise() {
     Hostname: (.Config.Hostname | sub($name; "SERVICE")),
     Labels: (.Config.Labels | with_entries(select(.key | startswith("com.docker.compose") | not))),
     RestartPolicy: .HostConfig.RestartPolicy,
+    LogConfig: .HostConfig.LogConfig,
     Memory: .HostConfig.Memory,
     ShmSize: .HostConfig.ShmSize,
     Privileged: .HostConfig.Privileged,

@@ -108,6 +108,56 @@ report="$("$BIN" info "$PLUGIN" "$SERVICE" --format json)"
 keyserver="$("$BIN" info "$PLUGIN" "$SERVICE" --backup-keyserver)"
 [[ -z "$keyserver" ]] || fail "expected an unset keyserver to read back empty, got '$keyserver'"
 
+echo "==> $DEFINITION: the container log is bounded"
+# the bug this closes: a container was made with nothing to say how large its log
+# was allowed to get, and on the default driver it grew until the host ran out of
+# room. Only json-file and local take a max-size, so a daemon logging any other
+# way would refuse one and there is nothing here to check
+daemon_driver="$(docker system info --format '{{ .LoggingDriver }}')"
+if [[ "$daemon_driver" == "json-file" || "$daemon_driver" == "local" ]]; then
+  max_size="$(docker container inspect "dokku.$PLUGIN.$SERVICE" --format '{{ index .HostConfig.LogConfig.Config "max-size" }}')"
+  # no dokku is installed, so there is no global to inherit and the built-in
+  # default is what a service lands on
+  [[ "$max_size" == "10m" ]] || fail "expected the container log to be capped at 10m, got '$max_size'"
+
+  echo "==> $DEFINITION: a log setting reaches the container it is rebuilt with"
+  "$BIN" set "$PLUGIN" "$SERVICE" log-opt max-size=15m,max-file=3
+  reported="$("$BIN" info "$PLUGIN" "$SERVICE" --log-opt)"
+  [[ "$reported" == "max-size=15m,max-file=3" ]] || fail "expected the log options to be read back, got '$reported'"
+
+  # a stop removes the container and a start builds a new one, which is the only
+  # way a create-time setting reaches a service that is already running
+  "$BIN" stop "$PLUGIN" "$SERVICE"
+  "$BIN" start "$PLUGIN" "$SERVICE"
+  log_config="$(docker container inspect "dokku.$PLUGIN.$SERVICE" --format '{{ .HostConfig.LogConfig.Config }}')"
+  [[ "$log_config" == *"max-size:15m"* ]] || fail "expected the new cap to reach the container, got '$log_config'"
+  [[ "$log_config" == *"max-file:3"* ]] || fail "expected the new option to reach the container, got '$log_config'"
+
+  echo "==> $DEFINITION: unlimited is how a service opts out"
+  # what is asserted is that the plugin stops asking for a cap, not that the
+  # container ends up with none: a daemon configured with log-opts of its own
+  # still applies them, which is docker's business rather than this plugin's
+  "$BIN" set "$PLUGIN" "$SERVICE" log-opt max-size=unlimited
+  "$BIN" stop "$PLUGIN" "$SERVICE"
+  "$BIN" start "$PLUGIN" "$SERVICE"
+  log_config="$(docker container inspect "dokku.$PLUGIN.$SERVICE" --format '{{ .HostConfig.LogConfig.Config }}')"
+  [[ "$log_config" != *"max-size:15m"* ]] || fail "expected the cap to be dropped after opting out, got '$log_config'"
+
+  # and back to what every other check expects of this service
+  "$BIN" set "$PLUGIN" "$SERVICE" log-opt
+else
+  echo "    skipped: the daemon logs with $daemon_driver, which takes no max-size"
+fi
+
+echo "==> $DEFINITION: a log option docker would refuse is refused first"
+set_err="$(mktemp)"
+if "$BIN" set "$PLUGIN" "$SERVICE" log-opt max-size=20 2>"$set_err"; then
+  fail "expected a malformed log option to be refused"
+fi
+grep -q "max-size" "$set_err" || fail "expected the refusal to name the option, got '$(cat "$set_err")'"
+[[ -z "$("$BIN" info "$PLUGIN" "$SERVICE" --log-opt)" ]] || fail "a refused set wrote the value anyway"
+rm -f "$set_err"
+
 echo "==> $DEFINITION: info reports every service when none is named"
 every_service="$("$BIN" info "$PLUGIN")"
 [[ "$every_service" == *"$SERVICE"* ]] || fail "expected $SERVICE to be reported when no service is named"

@@ -51,6 +51,8 @@ var InfoKeys = []InfoKey{
 	{Name: "initial-network", Description: "show the initial network being connected to"},
 	{Name: "internal-ip", Description: "show the service internal ip"},
 	{Name: "links", Description: "show the service app links"},
+	{Name: "log-driver", Description: "show the docker logging driver the service container is run with"},
+	{Name: "log-opt", Description: "show the docker log options the service container is run with"},
 	{Name: "memory", Description: "show the memory limit the service container is run with"},
 	{Name: "post-create-network", Description: "show the networks to attach to after service container creation"},
 	{Name: "post-start-network", Description: "show the networks to attach to after service container start"},
@@ -100,6 +102,7 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 
 	serviceFiles := service.Files(input.Datastore, input.ServiceName)
 	serviceFolders := service.Folders(input.Datastore, input.ServiceName)
+	commandPrefix := input.Datastore.Properties().CommandPrefix
 
 	info["service"] = input.ServiceName
 	info["backend"] = common.ReadFirstLine(serviceFiles.Backend)
@@ -109,6 +112,12 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info["definition"] = common.ReadFirstLine(serviceFiles.Definition)
 	info["image"] = common.ReadFirstLine(serviceFiles.Image)
 	info["image-version"] = common.ReadFirstLine(serviceFiles.ImageVersion)
+	// what was set rather than what the container ended up with: settling that
+	// needs a daemon and a plugn trigger, and this is the one report that has to
+	// answer for a service whose container is gone. The readme says what an
+	// unset value inherits
+	info[service.LogDriverProperty] = common.PropertyGet(commandPrefix, input.ServiceName, service.LogDriverProperty)
+	info[service.LogOptProperty] = common.PropertyGet(commandPrefix, input.ServiceName, service.LogOptProperty)
 	info["memory"] = common.ReadFirstLine(serviceFiles.Memory)
 	info["shm-size"] = common.ReadFirstLine(serviceFiles.ShmSize)
 

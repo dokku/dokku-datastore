@@ -59,6 +59,12 @@ type CreateServiceInput struct {
 	// InitialNetwork is the initial network to use for the service
 	InitialNetwork string
 
+	// LogDriver is the docker logging driver to run the service container with
+	LogDriver string
+
+	// LogOptions are the docker log options for the service container
+	LogOptions []string
+
 	// Memory is the memory limit to use for the service
 	Memory int
 
@@ -95,6 +101,13 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	// before anything is made, so that a host which cannot run this datastore
 	// says so rather than leaving a half made service behind
 	if err := CheckRequirements(input.Datastore.Definition.Dokku.Requirements); err != nil {
+		return err
+	}
+
+	// and for the same reason: a log option docker will not accept is a service
+	// that cannot start, which is worse found here than after its directories,
+	// its credentials and its config files have been written
+	if err := CheckLogConfig(input.LogDriver, input.LogOptions); err != nil {
 		return err
 	}
 
@@ -182,6 +195,8 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		Image:              recordedImage,
 		ImageVersion:       recordedImageVersion,
 		InitialNetwork:     input.InitialNetwork,
+		LogDriver:          input.LogDriver,
+		LogOptions:         input.LogOptions,
 		Memory:             input.Memory,
 		PostCreateNetworks: input.PostCreateNetworks,
 		PostStartNetworks:  input.PostStartNetworks,

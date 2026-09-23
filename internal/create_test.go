@@ -4,8 +4,12 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/dokku/dokku/plugins/common"
 )
 
 // currentUserAndGroup returns names SetPermissions can look up, so the test does
@@ -81,5 +85,30 @@ func TestCreateServiceFoldersIsIdempotent(t *testing.T) {
 	}
 	if mode := info.Mode().Perm(); mode != 0775 {
 		t.Errorf("expected mode 775, got %o", mode)
+	}
+}
+
+// A log option docker will not accept is refused where the command starts,
+// because everything after this point writes: the service root, its credentials
+// and its config files would all be on disk before docker was the one to say so.
+func TestCreateServiceRefusesAnUnusableLogConfig(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withDataRoot(t)
+
+	err := CreateService(t.Context(), CreateServiceInput{
+		Datastore:   datastore,
+		ServiceName: "lollipop",
+		LogOptions:  []string{"max-size=20"},
+	})
+	if err == nil {
+		t.Fatal("expected a malformed log option to be refused, got no error")
+	}
+
+	if !strings.Contains(err.Error(), `invalid max-size value "20"`) {
+		t.Errorf("expected the error to name the value, got %q", err)
+	}
+
+	if root := service.Folders(datastore, "lollipop").Root; common.DirectoryExists(root) {
+		t.Errorf("a refused create left %s behind", root)
 	}
 }

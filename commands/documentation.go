@@ -335,7 +335,10 @@ dokku {{.CommandPrefix}}:create lollipop --image <image> --image-version <versio
 you can also specify custom environment variables to start
 the {{.CommandPrefix}} service in semicolon-separated form.
 export {{.PluginVariable}}_CUSTOM_ENV="USER=alpha;HOST=beta"
-dokku {{.CommandPrefix}}:create lollipop`
+dokku {{.CommandPrefix}}:create lollipop
+the container log is bounded by whatever 'dokku logs:set --global max-size' says, and
+by dokku's own default where it says nothing, which a service may override for itself.
+dokku {{.CommandPrefix}}:create lollipop --log-opt max-size=20m,max-file=3`
 }
 
 // Group is the readme usage section the command is documented under
@@ -764,7 +767,14 @@ dokku {{.CommandPrefix}}:set lollipop post-create-network custom-network,other-n
 unset the post-create-network value
 dokku {{.CommandPrefix}}:set lollipop post-create-network
 set the keyserver a public key for backup encryption is fetched from
-dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com`
+dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com
+cap the container log at a size of your own rather than the one it inherits
+dokku {{.CommandPrefix}}:set lollipop log-opt max-size=20m,max-file=3
+keep the log unbounded, which is what a service had before there was anything to say here
+dokku {{.CommandPrefix}}:set lollipop log-opt max-size=unlimited
+send the container log somewhere other than the daemon's own driver
+dokku {{.CommandPrefix}}:set lollipop log-driver journald
+> NOTE: a log setting reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.`
 }
 
 // Group is the readme usage section the command is documented under

@@ -124,8 +124,14 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		writeInfoFile(t, filename, contents)
 	}
 
-	if err := SetProperty(datastore, "lollipop", "initial-network", "my-network"); err != nil {
-		t.Fatalf("failed to set the property: %s", err)
+	for key, value := range map[string]string{
+		"initial-network":         "my-network",
+		service.LogDriverProperty: "json-file",
+		service.LogOptProperty:    "max-size=20m,max-file=3",
+	} {
+		if err := SetProperty(datastore, "lollipop", key, value); err != nil {
+			t.Fatalf("failed to set the %s property: %s", key, err)
+		}
 	}
 
 	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
@@ -139,6 +145,8 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		"image":           "redis",
 		"image-version":   "8.4.2",
 		"initial-network": "my-network",
+		"log-driver":      "json-file",
+		"log-opt":         "max-size=20m,max-file=3",
 		"memory":          "512",
 		"service":         "lollipop",
 		"shm-size":        "128m",

@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/service"
@@ -12,6 +13,8 @@ import (
 func TestUpgradeChangesSettings(t *testing.T) {
 	value := "something"
 	list := []string{"a-network"}
+	driver := "json-file"
+	options := []string{"max-size=20m"}
 
 	tests := []struct {
 		name     string
@@ -25,6 +28,8 @@ func TestUpgradeChangesSettings(t *testing.T) {
 		{name: "post create networks", input: UpgradeServiceInput{PostCreateNetworks: &list}, expected: true},
 		{name: "post start networks", input: UpgradeServiceInput{PostStartNetworks: &list}, expected: true},
 		{name: "shm size", input: UpgradeServiceInput{ShmSize: &value}, expected: true},
+		{name: "log driver", input: UpgradeServiceInput{LogDriver: &driver}, expected: true},
+		{name: "log options", input: UpgradeServiceInput{LogOptions: &options}, expected: true},
 	}
 
 	for _, test := range tests {
@@ -145,5 +150,27 @@ func TestUpgradeVersion(t *testing.T) {
 				t.Errorf("expected %q, got %q", test.expected, actual)
 			}
 		})
+	}
+}
+
+// An upgrade takes the old container away before it makes the new one, so a log
+// option docker will not accept has to be refused at the top rather than when
+// the container is finally built, which would leave the service with neither.
+func TestUpgradeRefusesAnUnusableLogConfig(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withDataRoot(t)
+
+	options := []string{"max-size=20"}
+	err := UpgradeService(t.Context(), UpgradeServiceInput{
+		Datastore:   datastore,
+		ServiceName: "lollipop",
+		LogOptions:  &options,
+	})
+	if err == nil {
+		t.Fatal("expected a malformed log option to be refused, got no error")
+	}
+
+	if !strings.Contains(err.Error(), `invalid max-size value "20"`) {
+		t.Errorf("expected the error to name the value, got %q", err)
 	}
 }

@@ -134,6 +134,16 @@ func (s *Datastore) CreateServiceContainer(ctx context.Context, input CreateServ
 
 	scope := s.scope(input.ServiceName)
 	scope.InitialNetwork = InitialNetwork(input.Datastore, input.ServiceName)
+
+	// read here rather than in scope() for the same reason the initial network
+	// is: settling it needs a configured dokku and a daemon to ask, and
+	// rendering a connection string must need neither
+	logConfig, err := ServiceLogConfig(ctx, input.Datastore, input.ServiceName)
+	if err != nil {
+		return err
+	}
+	scope.LogDriver = logConfig.Driver
+	scope.LogOptions = logConfig.Options
 	if input.TaggedImage != "" {
 		scope.TaggedImage = input.TaggedImage
 		scope.Image, scope.ImageVersion = cutTaggedImage(input.TaggedImage)

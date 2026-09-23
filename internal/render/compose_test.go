@@ -142,3 +142,75 @@ func TestComposeOmitsALimitOfZero(t *testing.T) {
 		t.Errorf("expected a memory limit, got:\n%s", string(rendered))
 	}
 }
+
+func TestComposeCarriesTheLogConfig(t *testing.T) {
+	input := redisInput(t)
+	input.Scope.LogDriver = "json-file"
+	input.Scope.LogOptions = map[string]string{"max-size": "20m", "max-file": "3"}
+
+	rendered, err := Compose(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	document := string(rendered)
+
+	for _, expected := range []string{"logging:", "driver: json-file", `max-file: "3"`, "max-size: 20m"} {
+		if !strings.Contains(document, expected) {
+			t.Errorf("expected the compose file to contain %q, got:\n%s", expected, document)
+		}
+	}
+}
+
+// A service that says nothing about its logging must emit no logging key at
+// all, or compose would pin a driver the docker path leaves to the daemon and
+// the two backends would produce different containers.
+func TestComposeOmitsAnEmptyLogConfig(t *testing.T) {
+	rendered, err := Compose(redisInput(t))
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	if document := string(rendered); strings.Contains(document, "logging:") {
+		t.Errorf("expected no logging key when nothing is set, got:\n%s", document)
+	}
+}
+
+// The cap reaches the container whichever backend made it, and compose must not
+// name a driver the docker path did not.
+func TestComposeCarriesLogOptionsWithoutADriver(t *testing.T) {
+	input := redisInput(t)
+	input.Scope.LogOptions = map[string]string{"max-size": "10m"}
+
+	rendered, err := Compose(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	document := string(rendered)
+
+	if !strings.Contains(document, "max-size: 10m") {
+		t.Errorf("expected the cap to be carried, got:\n%s", document)
+	}
+
+	if strings.Contains(document, "driver:") {
+		t.Errorf("expected no driver when the service names none, got:\n%s", document)
+	}
+}
+
+// Compose expands ${...} in a value and docker's own --log-opt does not, so a
+// tag template carrying a dollar sign would otherwise mean two different things
+// depending on which backend made the container.
+func TestComposeDoublesADollarInALogOption(t *testing.T) {
+	input := redisInput(t)
+	input.Scope.LogOptions = map[string]string{"tag": "$SERVICE"}
+
+	rendered, err := Compose(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	if document := string(rendered); !strings.Contains(document, "tag: $$SERVICE") {
+		t.Errorf("expected the dollar sign to be doubled, got:\n%s", document)
+	}
+}

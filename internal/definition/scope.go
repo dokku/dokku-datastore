@@ -41,6 +41,12 @@ type Scope struct {
 	ShmSize        string
 	InitialNetwork string
 
+	// LogDriver and LogOptions are the docker logging a container is made
+	// with, already resolved. Empty means the daemon's own default, which is
+	// what every container had before there was anything to say here.
+	LogDriver  string
+	LogOptions map[string]string
+
 	// Args are the positional arguments of an extra subcommand.
 	Args map[string]string
 }

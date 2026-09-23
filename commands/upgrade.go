@@ -39,6 +39,10 @@ type UpgradeCommand struct {
 	postStartNetwork []string
 	// shmSize is the shared memory size for the container
 	shmSize string
+	// logDriver is the docker logging driver to use for the service container
+	logDriver string
+	// logOpt are the docker log options to use for the service container
+	logOpt []string
 }
 
 // Name returns the name of the command
@@ -105,6 +109,8 @@ func (c *UpgradeCommand) FlagSet() *flag.FlagSet {
 	f.StringSliceVarP(&c.postCreateNetwork, "post-create-network", "P", []string{}, "a comma-separated list of networks to attach the service container to after service creation")
 	f.StringSliceVarP(&c.postStartNetwork, "post-start-network", "S", []string{}, "a comma-separated list of networks to attach the service container to after service start")
 	f.StringVarP(&c.shmSize, "shm-size", "s", "", "override shared memory size for the service docker container")
+	f.StringVar(&c.logDriver, "log-driver", "", "the docker logging driver to run the service container with (default: the daemon's own)")
+	f.StringSliceVar(&c.logOpt, "log-opt", []string{}, "a comma-separated list of key=value docker log options for the service container")
 	return f
 }
 
@@ -223,6 +229,8 @@ func (c *UpgradeCommand) Run(args []string) int {
 		PostCreateNetworks: changedSlice(flags, "post-create-network", c.postCreateNetwork),
 		PostStartNetworks:  changedSlice(flags, "post-start-network", c.postStartNetwork),
 		ShmSize:            changedString(flags, "shm-size", c.shmSize),
+		LogDriver:          changedString(flags, "log-driver", c.logDriver),
+		LogOptions:         changedSlice(flags, "log-opt", c.logOpt),
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1

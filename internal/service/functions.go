@@ -16,6 +16,7 @@ import (
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
+	"github.com/dokku/dokku-datastore/internal/render"
 	"github.com/dokku/dokku/plugins/common"
 )
 
@@ -79,6 +80,12 @@ type CommitServiceConfigInput struct {
 
 	// PostStartNetworks is the networks to attach the service container to after service start
 	PostStartNetworks []string
+
+	// LogDriver is the docker logging driver to run the service container with
+	LogDriver string
+
+	// LogOptions are the docker log options for the service container
+	LogOptions []string
 }
 
 // CommitServiceConfig commits the service config for a given service
@@ -164,6 +171,16 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, "post-start-network", strings.Join(input.PostStartNetworks, ","))
 	if err != nil {
 		return fmt.Errorf("failed to write post start network property: %w", err)
+	}
+
+	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, LogDriverProperty, input.LogDriver)
+	if err != nil {
+		return fmt.Errorf("failed to write %s property: %w", LogDriverProperty, err)
+	}
+
+	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, LogOptProperty, strings.Join(input.LogOptions, ","))
+	if err != nil {
+		return fmt.Errorf("failed to write %s property: %w", LogOptProperty, err)
 	}
 
 	return nil
@@ -810,13 +827,22 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		"--label=dokku.ambassador=" + serviceProperties.CommandPrefix,
 	}
 
+	// the same cap the service it fronts is given. It is the only other
+	// container a service leaves running, so an unbounded log here is the same
+	// bug in a smaller container
+	logConfig, err := ServiceLogConfig(ctx, input.Datastore, input.ServiceName)
+	if err != nil {
+		return err
+	}
+	dockerRunOptions = append(dockerRunOptions, render.LogArgs(logConfig.Driver, logConfig.Options)...)
+
 	for i, hostPort := range hostPorts {
 		dockerRunOptions = append(dockerRunOptions, fmt.Sprintf("--publish=%s:%d", hostPort, serviceProperties.Ports[i]))
 	}
 
 	dockerRunOptions = append(dockerRunOptions, hostenv.AmbassadorImage)
 
-	_, err := execx.Run(ctx, common.ExecCommandInput{
+	_, err = execx.Run(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    dockerRunOptions,
 	})

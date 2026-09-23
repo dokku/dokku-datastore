@@ -25,6 +25,7 @@ type composeService struct {
 	Hostname      string    `yaml:"hostname"`
 	Restart       string    `yaml:"restart"`
 	Labels        yaml.Node `yaml:"labels"`
+	Logging       yaml.Node `yaml:"logging"`
 	Networks      yaml.Node `yaml:"networks"`
 }
 
@@ -117,6 +118,7 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		"container_name": service.ContainerName != "",
 		"hostname":       service.Hostname != "",
 		"labels":         !service.Labels.IsZero(),
+		"logging":        !service.Logging.IsZero(),
 		"networks":       !service.Networks.IsZero(),
 		"restart":        service.Restart != "",
 	} {

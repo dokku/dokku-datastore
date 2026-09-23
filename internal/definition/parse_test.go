@@ -94,6 +94,15 @@ func TestParseRejects(t *testing.T) {
 			expected: "restart is set by dokku",
 		},
 		{
+			// a service's logging is resolved from what the host and the service
+			// were told rather than declared per datastore, so a definition
+			// setting it would be overruled on the docker path and obeyed on the
+			// compose one
+			name:     "logging dokku owns",
+			compose:  strings.Replace(validCompose, "    command:", "    logging:\n      driver: none\n    command:", 1),
+			expected: "logging is set by dokku",
+		},
+		{
 			name:     "a missing dsn",
 			compose:  strings.Replace(validCompose, `  dsn: "{{ .Scheme }}://{{ .Host }}:{{ .Port.native }}"`, "", 1),
 			expected: "x-dokku.dsn is required",

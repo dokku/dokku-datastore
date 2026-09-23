@@ -92,6 +92,8 @@ func ContainerArgs(input Input) (ContainerArgsInput, error) {
 		EnvFile:        input.EnvFile,
 		IDFile:         input.IDFile,
 		InitialNetwork: input.Scope.InitialNetwork,
+		LogDriver:      input.Scope.LogDriver,
+		LogOptions:     input.Scope.LogOptions,
 		Memory:         MemoryLimit(input.Scope.Memory),
 		NetworkAlias:   input.Scope.Host,
 		ShmSize:        input.Scope.ShmSize,
