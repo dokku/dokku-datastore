@@ -102,30 +102,18 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 
 	serviceFiles := Files(input.Datastore, input.ServiceName)
 
+	// both can carry credentials the user handed over, so they are kept from
+	// other users the way the service's own secrets are
 	lines := strings.Split(input.CustomEnv, ";")
-	err := common.WriteStringToFile(common.WriteStringToFileInput{
-		Content:   strings.Join(lines, "\n"),
-		Filename:  serviceFiles.Env,
-		GroupName: hostenv.SystemGroup(),
-		Mode:      0644,
-		Username:  hostenv.SystemUser(),
-	})
-	if err != nil {
+	if err := ReplaceFileAtomically(serviceFiles.Env, strings.Join(lines, "\n"), PrivateFileMode); err != nil {
 		return fmt.Errorf("failed to write env to %s: %w", serviceFiles.Env, err)
 	}
 
-	err = common.WriteStringToFile(common.WriteStringToFileInput{
-		Content:   input.ConfigOptions,
-		Filename:  serviceFiles.ConfigOptions,
-		GroupName: hostenv.SystemGroup(),
-		Mode:      0644,
-		Username:  hostenv.SystemUser(),
-	})
-	if err != nil {
+	if err := ReplaceFileAtomically(serviceFiles.ConfigOptions, input.ConfigOptions, PrivateFileMode); err != nil {
 		return fmt.Errorf("failed to write config options to %s: %w", serviceFiles.ConfigOptions, err)
 	}
 
-	err = common.WriteStringToFile(common.WriteStringToFileInput{
+	err := common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   strconv.Itoa(input.Memory),
 		Filename:  serviceFiles.Memory,
 		GroupName: hostenv.SystemGroup(),
@@ -347,7 +335,7 @@ func writeRecordedImage(s *Datastore, serviceName string, recorded RecordedImage
 			continue
 		}
 
-		if err := replaceFileAtomically(file.filename, file.content); err != nil {
+		if err := ReplaceFileAtomically(file.filename, file.content, 0644); err != nil {
 			return fmt.Errorf("failed to write %s: %w", file.filename, err)
 		}
 	}
@@ -355,11 +343,20 @@ func writeRecordedImage(s *Datastore, serviceName string, recorded RecordedImage
 	return nil
 }
 
-// replaceFileAtomically writes a service file by renaming a temporary one over
+// PrivateFileMode is the mode of a service file holding something other users
+// on the host must not read: a secret, a credential, or a file either can end
+// up in. Only the dokku user and group read these.
+const PrivateFileMode os.FileMode = 0640
+
+// ReplaceFileAtomically writes a service file by renaming a temporary one over
 // it. The temporary file is made in the same directory so the rename stays
 // within one filesystem, and it is removed on every path that does not rename
 // it away.
-func replaceFileAtomically(filename string, content string) error {
+//
+// The temporary file is created readable by its owner alone and only given its
+// mode once written, so contents meant for PrivateFileMode are never readable
+// by anyone else, even when the file being replaced was.
+func ReplaceFileAtomically(filename string, content string, mode os.FileMode) error {
 	temporary, err := os.CreateTemp(filepath.Dir(filename), "."+filepath.Base(filename)+".*")
 	if err != nil {
 		return err
@@ -378,7 +375,7 @@ func replaceFileAtomically(filename string, content string) error {
 	if err := common.SetPermissions(common.SetPermissionInput{
 		Filename:  temporary.Name(),
 		GroupName: hostenv.SystemGroup(),
-		Mode:      0644,
+		Mode:      mode,
 		Username:  hostenv.SystemUser(),
 	}); err != nil {
 		return err

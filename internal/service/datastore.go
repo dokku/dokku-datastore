@@ -91,7 +91,7 @@ func (s *Datastore) writeSecrets(serviceName string) error {
 			Content:   value,
 			Filename:  filename,
 			GroupName: hostenv.SystemGroup(),
-			Mode:      0640,
+			Mode:      PrivateFileMode,
 			Username:  hostenv.SystemUser(),
 		})
 		if err != nil {
@@ -401,15 +401,10 @@ func (s *Datastore) writeCompose(serviceName string, scope definition.Scope, con
 		return err
 	}
 
-	filename := filepath.Join(Folders(s, serviceName).Root, "docker-compose.yml")
-	err = common.WriteStringToFile(common.WriteStringToFileInput{
-		Content:   string(rendered),
-		Filename:  filename,
-		GroupName: hostenv.SystemGroup(),
-		Mode:      0644,
-		Username:  hostenv.SystemUser(),
-	})
-	if err != nil {
+	// private, because it carries the service's secrets and its custom
+	// environment in the clear
+	filename := Files(s, serviceName).Compose
+	if err := ReplaceFileAtomically(filename, string(rendered), PrivateFileMode); err != nil {
 		return fmt.Errorf("unable to write %s: %w", filename, err)
 	}
 

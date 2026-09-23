@@ -201,6 +201,38 @@ compose="$DOKKU_LIB_ROOT/services/$DATA_DIR/$SERVICE/docker-compose.yml"
 [[ -f "$compose" ]] || fail "no compose file was written"
 docker compose --file "$compose" config --quiet || fail "the rendered compose file is not valid"
 
+# the mode of a file or folder, as octal permission bits
+assert_mode() {
+  local expected="$1" path="$2" mode
+  mode="$(stat -c '%a' "$path")"
+  [[ "$mode" == "$expected" ]] || fail "expected $path to be $expected, got $mode"
+}
+
+echo "==> $DEFINITION: the files holding secrets are unreadable by other users"
+# the compose file carries the service's password in the clear, and the custom
+# environment and config options can carry credentials of their own
+SERVICE_ROOT="$DOKKU_LIB_ROOT/services/$DATA_DIR/$SERVICE"
+assert_mode 640 "$compose"
+assert_mode 640 "$SERVICE_ROOT/ENV"
+assert_mode 640 "$SERVICE_ROOT/CONFIG_OPTIONS"
+
+echo "==> $DEFINITION: backup credentials are unreadable by other users"
+status=0
+"$BIN" backup-auth "$PLUGIN" "$SERVICE" AKIAEXAMPLE wJalrXUtnFEMI us-east-1 s3v4 http://127.0.0.1:9000 || status=$?
+if [[ "$status" -eq "${DOKKU_NOT_IMPLEMENTED_EXIT:-10}" ]]; then
+  echo "    skipped: $PLUGIN does not implement backup-auth"
+elif [[ "$status" -ne 0 ]]; then
+  fail "backup-auth failed with status $status"
+else
+  assert_mode 750 "$SERVICE_ROOT/backup"
+  for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION AWS_SIGNATURE_VERSION ENDPOINT_URL; do
+    assert_mode 640 "$SERVICE_ROOT/backup/$name"
+  done
+
+  "$BIN" backup-deauth "$PLUGIN" "$SERVICE"
+  [[ ! -d "$SERVICE_ROOT/backup" ]] || fail "backup-deauth left the credentials behind"
+fi
+
 echo "==> $DEFINITION: export and import round trip"
 probe="tests/probes/$DEFINITION.sh"
 if [[ -x "$probe" ]]; then
@@ -401,7 +433,6 @@ assert_no_ambassador "refused expose"
 # The version a service runs is what it recorded, and only an upgrade changes
 # that. These run last because two of them deliberately leave the service down,
 # and everything before this point needs it up.
-SERVICE_ROOT="$DOKKU_LIB_ROOT/services/$DATA_DIR/$SERVICE"
 CONTAINER="dokku.$PLUGIN.$SERVICE"
 recorded_image="$("$BIN" info "$PLUGIN" "$SERVICE" --image)"
 recorded_version="$("$BIN" info "$PLUGIN" "$SERVICE" --image-version)"
