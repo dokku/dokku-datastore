@@ -85,6 +85,28 @@ func DestroyService(ctx context.Context, input DestroyServiceInput) error {
 		return fmt.Errorf("failed to remove backup schedule: %w", err)
 	}
 
+	// the argv is built, and the image it names fetched, before the container
+	// goes: a destroy that cannot widen the data would otherwise stop with the
+	// service already gone and its files still owned by somebody the dokku user
+	// is not. A definition that binds nothing needs no container and so needs no
+	// image
+	serviceFolders := service.Folders(input.Datastore, input.ServiceName)
+	arguments := RemoveDataArgs(RemoveDataArgsInput{
+		Directories: input.Datastore.BindHostDirectories(input.ServiceName),
+		Image:       hostenv.BusyboxImage,
+	})
+
+	if len(arguments) > 0 {
+		if err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
+			Action:      "destroy",
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+			TaggedImage: hostenv.BusyboxImage,
+		}); err != nil {
+			return err
+		}
+	}
+
 	err = service.RemoveServiceContainer(ctx, service.RemoveServiceContainerInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
@@ -92,12 +114,6 @@ func DestroyService(ctx context.Context, input DestroyServiceInput) error {
 	if err != nil {
 		return fmt.Errorf("failed to remove container: %w", err)
 	}
-
-	serviceFolders := service.Folders(input.Datastore, input.ServiceName)
-	arguments := RemoveDataArgs(RemoveDataArgsInput{
-		Directories: input.Datastore.BindHostDirectories(input.ServiceName),
-		Image:       hostenv.BusyboxImage,
-	})
 
 	if len(arguments) > 0 {
 		_, err = execx.Run(ctx, common.ExecCommandInput{

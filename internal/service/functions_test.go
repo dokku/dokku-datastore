@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -397,8 +398,24 @@ func TestRecoverRecordedImageSkipsAnUnchangedRecord(t *testing.T) {
 
 // The wording a disabled pull leaves behind is what an operator pastes, and it
 // already shipped in two places before it was shared, so it is pinned here.
+//
+// The actions are the ones the tree actually uses: create, upgrade and start
+// name the service image; the rest name a step that runs one of the images the
+// plugin runs beside a service, and export stands in for every verb, which
+// passes its own name.
 func TestPullDisabledError(t *testing.T) {
-	for _, action := range []string{"creation", "upgrade", "start"} {
+	actions := []string{
+		"creation",
+		"upgrade",
+		"start",
+		"port publishing",
+		"readiness check",
+		"backup",
+		"destroy",
+		"export",
+	}
+
+	for _, action := range actions {
 		t.Run(action, func(t *testing.T) {
 			err := pullDisabledError("REDIS_DISABLE_PULL", "redis:8.9.0", "lollipop", action)
 
@@ -409,5 +426,36 @@ func TestPullDisabledError(t *testing.T) {
 				t.Errorf("expected:\n%s\ngot:\n%s", expected, err.Error())
 			}
 		})
+	}
+}
+
+// Install fetches what a plugin needs before any service exists, so the line
+// naming a service and what could not be done to it has nothing to say and is
+// left off. This is the wording install warns with and then carries on past.
+func TestPullDisabledErrorWithoutAService(t *testing.T) {
+	err := pullDisabledError("REDIS_DISABLE_PULL", "dokku/wait:0.9.3", "", "")
+
+	expected := "REDIS_DISABLE_PULL environment variable detected. Not running pull command.\n" +
+		"docker image pull dokku/wait:0.9.3"
+	if err.Error() != expected {
+		t.Errorf("expected:\n%s\ngot:\n%s", expected, err.Error())
+	}
+}
+
+// Install is the one caller that carries on past a disabled pull rather than
+// refusing, and it tells the two apart with errors.Is. Nothing about the message
+// says so, which is why this is pinned separately from the wording.
+func TestPullDisabledErrorIsErrPullDisabled(t *testing.T) {
+	err := pullDisabledError("REDIS_DISABLE_PULL", "redis:8.9.0", "lollipop", "start")
+	if !errors.Is(err, ErrPullDisabled) {
+		t.Error("expected a disabled pull to be recognisable as one")
+	}
+
+	if !errors.Is(fmt.Errorf("unable to start lollipop: %w", err), ErrPullDisabled) {
+		t.Error("expected a disabled pull to survive being wrapped")
+	}
+
+	if errors.Is(errors.New("failed to pull image redis:8.9.0"), ErrPullDisabled) {
+		t.Error("expected a failed pull not to look like a disabled one")
 	}
 }

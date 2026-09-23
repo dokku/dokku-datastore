@@ -361,6 +361,19 @@ func Backup(ctx context.Context, input BackupInput) error {
 		return errors.New("Service container is not running") //nolint:staticcheck // matches the bash datastore plugins
 	}
 
+	// before the dump rather than after it: the tool that ships the dump is
+	// pinned and fetched at install, which is no help on a host that has been
+	// pruned since, and exporting a database only to find there is nothing to
+	// ship it with is a wasted read of the whole service
+	if err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
+		Action:      "backup",
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		TaggedImage: hostenv.S3BackupImage,
+	}); err != nil {
+		return err
+	}
+
 	backupDir, err := os.MkdirTemp("", "dokku-datastore-backup")
 	if err != nil {
 		return fmt.Errorf("unable to create a temporary directory: %w", err)

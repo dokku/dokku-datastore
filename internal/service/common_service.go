@@ -604,6 +604,53 @@ type StartInput struct {
 	Warnings io.Writer
 }
 
+// containerAction is what Start does with the container a service already has.
+type containerAction int
+
+const (
+	// buildContainer makes one, because the service has none
+	buildContainer containerAction = iota
+
+	// keepContainer leaves a container that is up or on its way up alone
+	keepContainer
+
+	// unpauseContainer thaws one that was frozen
+	unpauseContainer
+
+	// resumeContainer starts one that is down, or replaces it where the record
+	// and the container disagree about the version
+	resumeContainer
+
+	// replaceContainer takes away one nothing can be done with, and builds
+	// another in its place
+	replaceContainer
+)
+
+// actionForStatus maps what docker says about a service's container onto what
+// Start does with it.
+//
+// Every state docker has, rather than the two Start used to ask for. A container
+// in created, paused, restarting, removing or dead matched neither the running
+// filter nor the exited one, so Start went on to build a container while one of
+// that name was still there and died on the name conflict - which is how an
+// interrupted create left a service that could not be started again. A state
+// this does not know is taken away rather than built beside, for the same
+// reason: one docker adds in a later release must not reopen that.
+func actionForStatus(status string) containerAction {
+	switch status {
+	case "missing":
+		return buildContainer
+	case "running", "restarting":
+		return keepContainer
+	case "paused":
+		return unpauseContainer
+	case "created", "exited":
+		return resumeContainer
+	default:
+		return replaceContainer
+	}
+}
+
 // Start starts a service.
 //
 // A service runs the version it recorded, and only an upgrade changes that. So
@@ -612,45 +659,53 @@ type StartInput struct {
 // never the definition's current default, which a release bumps under services
 // that never asked to move.
 func Start(ctx context.Context, input StartInput) error {
-	runningContainerID := LiveContainerID(ctx, LiveContainerIDInput{
+	containerID := LiveContainerID(ctx, LiveContainerIDInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
-		Filter:      "status=running",
 	})
-	if runningContainerID != "" {
-		// a service that is already up is left alone: rebuilding it onto its
-		// record would be a restart nobody asked for
-		input.recoverRecord(ctx, runningContainerID)
 
-		return common.WriteStringToFile(common.WriteStringToFileInput{
-			Content:   runningContainerID,
-			Filename:  Files(input.Datastore, input.ServiceName).ID,
-			GroupName: hostenv.SystemGroup(),
-			Mode:      0644,
-			Username:  hostenv.SystemUser(),
-		})
+	status := "missing"
+	if containerID != "" {
+		status = backend.Status(ctx, containerID)
 	}
 
-	previousContainerID := LiveContainerID(ctx, LiveContainerIDInput{
-		Datastore:   input.Datastore,
-		ServiceName: input.ServiceName,
-		Filter:      "status=exited",
-	})
-	if previousContainerID != "" {
-		recorded := input.recoverRecord(ctx, previousContainerID)
+	switch actionForStatus(status) {
+	case keepContainer:
+		// a service that is already up is left alone: rebuilding it onto its
+		// record would be a restart nobody asked for
+		input.recoverRecord(ctx, containerID)
+
+		return input.writeContainerID(containerID)
+
+	case unpauseContainer:
+		// docker refuses to start a container it froze, so it is thawed rather
+		// than started. Nothing here ever freezes one - this plugin's own pause
+		// is a stop - so a container in this state was paused by hand, and
+		// thawing it is the only reading of start that does not throw away the
+		// container the service already has
+		input.recoverRecord(ctx, containerID)
+
+		if err := backend.Unpause(ctx, containerID); err != nil {
+			return err
+		}
+
+		return input.writeContainerID(containerID)
+
+	case resumeContainer:
+		recorded := input.recoverRecord(ctx, containerID)
 
 		// Version rather than backend.Image: a definition that builds runs a tag
 		// dokku made, while the record holds the base it was built from, and
 		// only this maps the one back to the other. Comparing the raw container
 		// image would call every such service a mismatch.
 		running := Version(ctx, VersionInput{
-			ContainerID: previousContainerID,
+			ContainerID: containerID,
 			Datastore:   input.Datastore,
 			ServiceName: input.ServiceName,
 		})
 
 		if !recorded.Complete() || recorded.Tagged() == running {
-			if err := backend.Start(ctx, previousContainerID); err != nil {
+			if err := backend.Start(ctx, containerID); err != nil {
 				return fmt.Errorf("failed to start container: %w", err)
 			}
 
@@ -677,6 +732,18 @@ func Start(ctx context.Context, input StartInput) error {
 			return err
 		}
 
+		if err := RemoveServiceContainer(ctx, RemoveServiceContainerInput{
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+			Warnings:    input.Warnings,
+		}); err != nil {
+			return err
+		}
+
+	case replaceContainer:
+		// dead, removing, or something docker has not shipped yet. There is
+		// nothing to start and nothing worth learning from it beyond the version
+		// it ran, which removing it records on the way past
 		if err := RemoveServiceContainer(ctx, RemoveServiceContainerInput{
 			Datastore:   input.Datastore,
 			ServiceName: input.ServiceName,
@@ -719,9 +786,21 @@ func Start(ctx context.Context, input StartInput) error {
 	})
 }
 
+// writeContainerID notes which container the service is answering on, which is
+// what everything that addresses it by id reads.
+func (input StartInput) writeContainerID(containerID string) error {
+	return common.WriteStringToFile(common.WriteStringToFileInput{
+		Content:   containerID,
+		Filename:  Files(input.Datastore, input.ServiceName).ID,
+		GroupName: hostenv.SystemGroup(),
+		Mode:      0644,
+		Username:  hostenv.SystemUser(),
+	})
+}
+
 // recoverRecord settles the service's record from a container it already has.
 //
-// Best effort on purpose. Both branches that call it go on to start a container
+// Best effort on purpose. Every branch that calls it goes on to start a container
 // that exists, which they could do before this file was ever written, and a host
 // where the service root cannot be written is not a reason to refuse.
 func (input StartInput) recoverRecord(ctx context.Context, containerID string) RecordedImage {

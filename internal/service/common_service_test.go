@@ -347,3 +347,34 @@ func TestLiveContainerIDWithoutADatastore(t *testing.T) {
 		t.Errorf("expected no container id, got %q", id)
 	}
 }
+
+// Docker has seven container states and Start used to ask for two of them by
+// name, so a container in any of the other five was invisible to it and Start
+// went on to build one beside it. Every state is named here, and the default is
+// asserted too: a state docker ships in a later release has to land somewhere
+// that cannot produce a name conflict.
+func TestActionForStatus(t *testing.T) {
+	tests := []struct {
+		status   string
+		expected containerAction
+	}{
+		{status: "missing", expected: buildContainer},
+		{status: "running", expected: keepContainer},
+		{status: "restarting", expected: keepContainer},
+		{status: "paused", expected: unpauseContainer},
+		{status: "created", expected: resumeContainer},
+		{status: "exited", expected: resumeContainer},
+		{status: "dead", expected: replaceContainer},
+		{status: "removing", expected: replaceContainer},
+		{status: "hibernating", expected: replaceContainer},
+		{status: "", expected: replaceContainer},
+	}
+
+	for _, test := range tests {
+		t.Run(test.status, func(t *testing.T) {
+			if actual := actionForStatus(test.status); actual != test.expected {
+				t.Errorf("expected %d for a %q container, got %d", test.expected, test.status, actual)
+			}
+		})
+	}
+}
