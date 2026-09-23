@@ -56,6 +56,7 @@ var InfoKeys = []InfoKey{
 	{Name: "memory", Description: "show the memory limit the service container is run with"},
 	{Name: "post-create-network", Description: "show the networks to attach to after service container creation"},
 	{Name: "post-start-network", Description: "show the networks to attach to after service container start"},
+	{Name: "restart-policy", Description: "show the restart policy the service container is run with"},
 	{Name: "service", Description: "show the name of the service"},
 	{Name: "service-root", Description: "show the service root directory"},
 	{Name: "shm-size", Description: "show the shared memory size the service container is run with"},
@@ -118,6 +119,7 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	// unset value inherits
 	info[service.LogDriverProperty] = common.PropertyGet(commandPrefix, input.ServiceName, service.LogDriverProperty)
 	info[service.LogOptProperty] = common.PropertyGet(commandPrefix, input.ServiceName, service.LogOptProperty)
+	info[service.RestartPolicyProperty] = service.ServiceRestartPolicy(input.Datastore, input.ServiceName)
 	info["memory"] = common.ReadFirstLine(serviceFiles.Memory)
 	info["shm-size"] = common.ReadFirstLine(serviceFiles.ShmSize)
 

@@ -125,9 +125,10 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 	}
 
 	for key, value := range map[string]string{
-		"initial-network":         "my-network",
-		service.LogDriverProperty: "json-file",
-		service.LogOptProperty:    "max-size=20m,max-file=3",
+		"initial-network":             "my-network",
+		service.LogDriverProperty:     "json-file",
+		service.LogOptProperty:        "max-size=20m,max-file=3",
+		service.RestartPolicyProperty: "unless-stopped",
 	} {
 		if err := SetProperty(datastore, "lollipop", key, value); err != nil {
 			t.Fatalf("failed to set the %s property: %s", key, err)
@@ -148,6 +149,7 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		"log-driver":      "json-file",
 		"log-opt":         "max-size=20m,max-file=3",
 		"memory":          "512",
+		"restart-policy":  "unless-stopped",
 		"service":         "lollipop",
 		"shm-size":        "128m",
 	} {
@@ -241,5 +243,19 @@ func TestInfoOnAServiceWithNoContainer(t *testing.T) {
 
 	if info["service-root"] == "" {
 		t.Error("expected the service root to be reported")
+	}
+}
+
+// What was set rather than what the container is made with: a service that
+// names no restart policy reports none, and the readme says what it falls back
+// to. An export that reads this back and sets it again leaves the service on
+// the default rather than pinning it there.
+func TestInfoReportsAnUnsetRestartPolicyAsEmpty(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withInfoService(t, datastore, "lollipop")
+
+	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if policy := info[service.RestartPolicyProperty]; policy != "" {
+		t.Errorf("expected an unset restart policy to be reported empty, got %q", policy)
 	}
 }

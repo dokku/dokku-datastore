@@ -627,7 +627,8 @@ func TestActionForAmbassador(t *testing.T) {
 }
 
 func TestAmbassadorForwardOptions(t *testing.T) {
-	// what every ambassador is made with, whatever it fronts
+	// what every ambassador is made with, whatever it fronts. A service that
+	// names no restart policy leaves its ambassador on the same default it has
 	base := func(options portforward.Options) portforward.Options {
 		options.Addresses = []string{portforward.AllInterfaces}
 		options.Detach = true
@@ -711,6 +712,33 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 					"dokku.ambassador.container-id": "def456",
 				},
 			}),
+		},
+		{
+			// the policy the service it fronts was given, rather than always
+			name: "a restart policy of its service's own",
+			input: ambassadorForwardOptionsInput{
+				AmbassadorName: "dokku.postgres.lake.ambassador",
+				CommandPrefix:  "postgres",
+				ContainerID:    "abc123",
+				ContainerPorts: []int{5432},
+				HostPorts:      []string{"5678"},
+				Image:          "dokku/ambassador:0.8.2",
+				RestartPolicy:  "on-failure:3",
+			},
+			expected: func() portforward.Options {
+				options := base(portforward.Options{
+					Target: "container/abc123",
+					Ports:  []string{"5678:5432"},
+					Name:   "dokku.postgres.lake.ambassador",
+					Labels: map[string]string{
+						"dokku":                         "ambassador",
+						"dokku.ambassador":              "postgres",
+						"dokku.ambassador.container-id": "abc123",
+					},
+				})
+				options.RestartPolicy = "on-failure:3"
+				return options
+			}(),
 		},
 	}
 

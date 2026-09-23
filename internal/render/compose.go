@@ -104,7 +104,7 @@ func Compose(input Input) ([]byte, error) {
 		Hostname:      arguments.ContainerName,
 		Image:         arguments.TaggedImage,
 		Command:       append(append([]string{}, arguments.Command...), arguments.ConfigOptions...),
-		Restart:       "always",
+		Restart:       RestartPolicy(arguments.RestartPolicy),
 		Labels: map[string]string{
 			"dokku":         "service",
 			"dokku.service": arguments.CommandPrefix,

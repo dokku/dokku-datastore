@@ -43,6 +43,8 @@ type UpgradeCommand struct {
 	logDriver string
 	// logOpt are the docker log options to use for the service container
 	logOpt []string
+	// restart is the docker restart policy to use for the service container
+	restart string
 }
 
 // Name returns the name of the command
@@ -111,6 +113,7 @@ func (c *UpgradeCommand) FlagSet() *flag.FlagSet {
 	f.StringVarP(&c.shmSize, "shm-size", "s", "", "override shared memory size for the service docker container")
 	f.StringVar(&c.logDriver, "log-driver", "", "the docker logging driver to run the service container with (default: the daemon's own)")
 	f.StringSliceVar(&c.logOpt, "log-opt", []string{}, "a comma-separated list of key=value docker log options for the service container")
+	f.StringVar(&c.restart, "restart", "", "the docker restart policy to run the service container with (default: always)")
 	return f
 }
 
@@ -231,6 +234,7 @@ func (c *UpgradeCommand) Run(args []string) int {
 		ShmSize:            changedString(flags, "shm-size", c.shmSize),
 		LogDriver:          changedString(flags, "log-driver", c.logDriver),
 		LogOptions:         changedSlice(flags, "log-opt", c.logOpt),
+		RestartPolicy:      changedString(flags, "restart", c.restart),
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1

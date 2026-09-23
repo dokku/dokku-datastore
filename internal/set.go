@@ -10,7 +10,7 @@ import (
 )
 
 // SettableProperties are the properties a service exposes through the set command
-var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.LogDriverProperty, service.LogOptProperty}
+var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty}
 
 // InvalidPropertyError reports a property the set command does not manage
 func InvalidPropertyError() error {
@@ -39,6 +39,8 @@ func ValidatePropertyValue(key string, value string) error {
 		return service.ValidateLogDriver(value)
 	case service.LogOptProperty:
 		return service.ValidateLogOptions(value)
+	case service.RestartPolicyProperty:
+		return service.ValidateRestartPolicy(value)
 	}
 
 	return nil

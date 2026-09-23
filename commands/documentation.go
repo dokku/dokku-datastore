@@ -338,7 +338,9 @@ export {{.PluginVariable}}_CUSTOM_ENV="USER=alpha;HOST=beta"
 dokku {{.CommandPrefix}}:create lollipop
 the container log is bounded by whatever 'dokku logs:set --global max-size' says, and
 by dokku's own default where it says nothing, which a service may override for itself.
-dokku {{.CommandPrefix}}:create lollipop --log-opt max-size=20m,max-file=3`
+dokku {{.CommandPrefix}}:create lollipop --log-opt max-size=20m,max-file=3
+the container is restarted by docker whenever it stops, which a service may change for itself.
+dokku {{.CommandPrefix}}:create lollipop --restart unless-stopped`
 }
 
 // Group is the readme usage section the command is documented under
@@ -774,7 +776,11 @@ keep the log unbounded, which is what a service had before there was anything to
 dokku {{.CommandPrefix}}:set lollipop log-opt max-size=unlimited
 send the container log somewhere other than the daemon's own driver
 dokku {{.CommandPrefix}}:set lollipop log-driver journald
-> NOTE: a log setting reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.`
+restart the container unless it was stopped on purpose, including across a docker restart
+dokku {{.CommandPrefix}}:set lollipop restart-policy unless-stopped
+go back to always restarting the container
+dokku {{.CommandPrefix}}:set lollipop restart-policy
+> NOTE: a log setting or a restart policy reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.`
 }
 
 // Group is the readme usage section the command is documented under

@@ -41,6 +41,10 @@ type UpgradeServiceInput struct {
 	// LogOptions are the docker log options the service container is run with
 	LogOptions *[]string
 
+	// RestartPolicy is the docker restart policy the service container is run
+	// with
+	RestartPolicy *string
+
 	// Datastore is the datastore the service belongs to
 	Datastore *service.Datastore
 
@@ -70,7 +74,8 @@ func (i UpgradeServiceInput) changesSettings() bool {
 		i.PostStartNetworks != nil ||
 		i.ShmSize != nil ||
 		i.LogDriver != nil ||
-		i.LogOptions != nil
+		i.LogOptions != nil ||
+		i.RestartPolicy != nil
 }
 
 // upgradeVersion is the version an upgrade moves a service to: the one asked
@@ -113,8 +118,8 @@ func upgradeVersion(d definition.Definition, recorded service.RecordedImage, req
 // UpgradeService recreates a service's container on a different image
 func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	// before anything, because an upgrade takes the old container away before it
-	// makes the new one, and a log option docker will not accept would leave the
-	// service with neither
+	// makes the new one, and a log option or a restart policy docker will not
+	// accept would leave the service with neither
 	driver := ""
 	if input.LogDriver != nil {
 		driver = *input.LogDriver
@@ -125,6 +130,11 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	}
 	if err := CheckLogConfig(driver, options); err != nil {
 		return err
+	}
+	if input.RestartPolicy != nil {
+		if err := service.ValidateRestartPolicy(*input.RestartPolicy); err != nil {
+			return err
+		}
 	}
 
 	// before the version is decided, because deciding it needs to know which
@@ -308,6 +318,9 @@ func applyUpgradeSettings(input UpgradeServiceInput) error {
 	if input.LogOptions != nil {
 		joined := strings.Join(*input.LogOptions, ",")
 		properties[service.LogOptProperty] = &joined
+	}
+	if input.RestartPolicy != nil {
+		properties[service.RestartPolicyProperty] = input.RestartPolicy
 	}
 
 	for key, value := range properties {

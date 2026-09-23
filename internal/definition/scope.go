@@ -47,6 +47,10 @@ type Scope struct {
 	LogDriver  string
 	LogOptions map[string]string
 
+	// RestartPolicy is the docker restart policy a container is made with, as
+	// the service set it. Empty means the default, which the renderer applies.
+	RestartPolicy string
+
 	// Args are the positional arguments of an extra subcommand.
 	Args map[string]string
 }

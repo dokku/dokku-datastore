@@ -3,6 +3,8 @@ package render
 import (
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestComposeForRedis(t *testing.T) {
@@ -212,5 +214,51 @@ func TestComposeDoublesADollarInALogOption(t *testing.T) {
 
 	if document := string(rendered); !strings.Contains(document, "tag: $$SERVICE") {
 		t.Errorf("expected the dollar sign to be doubled, got:\n%s", document)
+	}
+}
+
+// The same policy the docker path is handed, retry count and all, which compose
+// takes in docker's own syntax.
+func TestComposeCarriesTheRestartPolicy(t *testing.T) {
+	input := redisInput(t)
+	input.Scope.RestartPolicy = "on-failure:3"
+
+	rendered, err := Compose(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	if document := string(rendered); !strings.Contains(document, "restart: on-failure:3") {
+		t.Errorf("expected the restart policy to be carried, got:\n%s", document)
+	}
+}
+
+// A bare no is a boolean to a YAML 1.1 reader, and compose would be handed
+// false rather than a policy, so it has to reach the file as a string.
+func TestComposeQuotesARestartPolicyOfNo(t *testing.T) {
+	input := redisInput(t)
+	input.Scope.RestartPolicy = "no"
+
+	rendered, err := Compose(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	document := string(rendered)
+	if !strings.Contains(document, `restart: "no"`) {
+		t.Errorf("expected the policy to be quoted, got:\n%s", document)
+	}
+
+	parsed := struct {
+		Services map[string]map[string]any `yaml:"services"`
+	}{}
+	if err := yaml.Unmarshal(rendered, &parsed); err != nil {
+		t.Fatalf("unable to parse the rendered file: %s", err)
+	}
+
+	for name, service := range parsed.Services {
+		if policy, ok := service["restart"].(string); !ok || policy != "no" {
+			t.Errorf("expected %s to restart %q, got %#v", name, "no", service["restart"])
+		}
 	}
 }

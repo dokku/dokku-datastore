@@ -48,6 +48,9 @@ type CloneServiceInput struct {
 	// LogOptions are the docker log options the new container is run with
 	LogOptions []string
 
+	// RestartPolicy is the docker restart policy the new container is run with
+	RestartPolicy string
+
 	// PostCreateNetworks are attached after the new container is created
 	PostCreateNetworks []string
 
@@ -93,6 +96,7 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 		Password:           input.Password,
 		PostCreateNetworks: input.PostCreateNetworks,
 		PostStartNetworks:  input.PostStartNetworks,
+		RestartPolicy:      input.RestartPolicy,
 		ServiceName:        input.NewServiceName,
 		ShmSize:            input.ShmSize,
 		Logger:             input.Logger,
