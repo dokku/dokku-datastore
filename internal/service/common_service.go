@@ -6,9 +6,11 @@ import (
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/backend"
@@ -171,6 +173,45 @@ func ExposedHostPorts(s *Datastore, serviceName string) []string {
 	}
 
 	return ports
+}
+
+// ValidateHostPort reports whether a value is a host port a service can be
+// exposed on: a port, an ip:port that publishes it on an IPv4 address alone, or
+// an [ip]:port for an IPv6 address.
+func ValidateHostPort(value string) error {
+	address, port := "", value
+	if strings.HasPrefix(value, "[") {
+		end := strings.Index(value, "]")
+		rest, found := "", false
+		if end >= 0 {
+			rest, found = strings.CutPrefix(value[end+1:], ":")
+		}
+		if !found {
+			return fmt.Errorf("invalid port %q, an IPv6 address must be written as [address]:port", value)
+		}
+
+		address, port = value[1:end], rest
+		if ip, err := netip.ParseAddr(address); err != nil || !ip.Is6() {
+			return fmt.Errorf("invalid port %q, %q is not an IPv6 address", value, address)
+		}
+	} else if strings.Contains(value, ":") {
+		parts := strings.Split(value, ":")
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid port %q, an IPv6 address must be written as [address]:port", value)
+		}
+
+		address, port = parts[0], parts[1]
+		if ip, err := netip.ParseAddr(address); err != nil || !ip.Is4() {
+			return fmt.Errorf("invalid port %q, %q is not an IPv4 address", value, address)
+		}
+	}
+
+	number, err := strconv.Atoi(port)
+	if err != nil || number < 1 || number > 65535 {
+		return fmt.Errorf("invalid port %q, a port must be a number between 1 and 65535", value)
+	}
+
+	return nil
 }
 
 // ExposedPorts gets the exposed ports for a service

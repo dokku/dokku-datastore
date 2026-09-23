@@ -12,12 +12,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/dokku/docker-port-forward/portforward"
 	"github.com/dokku/dokku-datastore/internal/backend"
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
-	"github.com/dokku/dokku-datastore/internal/render"
 	"github.com/dokku/dokku/plugins/common"
 )
 
@@ -764,6 +765,12 @@ type ServicePortReconcileStatusInput struct {
 // service container it was made to front.
 const AmbassadorContainerIDLabel = "dokku.ambassador.container-id"
 
+// AmbassadorHalfCloseTimeout is how long an ambassador keeps a connection open
+// after one side stops sending. It is the value the ambassador image used to
+// run socat with, so a client that half-closes and then waits for its reply is
+// not cut off after socat's own half second.
+const AmbassadorHalfCloseTimeout = 100000000 * time.Second
+
 // ambassadorAction is what ServicePortReconcileStatus does with a service's
 // ambassador.
 type ambassadorAction int
@@ -789,91 +796,145 @@ const (
 	ambassadorReplace
 )
 
+// ambassadorState is what is known about a service and its ambassador when
+// deciding what to do with the ambassador.
+type ambassadorState struct {
+	// Exposed is whether the service has ports to publish
+	Exposed bool
+
+	// Status is the ambassador container's status, "missing" when there is none
+	Status string
+
+	// Managed is whether the ambassador was made by docker-port-forward. One
+	// that was not is an older ambassador that reaches the service through a
+	// legacy link
+	Managed bool
+
+	// Stale is whether docker-port-forward says the ambassador can no longer
+	// reach the service
+	Stale bool
+
+	// FrontedID is the service container the ambassador says it fronts
+	FrontedID string
+
+	// ServiceID is the service container there is now
+	ServiceID string
+}
+
 // actionForAmbassador maps the state of a service's ambassador onto what
 // ServicePortReconcileStatus does with it.
 //
-// An ambassador is only ever kept when it is running and says it fronts the
-// container the service has now. It holds no state, so anything else is
-// replaced rather than started: a stopped one was linked to a container that
-// may since have been removed and made again, and docker refuses to start a
-// container whose link target is not running, which is how an exposed service
-// used to fail to come back after a stop and a start. One made before the label
-// existed says nothing about what it fronts, and is replaced once for the same
-// reason.
-func actionForAmbassador(exposed bool, ambassadorStatus string, frontedID string, serviceID string) ambassadorAction {
-	if !exposed {
-		if ambassadorStatus == "missing" {
+// An ambassador is only ever kept when it is running, was made by
+// docker-port-forward, fronts the container the service has now, and can still
+// reach it. It holds no state, so anything else is replaced rather than
+// started. A stopped one may front a container that has since been removed and
+// made again. One made before the label existed says nothing about what it
+// fronts. One made with a legacy link cannot find the service at all on docker
+// 29, which no longer hands a linked container the environment it reads its
+// target from. And one that dials the service by an address the service no
+// longer has publishes nothing.
+func actionForAmbassador(state ambassadorState) ambassadorAction {
+	if !state.Exposed {
+		if state.Status == "missing" {
 			return ambassadorNone
 		}
 
 		return ambassadorRemove
 	}
 
-	if ambassadorStatus == "missing" {
+	if state.Status == "missing" {
 		return ambassadorCreate
 	}
 
-	if ambassadorStatus == "running" && frontedID != "" && frontedID == serviceID {
+	if state.Status == "running" && state.Managed && !state.Stale && state.FrontedID != "" && state.FrontedID == state.ServiceID {
 		return ambassadorKeep
 	}
 
 	return ambassadorReplace
 }
 
-// ambassadorRunArgsInput is the input for ambassadorRunArgs.
-type ambassadorRunArgsInput struct {
+// ambassadorForwardOptionsInput is the input for ambassadorForwardOptions.
+type ambassadorForwardOptionsInput struct {
 	// AmbassadorName is the name of the ambassador container
 	AmbassadorName string
 
-	// CommandPrefix is the datastore's command prefix, which is the alias the
-	// service container is linked under
+	// CommandPrefix is the datastore's command prefix
 	CommandPrefix string
 
 	// ContainerID is the service container the ambassador fronts
 	ContainerID string
 
-	// ContainerName is the name of the service container
-	ContainerName string
-
 	// ContainerPorts are the ports the service listens on
 	ContainerPorts []int
 
 	// HostPorts are the host ports each container port is published on, in the
-	// same order
+	// same order. Each is a port, or an ip:port that publishes it on that
+	// address alone
 	HostPorts []string
 
 	// Image is the ambassador image
 	Image string
 
-	// LogArgs are the log flags the service container was given
-	LogArgs []string
+	// LogConfig is the logging the service container was given
+	LogConfig LogConfig
 }
 
-// ambassadorRunArgs builds the docker arguments that run a service's
-// ambassador.
-func ambassadorRunArgs(input ambassadorRunArgsInput) []string {
-	arguments := []string{
-		"container",
-		"run",
-		"-d",
-		"--link=" + fmt.Sprintf("%s:%s", input.ContainerName, input.CommandPrefix),
-		"--name=" + input.AmbassadorName,
-		"--restart=always",
-		"--label=dokku=ambassador",
-		"--label=dokku.ambassador=" + input.CommandPrefix,
-		"--label=" + AmbassadorContainerIDLabel + "=" + input.ContainerID,
-	}
-
-	// the same cap the service it fronts is given. It is the only other
-	// container a service leaves running, so an unbounded log here is the same
-	// bug in a smaller container
-	arguments = append(arguments, input.LogArgs...)
-
+// ambassadorForwardOptions builds the docker-port-forward options that run a
+// service's ambassador.
+func ambassadorForwardOptions(input ambassadorForwardOptionsInput) portforward.Options {
+	// the port file holds either a port or an ip:port, both of which are the
+	// front half of a docker style port spec. A port with no address of its own
+	// is published on every interface, as a plain --publish was
+	ports := make([]string, 0, len(input.HostPorts))
 	for i, hostPort := range input.HostPorts {
-		arguments = append(arguments, fmt.Sprintf("--publish=%s:%d", hostPort, input.ContainerPorts[i]))
+		ports = append(ports, fmt.Sprintf("%s:%d", hostPort, input.ContainerPorts[i]))
 	}
 
-	return append(arguments, input.Image)
+	return portforward.Options{
+		Target:              "container/" + input.ContainerID,
+		Ports:               ports,
+		Addresses:           []string{portforward.AllInterfaces},
+		Detach:              true,
+		RestartPolicy:       portforward.RestartAlways,
+		Name:                input.AmbassadorName,
+		HelperImage:         input.Image,
+		Pull:                portforward.PullNever,
+		TCPHalfCloseTimeout: AmbassadorHalfCloseTimeout,
+
+		// the host port is left for docker to claim, as it always was. The check
+		// runs as the dokku user, which cannot bind a port below 1024 that the
+		// daemon publishes without trouble
+		SkipPreflight: true,
+
+		// the same cap the service it fronts is given. It is the only other
+		// container a service leaves running, so an unbounded log here is the
+		// same bug in a smaller container
+		LogDriver: input.LogConfig.Driver,
+		LogOpts:   input.LogConfig.Options,
+
+		Labels: map[string]string{
+			"dokku":                    "ambassador",
+			"dokku.ambassador":         input.CommandPrefix,
+			AmbassadorContainerIDLabel: input.ContainerID,
+		},
+	}
+}
+
+// inspectAmbassador reports whether an ambassador was made by
+// docker-port-forward and, if so, whether it can still reach its service.
+func inspectAmbassador(ctx context.Context, ambassadorName string) (managed bool, stale bool, err error) {
+	helpers, err := portforward.List(ctx, portforward.ListOptions{Name: ambassadorName})
+	if errors.Is(err, portforward.ErrNotHelper) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("failed to inspect container %s: %w", ambassadorName, err)
+	}
+	if len(helpers) == 0 {
+		return false, false, nil
+	}
+
+	return true, helpers[0].Stale, nil
 }
 
 // ServicePortReconcileStatus makes a service's ambassador match whether the
@@ -882,21 +943,27 @@ func ambassadorRunArgs(input ambassadorRunArgsInput) []string {
 func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileStatusInput) error {
 	serviceProperties := input.Datastore.Properties()
 	portFile := Files(input.Datastore, input.ServiceName).Port
-	containerName := ContainerName(input.Datastore, input.ServiceName)
 	ambassadorName := AmbassadorContainerName(input.Datastore, input.ServiceName)
 
-	exposed := common.FileExists(portFile) && common.ReadFirstLine(portFile) != ""
-	ambassadorStatus := backend.Status(ctx, ambassadorName)
-	frontedID := ""
-	if ambassadorStatus != "missing" {
-		frontedID, _ = common.DockerInspect(ambassadorName, fmt.Sprintf("{{ index .Config.Labels %q }}", AmbassadorContainerIDLabel))
+	state := ambassadorState{
+		Exposed: common.FileExists(portFile) && common.ReadFirstLine(portFile) != "",
+		Status:  backend.Status(ctx, ambassadorName),
+		ServiceID: LiveContainerID(ctx, LiveContainerIDInput{
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+		}),
 	}
-	containerID := LiveContainerID(ctx, LiveContainerIDInput{
-		Datastore:   input.Datastore,
-		ServiceName: input.ServiceName,
-	})
+	if state.Exposed && state.Status != "missing" {
+		state.FrontedID, _ = common.DockerInspect(ambassadorName, fmt.Sprintf("{{ index .Config.Labels %q }}", AmbassadorContainerIDLabel))
 
-	switch actionForAmbassador(exposed, ambassadorStatus, frontedID, containerID) {
+		var err error
+		state.Managed, state.Stale, err = inspectAmbassador(ctx, ambassadorName)
+		if err != nil {
+			return err
+		}
+	}
+
+	switch actionForAmbassador(state) {
 	case ambassadorNone, ambassadorKeep:
 		return nil
 	case ambassadorRemove:
@@ -908,10 +975,10 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		return fmt.Errorf("port file %s holds %d ports, expected %d", portFile, len(hostPorts), len(serviceProperties.Ports))
 	}
 
-	// checked here rather than left to docker, which refuses a link to a
-	// container that is not running with an error that names the ambassador
-	// rather than the service that is actually down
-	if containerID == "" || backend.Status(ctx, containerID) != "running" {
+	// checked here rather than left to docker-port-forward, which refuses a
+	// target that is not running with an error that names the container rather
+	// than the service that is actually down
+	if state.ServiceID == "" || backend.Status(ctx, state.ServiceID) != "running" {
 		return fmt.Errorf("unable to publish ports for %s: its container is not running", input.ServiceName)
 	}
 
@@ -933,27 +1000,31 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		return err
 	}
 
-	if ambassadorStatus != "missing" {
+	if state.Status != "missing" {
 		if err := RemoveAmbassadorContainer(ctx, input.Datastore, input.ServiceName); err != nil {
 			return err
 		}
 	}
 
-	_, err = execx.Run(ctx, common.ExecCommandInput{
-		Command: common.DockerBin(),
-		Args: ambassadorRunArgs(ambassadorRunArgsInput{
-			AmbassadorName: ambassadorName,
-			CommandPrefix:  serviceProperties.CommandPrefix,
-			ContainerID:    containerID,
-			ContainerName:  containerName,
-			ContainerPorts: serviceProperties.Ports,
-			HostPorts:      hostPorts,
-			Image:          hostenv.AmbassadorImage,
-			LogArgs:        render.LogArgs(logConfig.Driver, logConfig.Options),
-		}),
-	})
+	result, err := portforward.Forward(ctx, ambassadorForwardOptions(ambassadorForwardOptionsInput{
+		AmbassadorName: ambassadorName,
+		CommandPrefix:  serviceProperties.CommandPrefix,
+		ContainerID:    state.ServiceID,
+		ContainerPorts: serviceProperties.Ports,
+		HostPorts:      hostPorts,
+		Image:          hostenv.AmbassadorImage,
+		LogConfig:      logConfig,
+	}))
 	if err != nil {
 		return fmt.Errorf("failed to run container %s: %w", ambassadorName, err)
+	}
+
+	// docker-port-forward hands back a helper that already covers the ports
+	// rather than making another. One that is not the ambassador is something
+	// else publishing the service, which the ambassador would be fighting for
+	// the same host ports
+	if result.Existing && result.HelperName != ambassadorName {
+		return fmt.Errorf("unable to publish ports for %s: they are already forwarded by container %s", input.ServiceName, result.HelperName)
 	}
 
 	return nil

@@ -7,8 +7,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/dokku/docker-port-forward/portforward"
 )
 
 func TestValidateServiceName(t *testing.T) {
@@ -585,82 +589,155 @@ func TestPullDisabledErrorIsErrPullDisabled(t *testing.T) {
 	}
 }
 
-// An ambassador is kept only when it is running and fronts the container the
-// service has now. Everything else about an exposed service's ambassador is
-// replaced rather than started, since starting one linked to a container that
-// is gone or down is what docker refuses.
+// An ambassador is kept only when it is running, was made by
+// docker-port-forward, fronts the container the service has now, and can still
+// reach it. Everything else about an exposed service's ambassador is replaced
+// rather than started.
 func TestActionForAmbassador(t *testing.T) {
 	tests := []struct {
-		name      string
-		exposed   bool
-		status    string
-		frontedID string
-		serviceID string
-		expected  ambassadorAction
+		name     string
+		state    ambassadorState
+		expected ambassadorAction
 	}{
-		{name: "not exposed, no ambassador", exposed: false, status: "missing", serviceID: "abc", expected: ambassadorNone},
-		{name: "not exposed, running ambassador", exposed: false, status: "running", frontedID: "abc", serviceID: "abc", expected: ambassadorRemove},
-		{name: "not exposed, stopped ambassador", exposed: false, status: "exited", frontedID: "old", serviceID: "abc", expected: ambassadorRemove},
-		{name: "exposed, no ambassador", exposed: true, status: "missing", serviceID: "abc", expected: ambassadorCreate},
-		{name: "exposed, running and fronting the service", exposed: true, status: "running", frontedID: "abc", serviceID: "abc", expected: ambassadorKeep},
-		{name: "exposed, fronting a container that is gone", exposed: true, status: "running", frontedID: "old", serviceID: "abc", expected: ambassadorReplace},
-		{name: "exposed, made before the label existed", exposed: true, status: "running", frontedID: "", serviceID: "abc", expected: ambassadorReplace},
-		{name: "exposed, no service container", exposed: true, status: "running", frontedID: "", serviceID: "", expected: ambassadorReplace},
-		{name: "exposed, stopped by a pause", exposed: true, status: "exited", frontedID: "abc", serviceID: "abc", expected: ambassadorReplace},
-		{name: "exposed, created and never started", exposed: true, status: "created", frontedID: "abc", serviceID: "abc", expected: ambassadorReplace},
-		{name: "exposed, dead", exposed: true, status: "dead", frontedID: "abc", serviceID: "abc", expected: ambassadorReplace},
-		{name: "exposed, restarting on a failed link", exposed: true, status: "restarting", frontedID: "abc", serviceID: "abc", expected: ambassadorReplace},
-		{name: "exposed, a state docker has not shipped yet", exposed: true, status: "hibernating", frontedID: "abc", serviceID: "abc", expected: ambassadorReplace},
+		{name: "not exposed, no ambassador", state: ambassadorState{Status: "missing", ServiceID: "abc"}, expected: ambassadorNone},
+		{name: "not exposed, running ambassador", state: ambassadorState{Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc"}, expected: ambassadorRemove},
+		{name: "not exposed, stopped ambassador", state: ambassadorState{Status: "exited", Managed: true, FrontedID: "old", ServiceID: "abc"}, expected: ambassadorRemove},
+		{name: "not exposed, legacy ambassador", state: ambassadorState{Status: "restarting", FrontedID: "abc", ServiceID: "abc"}, expected: ambassadorRemove},
+		{name: "exposed, no ambassador", state: ambassadorState{Exposed: true, Status: "missing", ServiceID: "abc"}, expected: ambassadorCreate},
+		{name: "exposed, running and fronting the service", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc"}, expected: ambassadorKeep},
+		{name: "exposed, fronting a container that is gone", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "old", ServiceID: "abc"}, expected: ambassadorReplace},
+		{name: "exposed, made before the label existed", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "", ServiceID: "abc"}, expected: ambassadorReplace},
+		{name: "exposed, no service container", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "", ServiceID: ""}, expected: ambassadorReplace},
+		{name: "exposed, made with a legacy link", state: ambassadorState{Exposed: true, Status: "running", FrontedID: "abc", ServiceID: "abc"}, expected: ambassadorReplace},
+		{name: "exposed, legacy link failing on docker 29", state: ambassadorState{Exposed: true, Status: "restarting", FrontedID: "abc", ServiceID: "abc"}, expected: ambassadorReplace},
+		{name: "exposed, dialing an address the service no longer has", state: ambassadorState{Exposed: true, Status: "running", Managed: true, Stale: true, FrontedID: "abc", ServiceID: "abc"}, expected: ambassadorReplace},
+		{name: "exposed, stopped by a pause", state: ambassadorState{Exposed: true, Status: "exited", Managed: true, FrontedID: "abc", ServiceID: "abc"}, expected: ambassadorReplace},
+		{name: "exposed, created and never started", state: ambassadorState{Exposed: true, Status: "created", Managed: true, FrontedID: "abc", ServiceID: "abc"}, expected: ambassadorReplace},
+		{name: "exposed, dead", state: ambassadorState{Exposed: true, Status: "dead", Managed: true, FrontedID: "abc", ServiceID: "abc"}, expected: ambassadorReplace},
+		{name: "exposed, a state docker has not shipped yet", state: ambassadorState{Exposed: true, Status: "hibernating", Managed: true, FrontedID: "abc", ServiceID: "abc"}, expected: ambassadorReplace},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if actual := actionForAmbassador(test.exposed, test.status, test.frontedID, test.serviceID); actual != test.expected {
+			if actual := actionForAmbassador(test.state); actual != test.expected {
 				t.Errorf("expected %d, got %d", test.expected, actual)
 			}
 		})
 	}
 }
 
-func TestAmbassadorRunArgs(t *testing.T) {
+func TestAmbassadorForwardOptions(t *testing.T) {
+	// what every ambassador is made with, whatever it fronts
+	base := func(options portforward.Options) portforward.Options {
+		options.Addresses = []string{portforward.AllInterfaces}
+		options.Detach = true
+		options.RestartPolicy = portforward.RestartAlways
+		options.HelperImage = "dokku/ambassador:0.8.2"
+		options.Pull = portforward.PullNever
+		options.TCPHalfCloseTimeout = 100000000 * time.Second
+		options.SkipPreflight = true
+		return options
+	}
+
 	tests := []struct {
 		name     string
-		input    ambassadorRunArgsInput
-		expected string
+		input    ambassadorForwardOptionsInput
+		expected portforward.Options
 	}{
 		{
 			name: "one port",
-			input: ambassadorRunArgsInput{
+			input: ambassadorForwardOptionsInput{
 				AmbassadorName: "dokku.postgres.lake.ambassador",
 				CommandPrefix:  "postgres",
 				ContainerID:    "abc123",
-				ContainerName:  "dokku.postgres.lake",
 				ContainerPorts: []int{5432},
 				HostPorts:      []string{"5678"},
 				Image:          "dokku/ambassador:0.8.2",
-				LogArgs:        []string{"--log-opt=max-size=10m"},
+				LogConfig:      LogConfig{Options: map[string]string{"max-size": "10m"}},
 			},
-			expected: "container run -d --link=dokku.postgres.lake:postgres --name=dokku.postgres.lake.ambassador --restart=always --label=dokku=ambassador --label=dokku.ambassador=postgres --label=dokku.ambassador.container-id=abc123 --log-opt=max-size=10m --publish=5678:5432 dokku/ambassador:0.8.2",
+			expected: base(portforward.Options{
+				Target:  "container/abc123",
+				Ports:   []string{"5678:5432"},
+				Name:    "dokku.postgres.lake.ambassador",
+				LogOpts: map[string]string{"max-size": "10m"},
+				Labels: map[string]string{
+					"dokku":                         "ambassador",
+					"dokku.ambassador":              "postgres",
+					"dokku.ambassador.container-id": "abc123",
+				},
+			}),
 		},
 		{
 			name: "several ports, published in order",
-			input: ambassadorRunArgsInput{
+			input: ambassadorForwardOptionsInput{
 				AmbassadorName: "dokku.rabbitmq.queue.ambassador",
 				CommandPrefix:  "rabbitmq",
 				ContainerID:    "def456",
-				ContainerName:  "dokku.rabbitmq.queue",
 				ContainerPorts: []int{5672, 4369, 35197, 15672},
 				HostPorts:      []string{"1", "2", "3", "4"},
 				Image:          "dokku/ambassador:0.8.2",
 			},
-			expected: "container run -d --link=dokku.rabbitmq.queue:rabbitmq --name=dokku.rabbitmq.queue.ambassador --restart=always --label=dokku=ambassador --label=dokku.ambassador=rabbitmq --label=dokku.ambassador.container-id=def456 --publish=1:5672 --publish=2:4369 --publish=3:35197 --publish=4:15672 dokku/ambassador:0.8.2",
+			expected: base(portforward.Options{
+				Target: "container/def456",
+				Ports:  []string{"1:5672", "2:4369", "3:35197", "4:15672"},
+				Name:   "dokku.rabbitmq.queue.ambassador",
+				Labels: map[string]string{
+					"dokku":                         "ambassador",
+					"dokku.ambassador":              "rabbitmq",
+					"dokku.ambassador.container-id": "def456",
+				},
+			}),
+		},
+		{
+			name: "ports on addresses of their own",
+			input: ambassadorForwardOptionsInput{
+				AmbassadorName: "dokku.rabbitmq.queue.ambassador",
+				CommandPrefix:  "rabbitmq",
+				ContainerID:    "def456",
+				ContainerPorts: []int{5672, 4369, 35197, 15672},
+				HostPorts:      []string{"127.0.0.1:1", "[::1]:2", "3", "10.0.0.2:4"},
+				Image:          "dokku/ambassador:0.8.2",
+				LogConfig:      LogConfig{Driver: "local", Options: map[string]string{"max-size": "5m", "max-file": "2"}},
+			},
+			expected: base(portforward.Options{
+				Target:    "container/def456",
+				Ports:     []string{"127.0.0.1:1:5672", "[::1]:2:4369", "3:35197", "10.0.0.2:4:15672"},
+				Name:      "dokku.rabbitmq.queue.ambassador",
+				LogDriver: "local",
+				LogOpts:   map[string]string{"max-size": "5m", "max-file": "2"},
+				Labels: map[string]string{
+					"dokku":                         "ambassador",
+					"dokku.ambassador":              "rabbitmq",
+					"dokku.ambassador.container-id": "def456",
+				},
+			}),
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if actual := strings.Join(ambassadorRunArgs(test.input), " "); actual != test.expected {
-				t.Errorf("expected:\n%s\ngot:\n%s", test.expected, actual)
+			if actual := ambassadorForwardOptions(test.input); !reflect.DeepEqual(actual, test.expected) {
+				t.Errorf("expected:\n%+v\ngot:\n%+v", test.expected, actual)
+			}
+		})
+	}
+}
+
+func TestValidateHostPort(t *testing.T) {
+	valid := []string{"1", "5432", "65535", "127.0.0.1:5432", "0.0.0.0:6379", "[::1]:5432", "[::]:5432", "[2001:db8::1]:80"}
+	for _, value := range valid {
+		t.Run("valid "+value, func(t *testing.T) {
+			if err := ValidateHostPort(value); err != nil {
+				t.Errorf("expected %q to be valid, got %v", value, err)
+			}
+		})
+	}
+
+	invalid := []string{"", "0", "65536", "-1", "port", "127.0.0.1:", ":5432", "localhost:5432", "example.com:5432", "300.0.0.1:5432", "::1:5432", "[::1]5432", "[::1:5432", "[127.0.0.1]:5432", "::ffff:127.0.0.1:5432", "127.0.0.1:5432:5432", "[::1]:0"}
+	for _, value := range invalid {
+		t.Run("invalid "+value, func(t *testing.T) {
+			if err := ValidateHostPort(value); err == nil {
+				t.Errorf("expected %q to be invalid", value)
 			}
 		})
 	}

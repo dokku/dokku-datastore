@@ -67,6 +67,15 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 		return fmt.Errorf("%d ports to be exposed need to be provided in the following order: %s", len(input.Ports), strings.Join(ports, ","))
 	}
 
+	// checked before the port file is written, since that file is what says a
+	// service is exposed. A port the ambassador cannot publish would otherwise
+	// leave a service reported as exposed that publishes nothing
+	for _, port := range input.Ports {
+		if err := service.ValidateHostPort(port); err != nil {
+			return err
+		}
+	}
+
 	// ahead of the port file, which is the only thing that says a service is
 	// exposed. Reconciling the ports fetches this too, but by then the file is
 	// written, so a host that cannot get the ambassador would be left with a
