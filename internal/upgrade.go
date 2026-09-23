@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
@@ -276,25 +277,30 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 func applyUpgradeSettings(input UpgradeServiceInput) error {
 	serviceFiles := service.Files(input.Datastore, input.ServiceName)
 
-	files := map[string]*string{
-		serviceFiles.ConfigOptions: input.ConfigOptions,
-		serviceFiles.ShmSize:       input.ShmSize,
+	// the config options can carry credentials, so they are kept private
+	files := []struct {
+		filename string
+		value    *string
+		mode     os.FileMode
+	}{
+		{filename: serviceFiles.ConfigOptions, value: input.ConfigOptions, mode: service.PrivateFileMode},
+		{filename: serviceFiles.ShmSize, value: input.ShmSize, mode: 0644},
 	}
-	for filename, value := range files {
-		if value == nil {
+	for _, file := range files {
+		if file.value == nil {
 			continue
 		}
 
-		if err := writeServiceFile(filename, *value); err != nil {
+		if err := writeServiceFile(file.filename, *file.value, file.mode); err != nil {
 			return err
 		}
 	}
 
 	// stored one per line, and given semi-colon delimited, the same way create
-	// takes it
+	// takes it. Private for the same reason the config options are
 	if input.CustomEnv != nil {
 		lines := strings.Join(strings.Split(*input.CustomEnv, ";"), "\n")
-		if err := writeServiceFile(serviceFiles.Env, lines); err != nil {
+		if err := writeServiceFile(serviceFiles.Env, lines, service.PrivateFileMode); err != nil {
 			return err
 		}
 	}

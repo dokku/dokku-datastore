@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -232,5 +234,83 @@ func TestTheScriptCallsTheHelperTheInstallWrites(t *testing.T) {
 		if !strings.Contains(string(script), installed) {
 			t.Errorf("expected %s to call %s", name, installed)
 		}
+	}
+}
+
+// A service made by an older plugin keeps whatever modes it was written with,
+// so the install is what takes other users off the files holding its secrets.
+func TestRestrictServiceSecretsTightensWhatOlderPluginsLeftOpen(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withDataRoot(t)
+
+	folders := service.Folders(datastore, "lollipop")
+	files := service.Files(datastore, "lollipop")
+
+	for _, folder := range []string{folders.Backup, folders.BackupEncryption} {
+		if err := os.MkdirAll(folder, 0775); err != nil {
+			t.Fatalf("failed to create %s: %s", folder, err)
+		}
+		if err := os.Chmod(folder, 0775); err != nil {
+			t.Fatalf("failed to chmod %s: %s", folder, err)
+		}
+	}
+
+	private := []string{
+		filepath.Join(folders.Backup, "AWS_ACCESS_KEY_ID"),
+		filepath.Join(folders.Backup, "AWS_SECRET_ACCESS_KEY"),
+		filepath.Join(folders.BackupEncryption, "ENCRYPTION_KEY"),
+		files.Compose,
+		files.Env,
+		files.ConfigOptions,
+		files.Password,
+	}
+	for _, filename := range append(private, files.Memory) {
+		if err := os.WriteFile(filename, []byte("value"), 0644); err != nil {
+			t.Fatalf("failed to write %s: %s", filename, err)
+		}
+		if err := os.Chmod(filename, 0644); err != nil {
+			t.Fatalf("failed to chmod %s: %s", filename, err)
+		}
+	}
+
+	if err := restrictServiceSecrets(datastore, "lollipop"); err != nil {
+		t.Fatalf("failed to restrict the service's secrets: %s", err)
+	}
+
+	for _, folder := range []string{folders.Backup, folders.BackupEncryption} {
+		if mode := fileMode(t, folder); mode != BackupFolderMode {
+			t.Errorf("expected %s to be %o, got %o", folder, BackupFolderMode, mode)
+		}
+	}
+
+	for _, filename := range private {
+		if mode := fileMode(t, filename); mode != service.PrivateFileMode {
+			t.Errorf("expected %s to be %o, got %o", filename, service.PrivateFileMode, mode)
+		}
+	}
+
+	// nothing secret is in it, and other tooling may read it
+	if mode := fileMode(t, files.Memory); mode != 0644 {
+		t.Errorf("expected %s to be left at 644, got %o", files.Memory, mode)
+	}
+}
+
+// Most services never set up backups, and a service can predate the compose
+// file, so none of what is tightened has to be there.
+func TestRestrictServiceSecretsToleratesMissingFiles(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withDataRoot(t)
+
+	root := service.Folders(datastore, "lollipop").Root
+	if err := os.MkdirAll(root, 0775); err != nil {
+		t.Fatalf("failed to create %s: %s", root, err)
+	}
+
+	if err := restrictServiceSecrets(datastore, "lollipop"); err != nil {
+		t.Fatalf("expected nothing to do, got %s", err)
+	}
+
+	if _, err := os.Stat(service.Folders(datastore, "lollipop").Backup); !os.IsNotExist(err) {
+		t.Errorf("expected no backup folder to be created, got %v", err)
 	}
 }

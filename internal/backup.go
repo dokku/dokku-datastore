@@ -39,29 +39,30 @@ const (
 // it is passed only when a service has one.
 const keyserverEnv = "KEYSERVER"
 
+// BackupFolderMode is the mode of the folders holding a service's backup
+// credentials and encryption settings. Nothing but the dokku user and group
+// reads them, so nobody else is let in, not even to list what is there.
+const BackupFolderMode = 0750
+
 // writeBackupFile writes one of the backup settings files for a service
 func writeBackupFile(folder string, name string, contents string) error {
-	if err := os.MkdirAll(folder, ServiceFolderMode); err != nil {
+	if err := os.MkdirAll(folder, BackupFolderMode); err != nil {
 		return fmt.Errorf("unable to create %s: %w", folder, err)
 	}
 
 	if err := common.SetPermissions(common.SetPermissionInput{
 		Filename:  folder,
 		GroupName: hostenv.SystemGroup(),
-		Mode:      ServiceFolderMode,
+		Mode:      BackupFolderMode,
 		Username:  hostenv.SystemUser(),
 	}); err != nil {
 		return fmt.Errorf("unable to set permissions on %s: %w", folder, err)
 	}
 
+	// replaced rather than rewritten, because a file left by an older plugin may
+	// still be readable by everyone and would hold the new secret until chmodded
 	filename := filepath.Join(folder, name)
-	if err := common.WriteStringToFile(common.WriteStringToFileInput{
-		Content:   contents,
-		Filename:  filename,
-		GroupName: hostenv.SystemGroup(),
-		Mode:      0640,
-		Username:  hostenv.SystemUser(),
-	}); err != nil {
+	if err := service.ReplaceFileAtomically(filename, contents, service.PrivateFileMode); err != nil {
 		return fmt.Errorf("unable to write %s: %w", filename, err)
 	}
 
@@ -280,23 +281,33 @@ type BackupArgsInput struct {
 	Image string
 }
 
-// BackupArgs builds the argv for the container that ships a dump to s3.
-func BackupArgs(input BackupArgsInput) []string {
+// BackupArgs builds the argv for the container that ships a dump to s3, and the
+// environment docker has to be run with for it.
+//
+// The argv names each variable without a value, which docker fills in from its
+// own environment. The values include the credentials and the encryption
+// passphrase, and an argv is readable by every user on the host, where the
+// environment of a process is readable only by its owner.
+func BackupArgs(input BackupArgsInput) ([]string, map[string]string) {
 	args := []string{"container", "run", "--rm"}
+	env := map[string]string{}
+
+	setenv := func(name string, value string) {
+		args = append(args, "-e", name)
+		env[name] = value
+	}
 
 	if input.AccessKeyID != "" {
-		args = append(args, "-e", fmt.Sprintf("%s=%s", accessKeyIDFile, input.AccessKeyID))
+		setenv(accessKeyIDFile, input.AccessKeyID)
 	}
 
 	if input.SecretAccessKey != "" {
-		args = append(args, "-e", fmt.Sprintf("%s=%s", secretAccessKeyFile, input.SecretAccessKey))
+		setenv(secretAccessKeyFile, input.SecretAccessKey)
 	}
 
-	args = append(args,
-		"-e", fmt.Sprintf("BUCKET_NAME=%s", input.BucketName),
-		"-e", fmt.Sprintf("BACKUP_NAME=%s", input.BackupName),
-		"-v", fmt.Sprintf("%s:/backup", input.BackupDir),
-	)
+	setenv("BUCKET_NAME", input.BucketName)
+	setenv("BACKUP_NAME", input.BackupName)
+	args = append(args, "-v", fmt.Sprintf("%s:/backup", input.BackupDir))
 
 	// sorted, because a map would otherwise emit a different command each run
 	names := make([]string, 0, len(input.Settings))
@@ -306,14 +317,14 @@ func BackupArgs(input BackupArgsInput) []string {
 	sort.Strings(names)
 
 	for _, name := range names {
-		args = append(args, "-e", fmt.Sprintf("%s=%s", name, input.Settings[name]))
+		setenv(name, input.Settings[name])
 	}
 
 	if input.Keyserver != "" {
-		args = append(args, "-e", fmt.Sprintf("%s=%s", keyserverEnv, input.Keyserver))
+		setenv(keyserverEnv, input.Keyserver)
 	}
 
-	return append(args, input.Image)
+	return append(args, input.Image), env
 }
 
 // BackupInput is the input for the Backup function
@@ -413,9 +424,11 @@ func Backup(ctx context.Context, input BackupInput) error {
 		}
 	}
 
+	args, env := BackupArgs(arguments)
 	if _, err := execx.Run(ctx, common.ExecCommandInput{
 		Command:      common.DockerBin(),
-		Args:         BackupArgs(arguments),
+		Args:         args,
+		Env:          env,
 		StreamStderr: true,
 		StreamStdout: true,
 	}); err != nil {

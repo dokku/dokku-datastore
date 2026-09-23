@@ -230,6 +230,7 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 		pinned, unresolved := input.Datastore.ForService(serviceName)
 		if unresolved != nil {
 			input.Logger.Warn(WarnInput{Warning: unresolved.Error()})
+			pinned = input.Datastore
 		} else if err := service.PinDefinition(pinned, serviceName); err != nil {
 			return err
 		}
@@ -244,26 +245,90 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 			if err := common.SetPermissions(common.SetPermissionInput{
 				Filename:  serviceFiles.ConfigOptions,
 				GroupName: hostenv.SystemGroup(),
-				Mode:      0644,
+				Mode:      service.PrivateFileMode,
 				Username:  hostenv.SystemUser(),
 			}); err != nil {
 				return fmt.Errorf("unable to set permissions on %s: %w", serviceFiles.ConfigOptions, err)
 			}
+		}
+
+		if err := restrictServiceSecrets(pinned, serviceName); err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-// writeServiceFile writes one of a service's metadata files
-func writeServiceFile(filename string, contents string) error {
-	if err := common.WriteStringToFile(common.WriteStringToFileInput{
-		Content:   contents,
-		Filename:  filename,
-		GroupName: hostenv.SystemGroup(),
-		Mode:      0644,
-		Username:  hostenv.SystemUser(),
-	}); err != nil {
+// restrictServiceSecrets takes away access by other users to every file of a
+// service that holds a secret. Older versions of the plugin, and the bash
+// plugins before them, left backup credentials, the custom environment and the
+// rendered compose file readable by everyone, and writing them privately from
+// now on does nothing for a file that is never written again.
+func restrictServiceSecrets(s *service.Datastore, serviceName string) error {
+	serviceFolders := service.Folders(s, serviceName)
+	serviceFiles := service.Files(s, serviceName)
+
+	restrict := func(filename string, mode os.FileMode) error {
+		if _, err := os.Stat(filename); errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+
+		if err := common.SetPermissions(common.SetPermissionInput{
+			Filename:  filename,
+			GroupName: hostenv.SystemGroup(),
+			Mode:      mode,
+			Username:  hostenv.SystemUser(),
+		}); err != nil {
+			return fmt.Errorf("unable to set permissions on %s: %w", filename, err)
+		}
+
+		return nil
+	}
+
+	for _, folder := range []string{serviceFolders.Backup, serviceFolders.BackupEncryption} {
+		entries, err := os.ReadDir(folder)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("unable to read %s: %w", folder, err)
+		}
+
+		if err := restrict(folder, BackupFolderMode); err != nil {
+			return err
+		}
+
+		for _, entry := range entries {
+			if !entry.Type().IsRegular() {
+				continue
+			}
+
+			if err := restrict(filepath.Join(folder, entry.Name()), service.PrivateFileMode); err != nil {
+				return err
+			}
+		}
+	}
+
+	files := []string{serviceFiles.Compose, serviceFiles.Env, serviceFiles.ConfigOptions}
+	for _, secret := range s.Definition.Dokku.Secrets {
+		files = append(files, filepath.Join(serviceFolders.Root, secret.File))
+	}
+
+	for _, filename := range files {
+		if err := restrict(filename, service.PrivateFileMode); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// writeServiceFile writes one of a service's metadata files. It replaces the
+// file rather than rewriting it, so that a file tightened to a private mode is
+// never left holding its new contents under the mode it had before.
+func writeServiceFile(filename string, contents string, mode os.FileMode) error {
+	if err := service.ReplaceFileAtomically(filename, contents, mode); err != nil {
 		return fmt.Errorf("unable to write %s: %w", filename, err)
 	}
 

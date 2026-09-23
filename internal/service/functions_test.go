@@ -770,3 +770,84 @@ func TestValidateHostPort(t *testing.T) {
 		})
 	}
 }
+
+// A file holding a secret is written readable by its owner alone and only then
+// given its mode, so replacing one never leaves the new contents where others
+// could read them, even when the old file was readable by everyone.
+func TestReplaceFileAtomicallyAppliesTheModeItIsGiven(t *testing.T) {
+	redis := redisDatastore(t)
+	serviceRoot := withServiceRoot(t, redis, "lollipop")
+
+	filename := filepath.Join(serviceRoot, "ENV")
+	if err := os.WriteFile(filename, []byte("OLD=1"), 0644); err != nil {
+		t.Fatalf("failed to write %s: %v", filename, err)
+	}
+	if err := os.Chmod(filename, 0644); err != nil {
+		t.Fatalf("failed to chmod %s: %v", filename, err)
+	}
+
+	if err := ReplaceFileAtomically(filename, "NEW=1", PrivateFileMode); err != nil {
+		t.Fatalf("failed to replace %s: %v", filename, err)
+	}
+
+	info, err := os.Stat(filename)
+	if err != nil {
+		t.Fatalf("failed to stat %s: %v", filename, err)
+	}
+	if info.Mode().Perm() != PrivateFileMode {
+		t.Errorf("expected %o, got %o", PrivateFileMode, info.Mode().Perm())
+	}
+
+	contents, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", filename, err)
+	}
+	if string(contents) != "NEW=1" {
+		t.Errorf("expected the new contents, got %q", contents)
+	}
+
+	// the temporary file is renamed away, so nothing is left beside it
+	entries, err := os.ReadDir(serviceRoot)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", serviceRoot, err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".ENV.") {
+			t.Errorf("expected no temporary file to be left behind, found %s", entry.Name())
+		}
+	}
+}
+
+// The custom environment and the config options can both carry credentials,
+// where the memory limit carries nothing anyone needs to be kept from.
+func TestCommitServiceConfigKeepsTheEnvironmentPrivate(t *testing.T) {
+	redis := redisDatastore(t)
+	withServiceRoot(t, redis, "lollipop")
+	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
+
+	if err := CommitServiceConfig(CommitServiceConfigInput{
+		ConfigOptions: "--requirepass hunter2",
+		CustomEnv:     "API_TOKEN=hunter2",
+		Datastore:     redis,
+		Image:         "redis",
+		ImageVersion:  "8.9.0",
+		ServiceName:   "lollipop",
+	}); err != nil {
+		t.Fatalf("failed to commit the service config: %v", err)
+	}
+
+	files := Files(redis, "lollipop")
+	for filename, expected := range map[string]os.FileMode{
+		files.Env:           PrivateFileMode,
+		files.ConfigOptions: PrivateFileMode,
+		files.Memory:        0644,
+	} {
+		info, err := os.Stat(filename)
+		if err != nil {
+			t.Fatalf("failed to stat %s: %v", filename, err)
+		}
+		if info.Mode().Perm() != expected {
+			t.Errorf("expected %s to be %o, got %o", filepath.Base(filename), expected, info.Mode().Perm())
+		}
+	}
+}

@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -195,5 +196,57 @@ func TestUpgradeRefusesAnUnusableRestartPolicy(t *testing.T) {
 
 	if !strings.Contains(err.Error(), `invalid restart-policy value "sometimes"`) {
 		t.Errorf("expected the error to name the value, got %q", err)
+	}
+}
+
+// An upgrade rewrites the custom environment and the config options of a service
+// that may have been made when both were readable by everyone, and the new
+// values must not land in a file that still is.
+func TestUpgradeSettingsKeepTheEnvironmentPrivate(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withDataRoot(t)
+
+	files := service.Files(datastore, "lollipop")
+	if err := os.MkdirAll(service.Folders(datastore, "lollipop").Root, 0775); err != nil {
+		t.Fatalf("failed to create the service root: %s", err)
+	}
+	for _, filename := range []string{files.Env, files.ConfigOptions} {
+		if err := os.WriteFile(filename, []byte("old"), 0644); err != nil {
+			t.Fatalf("failed to write %s: %s", filename, err)
+		}
+		if err := os.Chmod(filename, 0644); err != nil {
+			t.Fatalf("failed to chmod %s: %s", filename, err)
+		}
+	}
+
+	env := "API_TOKEN=hunter2"
+	options := "--requirepass hunter2"
+	shmSize := "256m"
+	if err := applyUpgradeSettings(UpgradeServiceInput{
+		ConfigOptions: &options,
+		CustomEnv:     &env,
+		Datastore:     datastore,
+		ServiceName:   "lollipop",
+		ShmSize:       &shmSize,
+	}); err != nil {
+		t.Fatalf("failed to apply the settings: %s", err)
+	}
+
+	for filename, expected := range map[string]os.FileMode{
+		files.Env:           service.PrivateFileMode,
+		files.ConfigOptions: service.PrivateFileMode,
+		files.ShmSize:       0644,
+	} {
+		if mode := fileMode(t, filename); mode != expected {
+			t.Errorf("expected %s to be %o, got %o", filename, expected, mode)
+		}
+	}
+
+	contents, err := os.ReadFile(files.Env)
+	if err != nil {
+		t.Fatalf("failed to read %s: %s", files.Env, err)
+	}
+	if string(contents) != env {
+		t.Errorf("expected the new environment, got %q", contents)
 	}
 }
