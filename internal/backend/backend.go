@@ -201,8 +201,18 @@ func Resume(ctx context.Context, names Names) error {
 }
 
 // Down stops and removes a service's containers, leaving its data on the host.
-// Nothing happens when the service container is already gone.
+//
+// The ambassador goes first, and goes whether or not the service container is
+// still there: one left behind by a service container removed out from under
+// it is linked to a container that no longer exists, and would otherwise
+// outlive every stop until an unexpose.
 func Down(ctx context.Context, names Names) error {
+	if Exists(ctx, names.Ambassador) {
+		if err := Remove(ctx, names.Ambassador); err != nil {
+			return fmt.Errorf("failed to remove ambassador container: %w", err)
+		}
+	}
+
 	containerID := LiveContainerID(ctx, LiveContainerIDInput{ContainerName: names.Container})
 	if containerID == "" {
 		return nil
@@ -210,12 +220,6 @@ func Down(ctx context.Context, names Names) error {
 
 	if err := Pause(ctx, PauseInput{Names: names, ContainerID: containerID}); err != nil {
 		return err
-	}
-
-	if Exists(ctx, names.Ambassador) {
-		if err := Remove(ctx, names.Ambassador); err != nil {
-			return err
-		}
 	}
 
 	// the restart policy is cleared before the removal so that docker cannot

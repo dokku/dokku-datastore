@@ -214,6 +214,73 @@ fi
 
 rm -f "$dump" "$dump.err"
 
+# An exposed service publishes its ports through a second container, linked to
+# the service container. Docker refuses to start a container linked to one that
+# is not running, which is how an exposed service used to fail to come back
+# after a stop and a start, and how its port went missing after an upgrade.
+AMBASSADOR="dokku.$PLUGIN.$SERVICE.ambassador"
+PORT_FILE="$DOKKU_LIB_ROOT/services/$DATA_DIR/$SERVICE/PORT"
+
+# the ambassador is up, fronts the container the service has now, and
+# publishes the port the service was exposed on
+assert_ambassador() {
+  local step="$1" state fronted service_id published host_port
+  state="$(docker container inspect "$AMBASSADOR" --format '{{ .State.Status }}' 2>/dev/null || true)"
+  [[ "$state" == "running" ]] || fail "$step: expected the ambassador to be running, got '$state'"
+
+  fronted="$(docker container inspect "$AMBASSADOR" --format '{{ index .Config.Labels "dokku.ambassador.container-id" }}')"
+  service_id="$(docker container inspect "dokku.$PLUGIN.$SERVICE" --format '{{ .Id }}')"
+  [[ "$fronted" == "$service_id" ]] || fail "$step: expected the ambassador to front $service_id, got '$fronted'"
+
+  # docker's own view of what is published rather than a connection to it: the
+  # userland proxy accepts a connection on a published port whether or not
+  # anything answers behind it
+  published="$(docker container port "$AMBASSADOR")"
+  host_port="$(awk '{ print $1 }' "$PORT_FILE")"
+  [[ "$published" == *":$host_port"* ]] || fail "$step: expected port $host_port to be published, got '$published'"
+}
+
+assert_no_ambassador() {
+  if docker container inspect "$AMBASSADOR" >/dev/null 2>/dev/null; then
+    fail "$1: expected no ambassador, found one"
+  fi
+}
+
+echo "==> $DEFINITION: expose publishes the service"
+"$BIN" expose "$PLUGIN" "$SERVICE"
+assert_ambassador "expose"
+exposed_ports="$("$BIN" info "$PLUGIN" "$SERVICE" --exposed-ports)"
+
+echo "==> $DEFINITION: an exposed service survives a stop and a start"
+"$BIN" stop "$PLUGIN" "$SERVICE"
+assert_no_ambassador "stop"
+"$BIN" start "$PLUGIN" "$SERVICE"
+assert_ambassador "stop and start"
+[[ "$("$BIN" info "$PLUGIN" "$SERVICE" --exposed-ports)" == "$exposed_ports" ]] || fail "a stop and a start changed the exposed ports"
+
+echo "==> $DEFINITION: an exposed service survives a pause and a start"
+"$BIN" pause "$PLUGIN" "$SERVICE"
+"$BIN" start "$PLUGIN" "$SERVICE"
+assert_ambassador "pause and start"
+
+echo "==> $DEFINITION: start puts back an ambassador a running service lost"
+docker container stop "$AMBASSADOR" >/dev/null
+"$BIN" start "$PLUGIN" "$SERVICE"
+assert_ambassador "start of a running service"
+
+echo "==> $DEFINITION: stop takes away an ambassador whose service is gone"
+docker container rm --force "dokku.$PLUGIN.$SERVICE" >/dev/null
+"$BIN" stop "$PLUGIN" "$SERVICE"
+assert_no_ambassador "stop of a service with no container"
+"$BIN" start "$PLUGIN" "$SERVICE"
+assert_ambassador "start after the service container was removed"
+
+echo "==> $DEFINITION: unexpose takes the ambassador away"
+"$BIN" unexpose "$PLUGIN" "$SERVICE"
+assert_no_ambassador "unexpose"
+unexposed_ports="$("$BIN" info "$PLUGIN" "$SERVICE" --exposed-ports)"
+[[ "$unexposed_ports" == "-" ]] || fail "expected no exposed ports after an unexpose, got '$unexposed_ports'"
+
 # The version a service runs is what it recorded, and only an upgrade changes
 # that. These run last because two of them deliberately leave the service down,
 # and everything before this point needs it up.

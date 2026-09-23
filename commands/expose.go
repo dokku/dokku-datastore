@@ -198,7 +198,7 @@ func (c *ExposeCommand) Run(args []string) int {
 		logger.Warn(internal.WarnInput{
 			Warning: fmt.Sprintf("Service %s has an untracked expose container, removing", serviceName),
 		})
-		err = internal.RemoveAmbassadorContainer(ctx, datastore, serviceName)
+		err = service.RemoveAmbassadorContainer(ctx, datastore, serviceName)
 		if err != nil {
 			logger.Error(internal.ErrorInput{
 				Error: err,
