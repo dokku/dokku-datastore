@@ -137,6 +137,23 @@ func Start(ctx context.Context, container string) error {
 	return nil
 }
 
+// Unpause thaws a container docker was told to freeze.
+//
+// This is docker's own unpause and not the reverse of this package's Pause,
+// which stops a service rather than freezing one. Nothing here ever freezes a
+// container; this exists because an operator can, by hand, and docker refuses to
+// start a container in that state.
+func Unpause(ctx context.Context, container string) error {
+	if _, err := execx.Run(ctx, common.ExecCommandInput{
+		Command: common.DockerBin(),
+		Args:    []string{"container", "unpause", container},
+	}); err != nil {
+		return fmt.Errorf("failed to unpause container: %w", err)
+	}
+
+	return nil
+}
+
 // PauseInput is the input for Pause.
 type PauseInput struct {
 	// Names are the service's containers

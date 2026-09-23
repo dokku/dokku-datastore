@@ -308,3 +308,28 @@ func TestBindDirectoriesCoversWhatTheHooksMountToo(t *testing.T) {
 		}
 	}
 }
+
+// The word a disabled pull leaves behind reads "<service> service <action>
+// failed", so it has to name something an operator recognises. A subcommand's
+// own name does; a hook and a trigger are named for where they sit in the plugin
+// rather than for anything anybody typed.
+func TestVerbAction(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected string
+	}{
+		{name: "export", expected: "export"},
+		{name: "connect", expected: "connect"},
+		{name: "hooks.pre_create", expected: "creation"},
+		{name: "hooks.post_create", expected: "creation"},
+		{name: "triggers.post-app-clone-setup", expected: "post-app-clone-setup"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if actual := verbAction(test.name); actual != test.expected {
+				t.Errorf("expected %q to be reported as %q, got %q", test.name, test.expected, actual)
+			}
+		})
+	}
+}

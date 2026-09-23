@@ -2,10 +2,12 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/cron"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
@@ -123,21 +125,24 @@ func Install(ctx context.Context, input InstallInput) error {
 		hostenv.S3BackupImage,
 		hostenv.WaitImage,
 	}
-	for _, image := range images {
-		if err := service.ValidateTaggedImageExists(image); err == nil {
+	for _, reference := range images {
+		// no service name, because an install happens before any service does.
+		// It is also the one caller that carries on past a disabled pull: a host
+		// told not to fetch still has to end up with a plugin it can run, and
+		// every command that needs one of these now fetches it when it gets
+		// there rather than trusting this to have done it
+		err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
+			Datastore:   input.Datastore,
+			TaggedImage: reference,
+		})
+		if errors.Is(err, service.ErrPullDisabled) {
+			for _, line := range strings.Split(err.Error(), "\n") {
+				input.Logger.Warn(WarnInput{Warning: line})
+			}
 			continue
 		}
-
-		if os.Getenv(properties.ImagePullVariable) == "true" {
-			input.Logger.Warn(WarnInput{
-				Warning: fmt.Sprintf("%s environment variable detected. Not running pull command.", properties.ImagePullVariable),
-			})
-			input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("docker image pull %s", image)})
-			continue
-		}
-
-		if _, err := service.PullTaggedImage(ctx, image); err != nil {
-			return fmt.Errorf("failed to pull image %s: %w", image, err)
+		if err != nil {
+			return err
 		}
 	}
 

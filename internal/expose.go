@@ -67,6 +67,20 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 		return fmt.Errorf("%d ports to be exposed need to be provided in the following order: %s", len(input.Ports), strings.Join(ports, ","))
 	}
 
+	// ahead of the port file, which is the only thing that says a service is
+	// exposed. Reconciling the ports fetches this too, but by then the file is
+	// written, so a host that cannot get the ambassador would be left with a
+	// service reported as exposed that publishes nothing and that a second
+	// expose refuses to touch
+	if err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
+		Action:      "port publishing",
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		TaggedImage: hostenv.AmbassadorImage,
+	}); err != nil {
+		return err
+	}
+
 	err := common.WriteStringToFile(common.WriteStringToFileInput{
 		Content:   strings.Join(input.Ports, " "),
 		Filename:  portFile,

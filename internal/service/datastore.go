@@ -513,9 +513,23 @@ func (s *Datastore) RunPreCreate(ctx context.Context, serviceName string) error 
 		return err
 	}
 
-	image := hook.Image
-	if image == "" {
-		image = s.taggedImage(serviceName)
+	reference := hook.Image
+	if reference == "" {
+		reference = s.taggedImage(serviceName)
+	}
+
+	// the same reason the verbs do it: a hook naming an image of its own has it
+	// pinned and fetched at install, and nothing since then has checked the host
+	// still holds it
+	if hook.Image != "" {
+		if err := EnsureTaggedImage(ctx, EnsureTaggedImageInput{
+			Action:      "creation",
+			Datastore:   s,
+			ServiceName: serviceName,
+			TaggedImage: hook.Image,
+		}); err != nil {
+			return err
+		}
 	}
 
 	volumes := make([]string, 0, len(hook.Volumes))
@@ -525,7 +539,7 @@ func (s *Datastore) RunPreCreate(ctx context.Context, serviceName string) error 
 	}
 
 	return backend.Run(ctx, backend.RunInput{
-		Image:      image,
+		Image:      reference,
 		Argv:       resolved.Argv,
 		Env:        resolved.Env,
 		Volumes:    volumes,
@@ -598,10 +612,46 @@ type runOptions struct {
 	Stderr io.Writer
 }
 
+// verbAction is what an operator is told could not be done when the image a
+// verb runs in cannot be fetched. The verb's own name says it for a subcommand,
+// but a hook and a trigger are named for where they sit in the plugin rather
+// than for anything anybody typed: a post-create hook that cannot run is a
+// create that failed.
+func verbAction(name string) string {
+	if strings.HasPrefix(name, "hooks.") {
+		return "creation"
+	}
+
+	return strings.TrimPrefix(name, "triggers.")
+}
+
 // run executes one of the definition's declared commands.
 func (s *Datastore) run(ctx context.Context, serviceName string, name string, options runOptions) error {
 	scope := s.scope(serviceName)
 	scope.Args = options.Arguments
+
+	// a command that names an image of its own runs beside the service in it -
+	// couchdb dumps with the tool dokku ships because its own image has no json
+	// reader - and that image is pinned and fetched at install, which is no help
+	// on a host that has been pruned since. A command that names none runs the
+	// service's, which whatever started the service has already fetched.
+	command := options.Command
+	if command == nil {
+		if declared, ok := s.Definition.CommandFor(name); ok {
+			command = &declared
+		}
+	}
+
+	if command != nil && command.Image != "" {
+		if err := EnsureTaggedImage(ctx, EnsureTaggedImageInput{
+			Action:      verbAction(name),
+			Datastore:   s,
+			ServiceName: serviceName,
+			TaggedImage: command.Image,
+		}); err != nil {
+			return err
+		}
+	}
 
 	return verb.Run(ctx, verb.RunInput{
 		Definition: s.Definition,

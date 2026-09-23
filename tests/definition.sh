@@ -156,6 +156,11 @@ recorded_image="$("$BIN" info "$PLUGIN" "$SERVICE" --image)"
 recorded_version="$("$BIN" info "$PLUGIN" "$SERVICE" --image-version)"
 recorded="$recorded_image:$recorded_version"
 start_err="$(mktemp)"
+PULL_VARIABLE="$(echo "$PLUGIN" | tr '[:lower:]' '[:upper:]')_DISABLE_PULL"
+
+# the readiness probe, read from the source rather than repeated here so a bump
+# cannot leave this asserting on a version nothing runs
+WAIT_IMAGE="$(awk -F'"' '/WaitImage = / { print $2; exit }' internal/hostenv/hostenv.go)"
 
 echo "==> $DEFINITION: start brings the service back on the version it recorded"
 "$BIN" stop "$PLUGIN" "$SERVICE"
@@ -204,7 +209,6 @@ echo "$recorded_version" >"$SERVICE_ROOT/IMAGE_VERSION"
 # forced if anything else on the host still holds it.
 if docker image rm --force "$recorded" >/dev/null 2>/dev/null && ! docker image inspect "$recorded" >/dev/null 2>/dev/null; then
   echo "==> $DEFINITION: start explains an image it is not allowed to fetch"
-  PULL_VARIABLE="$(echo "$PLUGIN" | tr '[:lower:]' '[:upper:]')_DISABLE_PULL"
   if env "$PULL_VARIABLE=true" "$BIN" start "$PLUGIN" "$SERVICE" 2>"$start_err"; then
     fail "expected start to refuse with pulling turned off"
   fi
@@ -218,6 +222,45 @@ else
   echo "    skipped: $recorded is still in use and cannot be removed"
   "$BIN" start "$PLUGIN" "$SERVICE"
 fi
+
+# The images the plugin runs beside a service are pulled once, when the plugin is
+# installed, and then only ever run - so a host pruned since has none of them and
+# nothing used to fetch them back. The readiness probe is the one to prove it on,
+# because it runs on every start and the start path is where a missing image is
+# felt.
+#
+# Removed without --force on purpose. A non-forced removal fails while a
+# container still holds the image, so a second run probing on this daemon makes
+# this skip rather than pull the image out from under it. A probe that has not
+# started yet is not covered, and does not need to be: the refusal below is
+# scoped to one invocation with env rather than exported, so the worst another
+# run sees is one extra pull.
+if docker image rm "$WAIT_IMAGE" >/dev/null 2>/dev/null && ! docker image inspect "$WAIT_IMAGE" >/dev/null 2>/dev/null; then
+  echo "==> $DEFINITION: start explains a sidecar image it is not allowed to fetch"
+  if env "$PULL_VARIABLE=true" "$BIN" start "$PLUGIN" "$SERVICE" 2>"$start_err"; then
+    fail "expected start to refuse with pulling turned off and $WAIT_IMAGE gone"
+  fi
+  grep -q "docker image pull $WAIT_IMAGE" "$start_err" || fail "expected start to say what to pull, got '$(cat "$start_err")'"
+
+  echo "==> $DEFINITION: start fetches a sidecar image the host no longer has"
+  "$BIN" start "$PLUGIN" "$SERVICE"
+  docker image inspect "$WAIT_IMAGE" >/dev/null 2>/dev/null || fail "start did not fetch $WAIT_IMAGE back"
+else
+  echo "    skipped: $WAIT_IMAGE is still in use and cannot be removed"
+fi
+
+echo "==> $DEFINITION: start thaws a frozen container rather than replacing it"
+# docker refuses to start a container it froze, and nothing in the plugin ever
+# freezes one - its own pause is a stop - so this is the state a hand-run
+# docker pause leaves behind, and start used to see straight past it and try to
+# build a second container of the same name
+frozen="$(docker container inspect "$CONTAINER" --format '{{ .Id }}')"
+docker container pause "$CONTAINER" >/dev/null
+"$BIN" start "$PLUGIN" "$SERVICE"
+thawed="$(docker container inspect "$CONTAINER" --format '{{ .Id }}')"
+[[ "$frozen" == "$thawed" ]] || fail "start replaced the frozen container instead of thawing it"
+frozen_status="$("$BIN" info "$PLUGIN" "$SERVICE" --status)"
+[[ "$frozen_status" == "running" ]] || fail "expected a running service after start, got '$frozen_status'"
 
 rm -f "$start_err"
 

@@ -124,6 +124,17 @@ func WaitForService(ctx context.Context, input WaitForServiceInput) error {
 		return nil
 	}
 
+	// before the wait rather than after it, so a host that cannot get the probe
+	// says so at once instead of thirty seconds later
+	if err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
+		Action:      "readiness check",
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		TaggedImage: hostenv.WaitImage,
+	}); err != nil {
+		return err
+	}
+
 	// the probe reaches the service with --link, and docker refuses to link to a
 	// container that is not up yet. Starting a container that already exists
 	// returns before it has necessarily got there, so a service that is on its

@@ -507,8 +507,8 @@ func ImageForService(input ImageForServiceInput) (string, error) {
 	return resolveTaggedImage(input.Datastore, input.ServiceName, input.ImageOverride, input.ImageVersionOverride), nil
 }
 
-// PullTaggedImage pulls a tagged image
-func PullTaggedImage(ctx context.Context, taggedImage string) (bool, error) {
+// pullTaggedImage pulls a tagged image
+func pullTaggedImage(ctx context.Context, taggedImage string) (bool, error) {
 	result, err := execx.Run(ctx, common.ExecCommandInput{
 		Command:      common.DockerBin(),
 		Args:         []string{"image", "pull", taggedImage},
@@ -548,8 +548,13 @@ type EnsureTaggedImageInput struct {
 // carried none of it - so a service pinned to a tag the host had pruned could
 // not be started at all, and the only way back was an upgrade onto a version
 // nobody asked for.
+//
+// Everything the plugin runs comes through here now, including the images it
+// runs beside a service, and the two halves it is made of are unexported so
+// that a call site cannot take the existence check without the pull or the pull
+// without the permission to make it.
 func EnsureTaggedImage(ctx context.Context, input EnsureTaggedImageInput) error {
-	if err := ValidateTaggedImageExists(input.TaggedImage); err == nil {
+	if err := validateTaggedImageExists(input.TaggedImage); err == nil {
 		return nil
 	}
 
@@ -558,24 +563,47 @@ func EnsureTaggedImage(ctx context.Context, input EnsureTaggedImageInput) error 
 		return pullDisabledError(pullVariable, input.TaggedImage, input.ServiceName, input.Action)
 	}
 
-	if _, err := PullTaggedImage(ctx, input.TaggedImage); err != nil {
+	if _, err := pullTaggedImage(ctx, input.TaggedImage); err != nil {
 		return fmt.Errorf("failed to pull image %s: %w", input.TaggedImage, err)
 	}
 
 	return nil
 }
 
+// ErrPullDisabled is what a disabled pull is, underneath the message that says
+// which image and which command. Install is the one caller that carries on past
+// it: it fetches every image a plugin will ever need up front, and an operator
+// who has turned pulling off means to fetch them by hand rather than to have the
+// install fail.
+var ErrPullDisabled = errors.New("pulling is disabled")
+
+// pullDisabledMessage is the operator-facing wording, which unwraps to the
+// sentinel. A wrapped error would print the sentinel's own text alongside it,
+// and what this says is already what an operator has to read.
+type pullDisabledMessage string
+
+func (message pullDisabledMessage) Error() string { return string(message) }
+
+func (message pullDisabledMessage) Unwrap() error { return ErrPullDisabled }
+
 // pullDisabledError is what a caller is told when the host has neither the
 // image nor permission to fetch it. Separate from EnsureTaggedImage so the
 // wording can be pinned by a test that needs no docker daemon.
+//
+// The last line names a service and what could not be done to it, and is left
+// out where there is neither: install fetches what the plugin needs before any
+// service exists.
 func pullDisabledError(pullVariable string, taggedImage string, serviceName string, action string) error {
 	message := []string{
 		fmt.Sprintf("%s environment variable detected. Not running pull command.", pullVariable),
 		fmt.Sprintf("docker image pull %s", taggedImage),
-		fmt.Sprintf("%s service %s failed", serviceName, action),
 	}
 
-	return errors.New(strings.Join(message, "\n"))
+	if serviceName != "" {
+		message = append(message, fmt.Sprintf("%s service %s failed", serviceName, action))
+	}
+
+	return pullDisabledMessage(strings.Join(message, "\n"))
 }
 
 // FilterServicesInput is the input for the FilterServices function
@@ -707,6 +735,18 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		return fmt.Errorf("port file %s holds %d ports, expected %d", portFile, len(hostPorts), len(serviceProperties.Ports))
 	}
 
+	// only this branch runs a container, and so only this branch needs the
+	// image. The ambassador is pinned and fetched when the plugin is installed,
+	// which is no help on a host that has been pruned since
+	if err := EnsureTaggedImage(ctx, EnsureTaggedImageInput{
+		Action:      "port publishing",
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		TaggedImage: hostenv.AmbassadorImage,
+	}); err != nil {
+		return err
+	}
+
 	dockerRunOptions := []string{
 		"container",
 		"run",
@@ -768,8 +808,8 @@ func ValidateServiceName(serviceName string) error {
 	return nil
 }
 
-// ValidateTaggedImageExists checks if the image exists
-func ValidateTaggedImageExists(taggedImage string) error {
+// validateTaggedImageExists checks if the image exists
+func validateTaggedImageExists(taggedImage string) error {
 	if common.VerifyImage(taggedImage) {
 		return nil
 	}

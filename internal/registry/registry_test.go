@@ -342,8 +342,10 @@ func TestMemcachedImplementsOnlyWhatItCan(t *testing.T) {
 }
 
 // Couchdb's sidecar image is one dokku already ships, so it is pinned in two
-// places: here and in the tool. They have to be the same image, or a service
-// would reach for one that was never pulled.
+// places: here and in the tool. An image a command names is now fetched when the
+// command runs, so this is no longer what stands between a service and an image
+// nothing ever pulled; it is what keeps couchdb from adding a fifth image to
+// every host that installs it.
 func TestCouchdbSidecarImageIsOnePluginShips(t *testing.T) {
 	loaded, err := Load(LoadInput{})
 	if err != nil {
