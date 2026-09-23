@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -118,6 +119,30 @@ func TestAlreadyExposedError(t *testing.T) {
 	expected := "Service ls already exposed on port(s) 6379"
 	if actual := AlreadyExposedError(datastore, "ls"); actual.Error() != expected {
 		t.Errorf("expected error %q, got %q", expected, actual)
+	}
+}
+
+// A port the ambassador cannot publish is refused before the port file is
+// written, since that file alone is what says a service is exposed.
+func TestExposeServiceRefusesAnInvalidPort(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	for _, port := range []string{"0", "65536", "port", "localhost:6379", "::1:6379"} {
+		t.Run(port, func(t *testing.T) {
+			withPortFile(t, datastore, "lollipop", nil)
+
+			err := ExposeService(context.Background(), ExposeServiceInput{
+				Datastore:   datastore,
+				Ports:       []string{port},
+				ServiceName: "lollipop",
+			})
+			if err == nil {
+				t.Fatalf("expected %q to be refused", port)
+			}
+
+			if IsExposed(datastore, "lollipop") {
+				t.Errorf("expected no port file after refusing %q", port)
+			}
+		})
 	}
 }
 

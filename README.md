@@ -173,9 +173,13 @@ Both are settable at `create`, `clone` and `upgrade` as well, and both are repor
 
 ## Exposed services
 
-An exposed service publishes its ports through a second container, the ambassador, which is linked to the service container. Docker refuses to start a container linked to one that is not running, and the ambassador used to be started again rather than made again, so an exposed service could fail to come back after a `stop` and a `start` - `Cannot link to a non running container` - and lose its published port across an `upgrade` until it was unexposed and exposed by hand.
+An exposed service publishes its ports through a second container, the ambassador. It used to be linked to the service container and to find the service through the environment docker hands a linked container. Docker 29 stopped handing that environment over unless the daemon is run with `DOCKER_KEEP_DEPRECATED_LEGACY_LINKS_ENV_VARS=1`, so an ambassador made there restarted forever - `Failed to autodetect target host/container and port using --link environment` - and published nothing.
 
-The ambassador holds nothing of its own, so it is now treated as disposable. It is kept only while it is running and fronts the container the service has now, and is otherwise replaced. A `stop` takes it away even when the service container is already gone, and a `start` puts it back even when the service itself is already running.
+The ambassador is now made by [docker-port-forward](https://github.com/dokku/docker-port-forward) and is not linked to anything. It joins a network the service container is on and forwards to the service there: by container name on a network of its own, and by address on docker's default bridge, which has no names to look up. It works on docker 29 without the daemon setting, and keeps working on the versions before it.
+
+The ambassador holds nothing of its own, so it is treated as disposable. It is kept only while it is running, fronts the container the service has now, and can still reach it, and is otherwise replaced. That includes an ambassador made by an older version of the plugin, which is replaced the next time the service is started, exposed or restarted rather than all at once when the plugin is installed. A `stop` takes it away even when the service container is already gone, and a `start` puts it back even when the service itself is already running.
+
+A port may be published on one address rather than on every interface. A port that docker could not publish - one out of range, or on a hostname rather than an address - is refused before the service is marked as exposed. Only the ambassador has moved off legacy links: `link` still links an app to the service container.
 
 ```shell
 # the port the service was exposed on comes back with it
@@ -185,6 +189,10 @@ dokku redis:start lollipop
 
 # and a running service whose ambassador went away gets it back
 dokku redis:start lollipop
+
+# published on the loopback interface alone
+dokku redis:unexpose lollipop
+dokku redis:expose lollipop 127.0.0.1:6380
 ```
 
 ## Plugin documentation

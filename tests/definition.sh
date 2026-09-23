@@ -214,19 +214,35 @@ fi
 
 rm -f "$dump" "$dump.err"
 
-# An exposed service publishes its ports through a second container, linked to
-# the service container. Docker refuses to start a container linked to one that
-# is not running, which is how an exposed service used to fail to come back
-# after a stop and a start, and how its port went missing after an upgrade.
+# An exposed service publishes its ports through a second container, the
+# ambassador, which forwards to the service over a network they share. It used
+# to be linked to the service container instead. Docker refuses to start a
+# container linked to one that is not running, which is how an exposed service
+# used to fail to come back after a stop and a start, and docker 29 no longer
+# hands a linked container the environment the ambassador found the service by.
 AMBASSADOR="dokku.$PLUGIN.$SERVICE.ambassador"
 PORT_FILE="$DOKKU_LIB_ROOT/services/$DATA_DIR/$SERVICE/PORT"
 
-# the ambassador is up, fronts the container the service has now, and
-# publishes the port the service was exposed on
+# the ambassador image, read from the source rather than repeated here so a bump
+# cannot leave this making an ambassador out of an image nothing runs
+AMBASSADOR_IMAGE="$(awk -F'"' '/AmbassadorImage = / { print $2; exit }' internal/hostenv/hostenv.go)"
+
+# the ambassador is up, was made by docker-port-forward rather than with a
+# legacy link, fronts the container the service has now, and publishes the port
+# the service was exposed on
 assert_ambassador() {
-  local step="$1" state fronted service_id published host_port
+  local step="$1" state managed links restart fronted service_id published host_port
   state="$(docker container inspect "$AMBASSADOR" --format '{{ .State.Status }}' 2>/dev/null || true)"
   [[ "$state" == "running" ]] || fail "$step: expected the ambassador to be running, got '$state'"
+
+  managed="$(docker container inspect "$AMBASSADOR" --format '{{ index .Config.Labels "com.dokku.port-forward" }}')"
+  [[ "$managed" == "true" ]] || fail "$step: expected the ambassador to be made by docker-port-forward, got '$managed'"
+
+  links="$(docker container inspect "$AMBASSADOR" --format '{{ len .HostConfig.Links }}')"
+  [[ "$links" == "0" ]] || fail "$step: expected the ambassador to have no links, got $links"
+
+  restart="$(docker container inspect "$AMBASSADOR" --format '{{ .HostConfig.RestartPolicy.Name }}')"
+  [[ "$restart" == "always" ]] || fail "$step: expected the ambassador to restart always, got '$restart'"
 
   fronted="$(docker container inspect "$AMBASSADOR" --format '{{ index .Config.Labels "dokku.ambassador.container-id" }}')"
   service_id="$(docker container inspect "dokku.$PLUGIN.$SERVICE" --format '{{ .Id }}')"
@@ -234,10 +250,20 @@ assert_ambassador() {
 
   # docker's own view of what is published rather than a connection to it: the
   # userland proxy accepts a connection on a published port whether or not
-  # anything answers behind it
+  # anything answers behind it. The port file may name an address as well as a
+  # port, and only the port is looked for here
   published="$(docker container port "$AMBASSADOR")"
   host_port="$(awk '{ print $1 }' "$PORT_FILE")"
+  host_port="${host_port##*:}"
   [[ "$published" == *":$host_port"* ]] || fail "$step: expected port $host_port to be published, got '$published'"
+}
+
+# every port the ambassador publishes is bound on one host address, empty for
+# every interface, which is what a plain docker --publish binds
+assert_bound_on() {
+  local step="$1" expected="$2" bound
+  bound="$(docker container inspect "$AMBASSADOR" --format '{{ range $port, $bindings := .HostConfig.PortBindings }}{{ range $bindings }}[{{ .HostIp }}]{{ end }}{{ end }}')"
+  [[ -n "$bound" && -z "${bound//"[$expected]"/}" ]] || fail "$step: expected every port to be bound on '$expected', got '$bound'"
 }
 
 assert_no_ambassador() {
@@ -249,6 +275,7 @@ assert_no_ambassador() {
 echo "==> $DEFINITION: expose publishes the service"
 "$BIN" expose "$PLUGIN" "$SERVICE"
 assert_ambassador "expose"
+assert_bound_on "expose" ""
 exposed_ports="$("$BIN" info "$PLUGIN" "$SERVICE" --exposed-ports)"
 
 echo "==> $DEFINITION: an exposed service survives a stop and a start"
@@ -275,11 +302,53 @@ assert_no_ambassador "stop of a service with no container"
 "$BIN" start "$PLUGIN" "$SERVICE"
 assert_ambassador "start after the service container was removed"
 
+echo "==> $DEFINITION: start replaces an ambassador made with a legacy link"
+# made the way older versions of the plugin made it. On docker 29 it restarts
+# forever, since the link no longer hands it the environment it reads the
+# service's address from, and on older versions it runs. Either way it is
+# replaced rather than kept
+service_id="$(docker container inspect "dokku.$PLUGIN.$SERVICE" --format '{{ .Id }}')"
+legacy_publish=()
+for mapping in $exposed_ports; do
+  legacy_publish+=("--publish=${mapping#*->}:${mapping%%->*}")
+done
+docker container rm --force "$AMBASSADOR" >/dev/null
+docker container run -d --link "dokku.$PLUGIN.$SERVICE:$PLUGIN" --name "$AMBASSADOR" --restart=always \
+  --label dokku=ambassador --label "dokku.ambassador=$PLUGIN" --label "dokku.ambassador.container-id=$service_id" \
+  "${legacy_publish[@]}" "$AMBASSADOR_IMAGE" >/dev/null
+"$BIN" start "$PLUGIN" "$SERVICE"
+assert_ambassador "start over a legacy ambassador"
+
 echo "==> $DEFINITION: unexpose takes the ambassador away"
 "$BIN" unexpose "$PLUGIN" "$SERVICE"
 assert_no_ambassador "unexpose"
 unexposed_ports="$("$BIN" info "$PLUGIN" "$SERVICE" --exposed-ports)"
 [[ "$unexposed_ports" == "-" ]] || fail "expected no exposed ports after an unexpose, got '$unexposed_ports'"
+
+echo "==> $DEFINITION: expose on an address publishes on it alone"
+# the host ports the service was just exposed on, since they are known to be free
+local_ports=()
+for mapping in $exposed_ports; do
+  local_ports+=("127.0.0.1:${mapping#*->}")
+done
+"$BIN" expose "$PLUGIN" "$SERVICE" "${local_ports[@]}"
+assert_ambassador "expose on an address"
+assert_bound_on "expose on an address" "127.0.0.1"
+"$BIN" unexpose "$PLUGIN" "$SERVICE"
+assert_no_ambassador "unexpose after an expose on an address"
+
+echo "==> $DEFINITION: expose refuses a port it cannot publish"
+# docker publishes on an address rather than a name, so a hostname would leave
+# the service reported as exposed with nothing published
+hostname_ports=()
+for mapping in $exposed_ports; do
+  hostname_ports+=("localhost:${mapping#*->}")
+done
+if "$BIN" expose "$PLUGIN" "$SERVICE" "${hostname_ports[@]}" 2>/dev/null; then
+  fail "expected an expose on a hostname to be refused"
+fi
+[[ ! -f "$PORT_FILE" ]] || fail "a refused expose left $PORT_FILE behind"
+assert_no_ambassador "refused expose"
 
 # The version a service runs is what it recorded, and only an upgrade changes
 # that. These run last because two of them deliberately leave the service down,
