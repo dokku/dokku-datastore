@@ -144,6 +144,7 @@ func (s *Datastore) CreateServiceContainer(ctx context.Context, input CreateServ
 	}
 	scope.LogDriver = logConfig.Driver
 	scope.LogOptions = logConfig.Options
+	scope.RestartPolicy = ServiceRestartPolicy(input.Datastore, input.ServiceName)
 	if input.TaggedImage != "" {
 		scope.TaggedImage = input.TaggedImage
 		scope.Image, scope.ImageVersion = cutTaggedImage(input.TaggedImage)

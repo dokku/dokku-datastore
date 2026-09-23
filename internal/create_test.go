@@ -112,3 +112,27 @@ func TestCreateServiceRefusesAnUnusableLogConfig(t *testing.T) {
 		t.Errorf("a refused create left %s behind", root)
 	}
 }
+
+// And for the same reason: a restart policy docker will not accept is a
+// container that cannot be made.
+func TestCreateServiceRefusesAnUnusableRestartPolicy(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withDataRoot(t)
+
+	err := CreateService(t.Context(), CreateServiceInput{
+		Datastore:     datastore,
+		ServiceName:   "lollipop",
+		RestartPolicy: "on-failure:abc",
+	})
+	if err == nil {
+		t.Fatal("expected a malformed restart policy to be refused, got no error")
+	}
+
+	if !strings.Contains(err.Error(), `invalid restart-policy value "on-failure:abc"`) {
+		t.Errorf("expected the error to name the value, got %q", err)
+	}
+
+	if root := service.Folders(datastore, "lollipop").Root; common.DirectoryExists(root) {
+		t.Errorf("a refused create left %s behind", root)
+	}
+}

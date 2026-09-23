@@ -61,3 +61,20 @@ for service in viadocker viacompose; do
 done
 
 ./tests/inspect-diff.sh "dokku.$PLUGIN.viadocker" "dokku.$PLUGIN.viacompose" "${secrets[@]}"
+
+echo "==> $DEFINITION: the two containers agree on a restart policy of their own"
+# a retry count rides in docker's own syntax on the command line and in the
+# compose file, and both have to arrive at the same policy
+for service in viadocker viacompose; do
+  "$BIN" set "$PLUGIN" "$service" restart-policy on-failure:3 >/dev/null
+  "$BIN" stop "$PLUGIN" "$service" >/dev/null
+  "$BIN" start "$PLUGIN" "$service" >/dev/null
+done
+
+./tests/inspect-diff.sh "dokku.$PLUGIN.viadocker" "dokku.$PLUGIN.viacompose" "${secrets[@]}"
+
+restart="$(docker container inspect "dokku.$PLUGIN.viacompose" --format '{{ .HostConfig.RestartPolicy.Name }}:{{ .HostConfig.RestartPolicy.MaximumRetryCount }}')"
+[[ "$restart" == "on-failure:3" ]] || {
+  echo "FAIL: expected both containers to restart on-failure:3, got '$restart'" >&2
+  exit 1
+}

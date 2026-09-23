@@ -65,6 +65,10 @@ type CreateServiceInput struct {
 	// LogOptions are the docker log options for the service container
 	LogOptions []string
 
+	// RestartPolicy is the docker restart policy for the service container,
+	// empty for the default
+	RestartPolicy string
+
 	// Memory is the memory limit to use for the service
 	Memory int
 
@@ -108,6 +112,10 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	// that cannot start, which is worse found here than after its directories,
 	// its credentials and its config files have been written
 	if err := CheckLogConfig(input.LogDriver, input.LogOptions); err != nil {
+		return err
+	}
+
+	if err := service.ValidateRestartPolicy(input.RestartPolicy); err != nil {
 		return err
 	}
 
@@ -200,6 +208,7 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		Memory:             input.Memory,
 		PostCreateNetworks: input.PostCreateNetworks,
 		PostStartNetworks:  input.PostStartNetworks,
+		RestartPolicy:      input.RestartPolicy,
 		ServiceName:        input.ServiceName,
 		ShmSize:            input.ShmSize,
 	}); err != nil {

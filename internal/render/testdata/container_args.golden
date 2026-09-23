@@ -172,6 +172,24 @@ redis-server
 --bind
 0.0.0.0
 
+### a restart policy
+container
+create
+--cidfile=/var/lib/dokku/services/redis/lollipop/ID
+--env-file=/var/lib/dokku/services/redis/lollipop/ENV
+--hostname=dokku.redis.lollipop
+--label=dokku.service=redis
+--label=dokku=service
+--name=dokku.redis.lollipop
+--restart=on-failure:3
+--volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
+--volume=/var/lib/dokku/services/redis/lollipop/data:/data
+redis:8.8.0
+redis-server
+/usr/local/etc/redis/redis.conf
+--bind
+0.0.0.0
+
 ### no volumes at all
 container
 create
@@ -193,7 +211,7 @@ create
 --label=dokku.service=redis
 --label=dokku=service
 --name=dokku.redis.lollipop
---restart=always
+--restart=unless-stopped
 --volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
 --volume=/var/lib/dokku/services/redis/lollipop/data:/data
 --memory=512m

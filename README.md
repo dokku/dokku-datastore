@@ -171,6 +171,28 @@ dokku redis:set lollipop log-opt max-size=unlimited
 
 Both are settable at `create`, `clone` and `upgrade` as well, and both are reported by `info` as what was set rather than as what was inherited. A change reaches a container the next time one is built: `restart` keeps the container it has, so a service already running takes a `stop` and then a `start`.
 
+## Container restart policy
+
+A datastore container is made with a restart policy of `always`, which is the right default for a datastore an app depends on but was also the only value there was. Changing it by hand with `docker container update --restart` lasted only until the container was next built. A service may now name a policy of its own through the `restart-policy` property, the same name `dokku ps:set` uses for an app.
+
+```shell
+# docker leaves the container down once it is stopped on purpose
+dokku redis:set lollipop restart-policy unless-stopped
+
+# and back to always
+dokku redis:set lollipop restart-policy
+```
+
+The accepted values are docker's own - `no`, `always`, `unless-stopped`, `on-failure` and `on-failure:<max-retries>` - and anything else is refused before it is written, since docker refuses to make a container with it. The ambassador an exposed service runs takes the same policy as the service.
+
+It is settable at `create`, `clone` and `upgrade` as well, with `--restart`, the flag `docker container create` takes. `info` reports what was set, empty when nothing was, which means `always`. A change reaches a container the next time one is built, the same as the log settings: `restart` keeps the container it has, so a service already running takes a `stop` and then a `start`.
+
+```shell
+dokku-datastore create redis lollipop --restart on-failure:5
+```
+
+A definition still cannot set `restart:` itself. The policy belongs to the service rather than to the datastore it runs.
+
 ## Exposed services
 
 An exposed service publishes its ports through a second container, the ambassador. It used to be linked to the service container and to find the service through the environment docker hands a linked container. Docker 29 stopped handing that environment over unless the daemon is run with `DOCKER_KEEP_DEPRECATED_LEGACY_LINKS_ENV_VARS=1`, so an ambassador made there restarted forever - `Failed to autodetect target host/container and port using --link environment` - and published nothing.

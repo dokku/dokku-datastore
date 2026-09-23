@@ -15,6 +15,7 @@ func TestUpgradeChangesSettings(t *testing.T) {
 	list := []string{"a-network"}
 	driver := "json-file"
 	options := []string{"max-size=20m"}
+	policy := "unless-stopped"
 
 	tests := []struct {
 		name     string
@@ -30,6 +31,7 @@ func TestUpgradeChangesSettings(t *testing.T) {
 		{name: "shm size", input: UpgradeServiceInput{ShmSize: &value}, expected: true},
 		{name: "log driver", input: UpgradeServiceInput{LogDriver: &driver}, expected: true},
 		{name: "log options", input: UpgradeServiceInput{LogOptions: &options}, expected: true},
+		{name: "restart policy", input: UpgradeServiceInput{RestartPolicy: &policy}, expected: true},
 	}
 
 	for _, test := range tests {
@@ -171,6 +173,27 @@ func TestUpgradeRefusesAnUnusableLogConfig(t *testing.T) {
 	}
 
 	if !strings.Contains(err.Error(), `invalid max-size value "20"`) {
+		t.Errorf("expected the error to name the value, got %q", err)
+	}
+}
+
+// The same holds for a restart policy: docker refuses to make a container from
+// one it does not know, and by then the old container is already gone.
+func TestUpgradeRefusesAnUnusableRestartPolicy(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withDataRoot(t)
+
+	policy := "sometimes"
+	err := UpgradeService(t.Context(), UpgradeServiceInput{
+		Datastore:     datastore,
+		ServiceName:   "lollipop",
+		RestartPolicy: &policy,
+	})
+	if err == nil {
+		t.Fatal("expected a malformed restart policy to be refused, got no error")
+	}
+
+	if !strings.Contains(err.Error(), `invalid restart-policy value "sometimes"`) {
 		t.Errorf("expected the error to name the value, got %q", err)
 	}
 }

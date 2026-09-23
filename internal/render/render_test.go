@@ -119,6 +119,10 @@ func TestRendererReproducesTheGoldenArgs(t *testing.T) {
 			},
 		},
 		{
+			name:   "a restart policy",
+			mutate: func(input *Input) { input.Scope.RestartPolicy = "on-failure:3" },
+		},
+		{
 			name: "everything at once",
 			mutate: func(input *Input) {
 				input.ConfigOptions = []string{"--appendonly", "yes"}
@@ -128,6 +132,7 @@ func TestRendererReproducesTheGoldenArgs(t *testing.T) {
 				input.Scope.LogDriver = "json-file"
 				input.Scope.LogOptions = map[string]string{"max-size": "20m", "max-file": "3"}
 				input.Scope.Memory = "512"
+				input.Scope.RestartPolicy = "unless-stopped"
 				input.Scope.ShmSize = "128m"
 			},
 		},

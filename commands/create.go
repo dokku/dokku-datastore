@@ -49,6 +49,8 @@ type CreateCommand struct {
 	logDriver string
 	// logOpt are the docker log options to use for the service container
 	logOpt []string
+	// restart is the docker restart policy to use for the service container
+	restart string
 }
 
 // Name returns the name of the command
@@ -119,6 +121,7 @@ func (c *CreateCommand) FlagSet() *flag.FlagSet {
 	f.StringVarP(&c.shmSize, "shm-size", "s", "", "override shared memory size for the service docker container")
 	f.StringVar(&c.logDriver, "log-driver", "", "the docker logging driver to run the service container with (default: the daemon's own)")
 	f.StringSliceVar(&c.logOpt, "log-opt", []string{}, "a comma-separated list of key=value docker log options for the service container")
+	f.StringVar(&c.restart, "restart", "", "the docker restart policy to run the service container with (default: always)")
 	return f
 }
 
@@ -141,6 +144,7 @@ func (c *CreateCommand) AutocompleteFlags() complete.Flags {
 			"--shm-size":            complete.PredictAnything,
 			"--log-driver":          complete.PredictAnything,
 			"--log-opt":             complete.PredictAnything,
+			"--restart":             complete.PredictSet("no", "always", "unless-stopped", "on-failure"),
 		},
 	)
 }
@@ -236,6 +240,7 @@ func (c *CreateCommand) Run(args []string) int {
 		InitialNetwork:     c.initialNetwork,
 		LogDriver:          c.logDriver,
 		LogOptions:         c.logOpt,
+		RestartPolicy:      c.restart,
 		Memory:             c.memory,
 		Password:           c.password,
 		PostCreateNetworks: c.postCreateNetwork,

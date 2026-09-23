@@ -19,6 +19,7 @@ import (
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
+	"github.com/dokku/dokku-datastore/internal/render"
 	"github.com/dokku/dokku/plugins/common"
 )
 
@@ -88,6 +89,9 @@ type CommitServiceConfigInput struct {
 
 	// LogOptions are the docker log options for the service container
 	LogOptions []string
+
+	// RestartPolicy is the docker restart policy for the service container
+	RestartPolicy string
 }
 
 // CommitServiceConfig commits the service config for a given service
@@ -183,6 +187,11 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, LogOptProperty, strings.Join(input.LogOptions, ","))
 	if err != nil {
 		return fmt.Errorf("failed to write %s property: %w", LogOptProperty, err)
+	}
+
+	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, RestartPolicyProperty, input.RestartPolicy)
+	if err != nil {
+		return fmt.Errorf("failed to write %s property: %w", RestartPolicyProperty, err)
 	}
 
 	return nil
@@ -877,6 +886,13 @@ type ambassadorForwardOptionsInput struct {
 
 	// LogConfig is the logging the service container was given
 	LogConfig LogConfig
+
+	// RestartPolicy is the restart policy the service was given, empty for the
+	// default. The ambassador takes the same one: left restarting forever
+	// beside a service told not to, it would publish a port with nothing behind
+	// it. The default is applied rather than passed on empty, because
+	// docker-port-forward reads an empty policy as unless-stopped
+	RestartPolicy string
 }
 
 // ambassadorForwardOptions builds the docker-port-forward options that run a
@@ -895,7 +911,7 @@ func ambassadorForwardOptions(input ambassadorForwardOptionsInput) portforward.O
 		Ports:               ports,
 		Addresses:           []string{portforward.AllInterfaces},
 		Detach:              true,
-		RestartPolicy:       portforward.RestartAlways,
+		RestartPolicy:       render.RestartPolicy(input.RestartPolicy),
 		Name:                input.AmbassadorName,
 		HelperImage:         input.Image,
 		Pull:                portforward.PullNever,
@@ -1014,6 +1030,7 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		HostPorts:      hostPorts,
 		Image:          hostenv.AmbassadorImage,
 		LogConfig:      logConfig,
+		RestartPolicy:  ServiceRestartPolicy(input.Datastore, input.ServiceName),
 	}))
 	if err != nil {
 		return fmt.Errorf("failed to run container %s: %w", ambassadorName, err)

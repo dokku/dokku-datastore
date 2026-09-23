@@ -81,6 +81,12 @@ func TestContainerArgs(t *testing.T) {
 			},
 		},
 		{
+			// the retry count rides along in docker's own syntax rather than as a
+			// flag of its own
+			name:   "a restart policy",
+			mutate: func(input *ContainerArgsInput) { input.RestartPolicy = "on-failure:3" },
+		},
+		{
 			name: "no volumes at all",
 			mutate: func(input *ContainerArgsInput) {
 				input.Volumes = nil
@@ -95,6 +101,7 @@ func TestContainerArgs(t *testing.T) {
 				input.LogDriver = "json-file"
 				input.LogOptions = map[string]string{"max-size": "20m", "max-file": "3"}
 				input.Memory = "512"
+				input.RestartPolicy = "unless-stopped"
 				input.ShmSize = "128m"
 				input.TaggedImage = "valkey/valkey:9.0.0"
 			},

@@ -158,6 +158,40 @@ grep -q "max-size" "$set_err" || fail "expected the refusal to name the option, 
 [[ -z "$("$BIN" info "$PLUGIN" "$SERVICE" --log-opt)" ]] || fail "a refused set wrote the value anyway"
 rm -f "$set_err"
 
+echo "==> $DEFINITION: a restart policy reaches the container it is rebuilt with"
+restart="$(docker container inspect "dokku.$PLUGIN.$SERVICE" --format '{{ .HostConfig.RestartPolicy.Name }}')"
+[[ "$restart" == "always" ]] || fail "expected a service that names no policy to restart always, got '$restart'"
+
+"$BIN" set "$PLUGIN" "$SERVICE" restart-policy unless-stopped
+reported="$("$BIN" info "$PLUGIN" "$SERVICE" --restart-policy)"
+[[ "$reported" == "unless-stopped" ]] || fail "expected the restart policy to be read back, got '$reported'"
+
+# nothing reaches the running container: like a log setting, it is read when a
+# container is made
+restart="$(docker container inspect "dokku.$PLUGIN.$SERVICE" --format '{{ .HostConfig.RestartPolicy.Name }}')"
+[[ "$restart" == "always" ]] || fail "expected set to leave the running container alone, got '$restart'"
+
+"$BIN" stop "$PLUGIN" "$SERVICE"
+"$BIN" start "$PLUGIN" "$SERVICE"
+restart="$(docker container inspect "dokku.$PLUGIN.$SERVICE" --format '{{ .HostConfig.RestartPolicy.Name }}')"
+[[ "$restart" == "unless-stopped" ]] || fail "expected the new policy to reach the container, got '$restart'"
+
+# and back to what every other check expects of this service
+"$BIN" set "$PLUGIN" "$SERVICE" restart-policy
+"$BIN" stop "$PLUGIN" "$SERVICE"
+"$BIN" start "$PLUGIN" "$SERVICE"
+restart="$(docker container inspect "dokku.$PLUGIN.$SERVICE" --format '{{ .HostConfig.RestartPolicy.Name }}')"
+[[ "$restart" == "always" ]] || fail "expected an unset policy to go back to always, got '$restart'"
+
+echo "==> $DEFINITION: a restart policy docker would refuse is refused first"
+set_err="$(mktemp)"
+if "$BIN" set "$PLUGIN" "$SERVICE" restart-policy on-failure:abc 2>"$set_err"; then
+  fail "expected a malformed restart policy to be refused"
+fi
+grep -q "restart-policy" "$set_err" || fail "expected the refusal to name the property, got '$(cat "$set_err")'"
+[[ -z "$("$BIN" info "$PLUGIN" "$SERVICE" --restart-policy)" ]] || fail "a refused set wrote the value anyway"
+rm -f "$set_err"
+
 echo "==> $DEFINITION: info reports every service when none is named"
 every_service="$("$BIN" info "$PLUGIN")"
 [[ "$every_service" == *"$SERVICE"* ]] || fail "expected $SERVICE to be reported when no service is named"
@@ -228,10 +262,10 @@ PORT_FILE="$DOKKU_LIB_ROOT/services/$DATA_DIR/$SERVICE/PORT"
 AMBASSADOR_IMAGE="$(awk -F'"' '/AmbassadorImage = / { print $2; exit }' internal/hostenv/hostenv.go)"
 
 # the ambassador is up, was made by docker-port-forward rather than with a
-# legacy link, fronts the container the service has now, and publishes the port
-# the service was exposed on
+# legacy link, restarts the way its service does, fronts the container the
+# service has now, and publishes the port the service was exposed on
 assert_ambassador() {
-  local step="$1" state managed links restart fronted service_id published host_port
+  local step="$1" expected_restart="${2:-always}" state managed links restart fronted service_id published host_port
   state="$(docker container inspect "$AMBASSADOR" --format '{{ .State.Status }}' 2>/dev/null || true)"
   [[ "$state" == "running" ]] || fail "$step: expected the ambassador to be running, got '$state'"
 
@@ -241,8 +275,8 @@ assert_ambassador() {
   links="$(docker container inspect "$AMBASSADOR" --format '{{ len .HostConfig.Links }}')"
   [[ "$links" == "0" ]] || fail "$step: expected the ambassador to have no links, got $links"
 
-  restart="$(docker container inspect "$AMBASSADOR" --format '{{ .HostConfig.RestartPolicy.Name }}')"
-  [[ "$restart" == "always" ]] || fail "$step: expected the ambassador to restart always, got '$restart'"
+  restart="$(docker container inspect "$AMBASSADOR" --format '{{ .HostConfig.RestartPolicy.Name }}:{{ .HostConfig.RestartPolicy.MaximumRetryCount }}')"
+  [[ "${restart%:0}" == "$expected_restart" ]] || fail "$step: expected the ambassador to restart $expected_restart, got '$restart'"
 
   fronted="$(docker container inspect "$AMBASSADOR" --format '{{ index .Config.Labels "dokku.ambassador.container-id" }}')"
   service_id="$(docker container inspect "dokku.$PLUGIN.$SERVICE" --format '{{ .Id }}')"
@@ -318,6 +352,20 @@ docker container run -d --link "dokku.$PLUGIN.$SERVICE:$PLUGIN" --name "$AMBASSA
   "${legacy_publish[@]}" "$AMBASSADOR_IMAGE" >/dev/null
 "$BIN" start "$PLUGIN" "$SERVICE"
 assert_ambassador "start over a legacy ambassador"
+
+echo "==> $DEFINITION: the ambassador restarts the way its service does"
+# a retry count, so that what is checked is the whole policy rather than its name
+"$BIN" set "$PLUGIN" "$SERVICE" restart-policy on-failure:3
+"$BIN" stop "$PLUGIN" "$SERVICE"
+"$BIN" start "$PLUGIN" "$SERVICE"
+assert_ambassador "a restart policy of the service's own" "on-failure:3"
+restart="$(docker container inspect "dokku.$PLUGIN.$SERVICE" --format '{{ .HostConfig.RestartPolicy.Name }}:{{ .HostConfig.RestartPolicy.MaximumRetryCount }}')"
+[[ "$restart" == "on-failure:3" ]] || fail "expected the service container to restart on-failure:3, got '$restart'"
+
+"$BIN" set "$PLUGIN" "$SERVICE" restart-policy
+"$BIN" stop "$PLUGIN" "$SERVICE"
+"$BIN" start "$PLUGIN" "$SERVICE"
+assert_ambassador "an unset restart policy"
 
 echo "==> $DEFINITION: unexpose takes the ambassador away"
 "$BIN" unexpose "$PLUGIN" "$SERVICE"

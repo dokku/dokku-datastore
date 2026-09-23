@@ -50,6 +50,9 @@ type ContainerArgsInput struct {
 	// NetworkAlias is the dns name the service answers to on its networks
 	NetworkAlias string
 
+	// RestartPolicy is the docker restart policy, empty for DefaultRestartPolicy
+	RestartPolicy string
+
 	// ShmSize is a shared memory size, with its unit
 	ShmSize string
 
@@ -58,6 +61,25 @@ type ContainerArgsInput struct {
 
 	// Volumes are host:container bind mounts, in the order they are passed
 	Volumes []string
+}
+
+// DefaultRestartPolicy is what a container is made with when its service names
+// no restart policy. A datastore an app depends on should come back on its own,
+// which is why this was the only value there was before there was a choice.
+const DefaultRestartPolicy = "always"
+
+// RestartPolicy is the restart policy a container is made with: the one its
+// service names, and otherwise the default.
+//
+// Applied here rather than where the property is read, because the ambassador an
+// exposed service runs is made elsewhere and has to land on the same answer, and
+// an empty policy means something else to each of the things that make one.
+func RestartPolicy(value string) string {
+	if value == "" {
+		return DefaultRestartPolicy
+	}
+
+	return value
 }
 
 // DockerCreateArgs builds the argv for `docker container create`. It is pure, so the
@@ -73,7 +95,7 @@ func DockerCreateArgs(input ContainerArgsInput) []string {
 		"--label=dokku.service=" + input.CommandPrefix,
 		"--label=dokku=service",
 		"--name=" + input.ContainerName,
-		"--restart=always",
+		"--restart=" + RestartPolicy(input.RestartPolicy),
 	}
 
 	// sorted, because a map would otherwise emit a different command each run
