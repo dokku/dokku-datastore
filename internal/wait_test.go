@@ -1,10 +1,12 @@
 package internal
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/hostenv"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 func TestWaitArgs(t *testing.T) {
@@ -86,5 +88,32 @@ func TestWaitArgsPutsTheProbeArgumentsLast(t *testing.T) {
 
 	if strings.Join(args[image+1:], " ") != "-c dokku-redis-lollipop:6379" {
 		t.Errorf("expected the probe arguments to follow the image, got %v", args[image+1:])
+	}
+}
+
+// A definition that declares no ports has nothing to connect to. Every
+// definition shipped today declares at least one, so this is here to keep a
+// future one from probing port zero and waiting out the timeout - and it
+// returns before anything is run, which is why it needs no docker daemon.
+func TestWaitForServiceSkipsADefinitionWithNoWaitPort(t *testing.T) {
+	redis, ok := service.Datastores["redis"]
+	if !ok {
+		t.Fatal("expected redis to be registered")
+	}
+
+	portless := &service.Datastore{Definition: redis.Definition}
+	portless.Definition.Service.Ports = nil
+
+	if port := portless.Properties().WaitPort; port != 0 {
+		t.Fatalf("expected a definition with no ports to have no wait port, got %d", port)
+	}
+
+	// a zero value logger, which would panic if the wait got as far as
+	// announcing itself
+	if err := WaitForService(context.Background(), WaitForServiceInput{
+		Datastore:   portless,
+		ServiceName: "lollipop",
+	}); err != nil {
+		t.Errorf("expected no error, got %v", err)
 	}
 }

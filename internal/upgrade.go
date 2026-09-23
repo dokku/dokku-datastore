@@ -2,11 +2,10 @@ package internal
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
 	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
@@ -66,11 +65,57 @@ func (i UpgradeServiceInput) changesSettings() bool {
 		i.ShmSize != nil
 }
 
+// upgradeVersion is the version an upgrade moves a service to: the one asked
+// for, and otherwise the newest the service's own definition ships.
+//
+// The datastore an upgrade is handed has already been resolved to the
+// definition the service runs, so the default here is the newest tag inside the
+// service's major version rather than the newest the plugin has. Crossing a
+// major version stays something the operator asks for by name, because it moves
+// where the data is mounted and cannot be undone by pointing the version back.
+//
+// A service running an image its definition does not ship has no newest to move
+// to, so it is told rather than moved onto something invented. A service with no
+// record at all takes the default: an upgrade was asked for in so many words,
+// which makes it a choice rather than a guess, and it is what puts a service
+// right that start has refused to place.
+//
+// Pure, so which version an upgrade lands on is pinned by a test rather than by
+// a docker daemon.
+func upgradeVersion(d definition.Definition, recorded service.RecordedImage, requested string) (string, error) {
+	if requested != "" {
+		return requested, nil
+	}
+
+	if recorded.Image != "" && recorded.Image != d.DefaultImage {
+		return "", fmt.Errorf("it runs %s, which is not the image the %s definition ships; name a version with --image-version to upgrade it",
+			recorded.Image, d.Dokku.Plugin)
+	}
+
+	return d.DefaultImageVersion, nil
+}
+
 // UpgradeService recreates a service's container on a different image
 func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
+	// before the version is decided, because deciding it needs to know which
+	// image the service runs, and a service that never recorded one only knows
+	// while its container is still there
+	recorded, err := service.RecoverRecordedImage(ctx, service.RecoverRecordedImageInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+	})
+	if err != nil {
+		return err
+	}
+
+	imageVersion, err := upgradeVersion(input.Datastore.Definition, recorded, input.ImageVersion)
+	if err != nil {
+		return fmt.Errorf("unable to upgrade %s: %w", input.ServiceName, err)
+	}
+
 	taggedImage, err := service.ImageForService(service.ImageForServiceInput{
 		ImageOverride:        input.Image,
-		ImageVersionOverride: input.ImageVersion,
+		ImageVersionOverride: imageVersion,
 		Datastore:            input.Datastore,
 		ServiceName:          input.ServiceName,
 	})
@@ -78,20 +123,13 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		return fmt.Errorf("failed to get image for service: %w", err)
 	}
 
-	properties := input.Datastore.Properties()
-	if err := service.ValidateTaggedImageExists(taggedImage); err != nil {
-		if os.Getenv(properties.ImagePullVariable) == "true" {
-			message := []string{
-				fmt.Sprintf("%s environment variable detected. Not running pull command.", properties.ImagePullVariable),
-				fmt.Sprintf("docker image pull %s", taggedImage),
-				fmt.Sprintf("%s service upgrade failed", input.ServiceName),
-			}
-			return errors.New(strings.Join(message, "\n"))
-		}
-
-		if _, err := service.PullTaggedImage(ctx, taggedImage); err != nil {
-			return fmt.Errorf("failed to pull image %s: %w", taggedImage, err)
-		}
+	if err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
+		Action:      "upgrade",
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		TaggedImage: taggedImage,
+	}); err != nil {
+		return err
 	}
 
 	currentImage := service.Version(ctx, service.VersionInput{
@@ -163,6 +201,16 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	if err := service.Start(ctx, service.StartInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
+	}); err != nil {
+		return err
+	}
+
+	// before the linked apps are started again, so they come back to a datastore
+	// that answers on the version they were stopped for
+	if err := WaitForService(ctx, WaitForServiceInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		Logger:      input.Logger,
 	}); err != nil {
 		return err
 	}

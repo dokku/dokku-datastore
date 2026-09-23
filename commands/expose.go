@@ -208,6 +208,7 @@ func (c *ExposeCommand) Run(args []string) int {
 	}
 
 	err = internal.ExposeService(ctx, internal.ExposeServiceInput{
+		Logger:      logger,
 		Datastore:   datastore,
 		Ports:       arguments["ports"].ListValue(),
 		ServiceName: serviceName,

@@ -91,7 +91,25 @@ dokku-datastore create postgres db --image-version 18.4
 
 If a service names a definition the plugin no longer ships, commands that would run it refuse rather than quietly placing it on another one, since that is the failure the pin exists to prevent. The service stays inspectable and can still be destroyed, so it can be reported on and cleaned up; reinstalling a plugin that carries the definition makes it runnable again.
 
-`upgrade` across a major version moves the service onto the other definition, which moves where its data is mounted along with it. That is the upgrade a major version asks for rather than something to work around, but it is not a tag change and it is not reversible by pointing the version back.
+`upgrade` across a major version moves the service onto the other definition, which moves where its data is mounted along with it. That is the upgrade a major version asks for rather than something to work around, but it is not a tag change and it is not reversible by pointing the version back. A bare `upgrade` never crosses one: with no version named it moves to the newest tag the service's own major version ships, and leaves the data where it is.
+
+## The version a service runs
+
+A service records the image it runs in `IMAGE` and `IMAGE_VERSION` beside its data, and that record is what it is placed by every time its container has to be made again. A release that ships a newer image does not move a service that already exists onto it - only `upgrade` changes the version a service runs.
+
+```shell
+# comes back on the version it was created with, not on whatever is newest
+dokku-datastore stop redis lollipop
+dokku-datastore start redis lollipop
+```
+
+`stop` removes the container, so the record is the only thing left that knows the version. A service that never wrote one - because it predates the file, or lost it - has it recovered from its own container, at the moment a plugin is installed, before a container is removed, and before one is started. The image is fetched if the host no longer has it, so a service pinned to an old tag can always come back on that tag rather than being pushed into an upgrade to run at all.
+
+Where there is neither a record nor a container to recover one from, there is no version to respect, and `start` says so rather than choosing one:
+
+```shell
+dokku-datastore upgrade redis lollipop --image-version 8.9.0
+```
 
 ## Plugin documentation
 

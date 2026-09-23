@@ -2,7 +2,6 @@ package internal
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -116,21 +115,13 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return fmt.Errorf("failed to get image for service: %w", err)
 	}
 
-	properties := input.Datastore.Properties()
-	if err := service.ValidateTaggedImageExists(taggedImage); err != nil {
-		if os.Getenv(properties.ImagePullVariable) == "true" {
-			message := []string{
-				fmt.Sprintf("%s environment variable detected. Not running pull command.", properties.ImagePullVariable),
-				fmt.Sprintf("docker image pull %s", taggedImage),
-				fmt.Sprintf("%s service creation failed", input.ServiceName),
-			}
-			return errors.New(strings.Join(message, "\n"))
-		}
-
-		// pull the image
-		if _, err := service.PullTaggedImage(ctx, taggedImage); err != nil {
-			return fmt.Errorf("failed to pull image %s: %w", taggedImage, err)
-		}
+	if err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
+		Action:      "creation",
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		TaggedImage: taggedImage,
+	}); err != nil {
+		return err
 	}
 
 	_, err = execx.PlugnTrigger(ctx, common.PlugnTriggerInput{
@@ -178,12 +169,18 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return fmt.Errorf("failed to create service: %w", err)
 	}
 
+	// what was resolved rather than what was asked for, the way upgrade records
+	// it. The two are the same whenever the caller filled the flags in first,
+	// and when it did not this is the difference between a service that records
+	// the image it runs and one that records nothing and is placed by whatever
+	// the plugin ships the next time its container has to be made.
+	recordedImage, recordedImageVersion, _ := strings.Cut(taggedImage, ":")
 	if err := service.CommitServiceConfig(service.CommitServiceConfigInput{
 		ConfigOptions:      input.ConfigOptions,
 		CustomEnv:          input.CustomEnv,
 		Datastore:          input.Datastore,
-		Image:              input.Image,
-		ImageVersion:       input.ImageVersion,
+		Image:              recordedImage,
+		ImageVersion:       recordedImageVersion,
 		InitialNetwork:     input.InitialNetwork,
 		Memory:             input.Memory,
 		PostCreateNetworks: input.PostCreateNetworks,

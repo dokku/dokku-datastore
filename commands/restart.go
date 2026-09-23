@@ -202,6 +202,19 @@ func (c *RestartCommand) Run(args []string) int {
 		return 1
 	}
 
+	// a container that exists is not a datastore that answers, and the caller
+	// asked for a service it can use
+	if err := internal.WaitForService(ctx, internal.WaitForServiceInput{
+		Datastore:   datastore,
+		ServiceName: serviceName,
+		Logger:      logger,
+	}); err != nil {
+		logger.Error(internal.ErrorInput{
+			Error: err,
+		})
+		return 1
+	}
+
 	logger.Info(fmt.Sprintf("Service %s restarted", serviceName))
 
 	return 0

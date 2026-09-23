@@ -77,6 +77,13 @@ type WaitForServiceInput struct {
 func WaitForService(ctx context.Context, input WaitForServiceInput) error {
 	properties := input.Datastore.Properties()
 
+	// a definition that declares no ports at all has nothing to connect to, and
+	// probing port zero would only ever time out. No definition shipped today is
+	// one, so this is here to keep a future one from waiting for nothing.
+	if properties.WaitPort == 0 {
+		return nil
+	}
+
 	arguments := WaitArgs(WaitArgsInput{
 		ContainerName:  service.ContainerName(input.Datastore, input.ServiceName),
 		NetworkAlias:   service.DNSHostname(input.Datastore, input.ServiceName),

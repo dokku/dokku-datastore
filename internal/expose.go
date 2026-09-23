@@ -38,6 +38,9 @@ type ExposeServiceInput struct {
 
 	// ServiceName is the name of the service to expose
 	ServiceName string
+
+	// Logger reports what is being waited on once the container exists
+	Logger Ui
 }
 
 // ExposeService exposes a service
@@ -81,6 +84,16 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to start service: %w", err)
+	}
+
+	// the ports are reconciled against a service that answers, and an app told
+	// it is exposed has somewhere to connect to
+	if err := WaitForService(ctx, WaitForServiceInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		Logger:      input.Logger,
+	}); err != nil {
+		return err
 	}
 
 	err = service.ServicePortReconcileStatus(ctx, service.ServicePortReconcileStatusInput{

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -527,10 +528,31 @@ type RemoveServiceContainerInput struct {
 
 	// ServiceName is the name of the service to remove the container for
 	ServiceName string
+
+	// Warnings is where a record that could not be written is reported. Nil
+	// means stderr.
+	Warnings io.Writer
 }
 
-// RemoveServiceContainer removes the service container for a service
+// RemoveServiceContainer removes the service container for a service.
+//
+// The image the container runs is written down first, if the service had not
+// recorded one. This is the last moment it is knowable: once the container is
+// gone, the files in the service root are the only record of the version
+// anywhere on the host, and a service that reaches a later start without one
+// has nothing to be placed by.
+//
+// A repair that fails is not fatal. Stopping a service has to keep working on a
+// host where these files cannot be written, and the caller asked for the
+// container to be removed rather than for the record to be fixed.
 func RemoveServiceContainer(ctx context.Context, input RemoveServiceContainerInput) error {
+	if _, err := RecoverRecordedImage(ctx, RecoverRecordedImageInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+	}); err != nil {
+		warn(input.Warnings, fmt.Sprintf("unable to record the image %s runs: %s", input.ServiceName, err))
+	}
+
 	return backend.Down(ctx, containerNames(input.Datastore, input.ServiceName))
 }
 
@@ -558,6 +580,17 @@ func Status(ctx context.Context, input StatusInput) string {
 	return backend.Status(ctx, input.ContainerID)
 }
 
+// warn reports something a command carried on past. Nil means stderr, which is
+// where a command's own logger would have put it: this package cannot reach the
+// Ui type, because the package that holds it imports this one.
+func warn(to io.Writer, message string) {
+	if to == nil {
+		to = os.Stderr
+	}
+
+	fmt.Fprintf(to, " !     %s\n", message)
+}
+
 // StartInput is the input for the Start function
 type StartInput struct {
 	// Datastore is the service to start
@@ -565,9 +598,19 @@ type StartInput struct {
 
 	// ServiceName is the name of the service to start
 	ServiceName string
+
+	// Warnings is where a record that could not be written is reported. Nil
+	// means stderr.
+	Warnings io.Writer
 }
 
-// Start starts a service
+// Start starts a service.
+//
+// A service runs the version it recorded, and only an upgrade changes that. So
+// every branch below settles the record first, from the service's own container
+// where there is one, and the record is then what the service is placed by -
+// never the definition's current default, which a release bumps under services
+// that never asked to move.
 func Start(ctx context.Context, input StartInput) error {
 	runningContainerID := LiveContainerID(ctx, LiveContainerIDInput{
 		Datastore:   input.Datastore,
@@ -575,6 +618,10 @@ func Start(ctx context.Context, input StartInput) error {
 		Filter:      "status=running",
 	})
 	if runningContainerID != "" {
+		// a service that is already up is left alone: rebuilding it onto its
+		// record would be a restart nobody asked for
+		input.recoverRecord(ctx, runningContainerID)
+
 		return common.WriteStringToFile(common.WriteStringToFileInput{
 			Content:   runningContainerID,
 			Filename:  Files(input.Datastore, input.ServiceName).ID,
@@ -590,41 +637,104 @@ func Start(ctx context.Context, input StartInput) error {
 		Filter:      "status=exited",
 	})
 	if previousContainerID != "" {
-		_, err := execx.Run(ctx, common.ExecCommandInput{
-			Command: common.DockerBin(),
-			Args:    []string{"container", "start", previousContainerID},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to start container: %w", err)
-		}
+		recorded := input.recoverRecord(ctx, previousContainerID)
 
-		err = ServicePortReconcileStatus(ctx, ServicePortReconcileStatusInput{
+		// Version rather than backend.Image: a definition that builds runs a tag
+		// dokku made, while the record holds the base it was built from, and
+		// only this maps the one back to the other. Comparing the raw container
+		// image would call every such service a mismatch.
+		running := Version(ctx, VersionInput{
+			ContainerID: previousContainerID,
 			Datastore:   input.Datastore,
 			ServiceName: input.ServiceName,
 		})
-		if err != nil {
-			return fmt.Errorf("failed to reconcile port status: %w", err)
+
+		if !recorded.Complete() || recorded.Tagged() == running {
+			if err := backend.Start(ctx, previousContainerID); err != nil {
+				return fmt.Errorf("failed to start container: %w", err)
+			}
+
+			if err := ServicePortReconcileStatus(ctx, ServicePortReconcileStatusInput{
+				Datastore:   input.Datastore,
+				ServiceName: input.ServiceName,
+			}); err != nil {
+				return fmt.Errorf("failed to reconcile port status: %w", err)
+			}
+
+			return nil
 		}
 
-		return nil
+		// the container disagrees with the record, so it is the container that
+		// is wrong. The image is fetched before it is taken away, so that a pull
+		// which fails leaves the service with the container it already had
+		// rather than with none.
+		if err := EnsureTaggedImage(ctx, EnsureTaggedImageInput{
+			Action:      "start",
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+			TaggedImage: recorded.Tagged(),
+		}); err != nil {
+			return err
+		}
+
+		if err := RemoveServiceContainer(ctx, RemoveServiceContainerInput{
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+			Warnings:    input.Warnings,
+		}); err != nil {
+			return err
+		}
 	}
 
-	taggedImage, err := ImageForService(ImageForServiceInput{
+	recorded, err := RecoverRecordedImage(ctx, RecoverRecordedImageInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to get image for service: %w", err)
-	}
-
-	if err := ValidateTaggedImageExists(taggedImage); err != nil {
 		return err
 	}
+
+	// both halves, because half a record places a container as surely as none of
+	// it does: the missing half would come from the definition, which is the
+	// drift this is here to stop
+	if !recorded.Complete() {
+		return fmt.Errorf("service %s has no recorded image version and no container to recover one from; run `dokku %s:upgrade %s --image-version <version>` to choose the version it runs",
+			input.ServiceName, input.Datastore.Properties().CommandPrefix, input.ServiceName)
+	}
+
+	taggedImage := recorded.Tagged()
+	if err := EnsureTaggedImage(ctx, EnsureTaggedImageInput{
+		Action:      "start",
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		TaggedImage: taggedImage,
+	}); err != nil {
+		return err
+	}
+
 	return input.Datastore.CreateServiceContainer(ctx, CreateServiceContainerInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 		TaggedImage: taggedImage,
 	})
+}
+
+// recoverRecord settles the service's record from a container it already has.
+//
+// Best effort on purpose. Both branches that call it go on to start a container
+// that exists, which they could do before this file was ever written, and a host
+// where the service root cannot be written is not a reason to refuse.
+func (input StartInput) recoverRecord(ctx context.Context, containerID string) RecordedImage {
+	recorded, err := RecoverRecordedImage(ctx, RecoverRecordedImageInput{
+		ContainerID: containerID,
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+	})
+	if err != nil {
+		warn(input.Warnings, fmt.Sprintf("unable to record the image %s runs: %s", input.ServiceName, err))
+	}
+
+	return recorded
 }
 
 // VersionInput is the input for the Version function

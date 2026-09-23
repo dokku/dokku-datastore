@@ -762,22 +762,14 @@ func (s *Datastore) URL(serviceName string, schemeOverride string) string {
 	return url
 }
 
-// taggedImage is the image a service runs, which is what it pinned at create
+// taggedImage is the image a service runs, which is what it recorded at create
 // time and the definition's default otherwise.
+//
+// The decision itself lives in resolveTaggedImage, because this used to be a
+// second copy of it that read the files differently and so could answer
+// something else for the same service.
 func (s *Datastore) taggedImage(serviceName string) string {
-	serviceFiles := Files(s, serviceName)
-
-	image := common.ReadFirstLine(serviceFiles.Image)
-	if image == "" {
-		image = s.Definition.DefaultImage
-	}
-
-	imageVersion := common.ReadFirstLine(serviceFiles.ImageVersion)
-	if imageVersion == "" {
-		imageVersion = s.Definition.DefaultImageVersion
-	}
-
-	return fmt.Sprintf("%s:%s", image, imageVersion)
+	return resolveTaggedImage(s, serviceName, "", "")
 }
 
 // scope assembles what the definition's templates are rendered against. Nothing

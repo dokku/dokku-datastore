@@ -217,6 +217,147 @@ func RecordImage(input RecordImageInput) error {
 	return nil
 }
 
+// RecoverRecordedImageInput is the input for the RecoverRecordedImage function
+type RecoverRecordedImageInput struct {
+	// ContainerID is the container to read the image from, looked up when empty
+	ContainerID string
+
+	// Datastore is the datastore the service belongs to
+	Datastore *Datastore
+
+	// ServiceName is the service whose record is being settled
+	ServiceName string
+}
+
+// RecoverRecordedImage writes down what a service's container runs when its
+// files do not say, and reports the record as it then stands.
+//
+// This is how a service that predates these files, or that lost one of them,
+// gets placed by what it is actually running rather than by whatever the plugin
+// now ships. It is called wherever the truth is still available and about to
+// stop being: before a container is removed, before a container is made, and
+// when a plugin is installed.
+//
+// A record that is already complete is left alone rather than rewritten. That
+// is not only an optimisation: Start runs from the pre-start trigger and dokku
+// restores apps in parallel, so two deploys can reach one service at once, and
+// a rewrite that truncates before it writes gives a concurrent reader an empty
+// file to fall back from.
+func RecoverRecordedImage(ctx context.Context, input RecoverRecordedImageInput) (RecordedImage, error) {
+	recorded := ReadRecordedImage(input.Datastore, input.ServiceName)
+	if recorded.Complete() {
+		return recorded, nil
+	}
+
+	running := Version(ctx, VersionInput{
+		ContainerID: input.ContainerID,
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+	})
+
+	repaired, changed := recoveredImage(recorded, running)
+	if !changed {
+		return repaired, nil
+	}
+
+	if err := writeRecordedImage(input.Datastore, input.ServiceName, repaired); err != nil {
+		return recorded, err
+	}
+
+	return repaired, nil
+}
+
+// recoveredImage decides what a service should record, given what its files say
+// and what its container runs, and whether that is a change worth writing.
+//
+// The record wins wherever it has something to say: a container running
+// something other than what the service recorded is the case Start rebuilds,
+// not a correction to be written down. Pure, so the decision is pinned by a
+// test rather than by a docker daemon.
+func recoveredImage(recorded RecordedImage, running string) (RecordedImage, bool) {
+	if recorded.Complete() {
+		return recorded, false
+	}
+
+	image, imageVersion, found := strings.Cut(running, ":")
+	if !found || image == "" || imageVersion == "" {
+		return recorded, false
+	}
+
+	repaired := recorded
+	if repaired.Image == "" {
+		repaired.Image = image
+	}
+	if repaired.ImageVersion == "" {
+		repaired.ImageVersion = imageVersion
+	}
+
+	return repaired, repaired != recorded
+}
+
+// writeRecordedImage writes a repaired record through a temporary file in the
+// same directory, so that a reader never sees a half written one.
+//
+// RecordImage writes in place, which is right where the service is being
+// changed by the command doing the writing. A repair happens underneath
+// commands that are only passing through, including the trigger that starts a
+// service while an app deploys, so here the swap is atomic.
+func writeRecordedImage(s *Datastore, serviceName string, recorded RecordedImage) error {
+	serviceFiles := Files(s, serviceName)
+
+	files := []struct {
+		filename string
+		content  string
+	}{
+		{filename: serviceFiles.Image, content: recorded.Image},
+		{filename: serviceFiles.ImageVersion, content: recorded.ImageVersion},
+	}
+
+	for _, file := range files {
+		if file.content == "" {
+			continue
+		}
+
+		if err := replaceFileAtomically(file.filename, file.content); err != nil {
+			return fmt.Errorf("failed to write %s: %w", file.filename, err)
+		}
+	}
+
+	return nil
+}
+
+// replaceFileAtomically writes a service file by renaming a temporary one over
+// it. The temporary file is made in the same directory so the rename stays
+// within one filesystem, and it is removed on every path that does not rename
+// it away.
+func replaceFileAtomically(filename string, content string) error {
+	temporary, err := os.CreateTemp(filepath.Dir(filename), "."+filepath.Base(filename)+".*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temporary.Name())
+
+	if _, err := temporary.WriteString(content); err != nil {
+		temporary.Close()
+		return err
+	}
+
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+
+	if err := common.SetPermissions(common.SetPermissionInput{
+		Filename:  temporary.Name(),
+		GroupName: hostenv.SystemGroup(),
+		Mode:      0644,
+		Username:  hostenv.SystemUser(),
+	}); err != nil {
+		return err
+	}
+
+	return os.Rename(temporary.Name(), filename)
+}
+
 // GenerateRandomHexString generates a random hex string
 func GenerateRandomHexString(length int) (string, error) {
 	bytes := make([]byte, length/2)
@@ -261,6 +402,81 @@ func GetAvailablePort() int {
 	}
 }
 
+// RecordedImage is what a service's files say it runs, with no fallback of any
+// kind applied.
+//
+// The halves are separate because a service can have recorded one and not the
+// other, and half a record places a container as surely as none of it does: a
+// service that kept its IMAGE and lost its IMAGE_VERSION would take the
+// definition's current version for the missing half, which is the drift these
+// files exist to prevent.
+type RecordedImage struct {
+	// Image is the image the service recorded, without its tag
+	Image string
+
+	// ImageVersion is the tag the service recorded
+	ImageVersion string
+}
+
+// Complete reports whether the service recorded both halves, which is what it
+// takes to place a container without inventing anything.
+func (r RecordedImage) Complete() bool {
+	return r.Image != "" && r.ImageVersion != ""
+}
+
+// Tagged is the image reference the record names.
+func (r RecordedImage) Tagged() string {
+	return fmt.Sprintf("%s:%s", r.Image, r.ImageVersion)
+}
+
+// ReadRecordedImage reads what a service recorded. Nothing is substituted: an
+// empty field means the service said nothing, which is the one thing a caller
+// placing a container has to be able to tell apart from a version.
+//
+// Nothing is written either. A record is not repaired on read, for the reason
+// PinDefinition gives for not writing the definition pin on read: every read
+// path would then need to be able to write. RecoverRecordedImage is the repair,
+// and it is called from the paths that are allowed to write.
+func ReadRecordedImage(s *Datastore, serviceName string) RecordedImage {
+	serviceFiles := Files(s, serviceName)
+
+	return RecordedImage{
+		Image:        common.ReadFirstLine(serviceFiles.Image),
+		ImageVersion: common.ReadFirstLine(serviceFiles.ImageVersion),
+	}
+}
+
+// resolveTaggedImage is the single decision about which image a service runs:
+// what it recorded, then the definition's default for whichever half it did not
+// record, then any override the caller was given.
+//
+// One function rather than two, because there were two and they disagreed. The
+// other read the files with os.ReadFile and trimmed the whole thing, so a file
+// with a second line produced a reference with a newline in the middle of it
+// that docker cannot resolve, while this one takes the first line the way every
+// other file in a service root is read.
+func resolveTaggedImage(s *Datastore, serviceName string, imageOverride string, imageVersionOverride string) string {
+	recorded := ReadRecordedImage(s, serviceName)
+
+	image := recorded.Image
+	if image == "" {
+		image = s.Definition.DefaultImage
+	}
+	if imageOverride != "" {
+		image = imageOverride
+	}
+
+	imageVersion := recorded.ImageVersion
+	if imageVersion == "" {
+		imageVersion = s.Definition.DefaultImageVersion
+	}
+	if imageVersionOverride != "" {
+		imageVersion = imageVersionOverride
+	}
+
+	return fmt.Sprintf("%s:%s", image, imageVersion)
+}
+
 // ImageForServiceInput is the input for the ImageForService function
 type ImageForServiceInput struct {
 	// Datastore is the service to get the image for
@@ -276,51 +492,19 @@ type ImageForServiceInput struct {
 	ImageVersionOverride string
 }
 
-// ImageForService retrieves the image for a service
+// ImageForService retrieves the image for a service.
+//
+// The definition's default still stands in for a half the service did not
+// record, because the commands that only report on a service are better off
+// with a wrong answer than with none. A caller that is about to build a
+// container settles the record first and refuses when it cannot, which is what
+// Start does.
 func ImageForService(input ImageForServiceInput) (string, error) {
 	if input.ServiceName == "" {
 		return "", fmt.Errorf("service name is required")
 	}
 
-	serviceProperties := input.Datastore.Properties()
-	serviceFiles := Files(input.Datastore, input.ServiceName)
-
-	image := serviceProperties.DefaultImage
-	imageVersion := serviceProperties.DefaultImageVersion
-
-	// check if the IMAGE file exists
-	if _, err := os.Stat(serviceFiles.Image); err == nil {
-		content, err := os.ReadFile(serviceFiles.Image)
-		if err != nil {
-			return "", err
-		}
-		diskSpecifiedImage := strings.TrimSpace(string(content))
-		if diskSpecifiedImage != "" {
-			image = diskSpecifiedImage
-		}
-	}
-
-	// check if the IMAGE_VERSION file exists
-	if _, err := os.Stat(serviceFiles.ImageVersion); err == nil {
-		content, err := os.ReadFile(serviceFiles.ImageVersion)
-		if err != nil {
-			return "", err
-		}
-		diskSpecifiedImageVersion := strings.TrimSpace(string(content))
-		if diskSpecifiedImageVersion != "" {
-			imageVersion = diskSpecifiedImageVersion
-		}
-	}
-
-	if input.ImageOverride != "" {
-		image = input.ImageOverride
-	}
-
-	if input.ImageVersionOverride != "" {
-		imageVersion = input.ImageVersionOverride
-	}
-
-	return fmt.Sprintf("%s:%s", image, imageVersion), nil
+	return resolveTaggedImage(input.Datastore, input.ServiceName, input.ImageOverride, input.ImageVersionOverride), nil
 }
 
 // PullTaggedImage pulls a tagged image
@@ -338,6 +522,60 @@ func PullTaggedImage(ctx context.Context, taggedImage string) (bool, error) {
 	}
 
 	return false, errors.New("unspecified error")
+}
+
+// EnsureTaggedImageInput is the input for the EnsureTaggedImage function
+type EnsureTaggedImageInput struct {
+	// Action names what could not be done, for the message a disabled pull
+	// leaves behind: "creation", "upgrade" or "start"
+	Action string
+
+	// Datastore is the datastore the service belongs to
+	Datastore *Datastore
+
+	// ServiceName is the service the image is being fetched for
+	ServiceName string
+
+	// TaggedImage is the reference the host has to have
+	TaggedImage string
+}
+
+// EnsureTaggedImage makes sure the host has an image, pulling it when it does
+// not and explaining what to run by hand when pulling is turned off.
+//
+// One copy rather than three. Create and upgrade each carried this block
+// verbatim, differing only in the word they put in the failure line, and start
+// carried none of it - so a service pinned to a tag the host had pruned could
+// not be started at all, and the only way back was an upgrade onto a version
+// nobody asked for.
+func EnsureTaggedImage(ctx context.Context, input EnsureTaggedImageInput) error {
+	if err := ValidateTaggedImageExists(input.TaggedImage); err == nil {
+		return nil
+	}
+
+	pullVariable := input.Datastore.Properties().ImagePullVariable
+	if os.Getenv(pullVariable) == "true" {
+		return pullDisabledError(pullVariable, input.TaggedImage, input.ServiceName, input.Action)
+	}
+
+	if _, err := PullTaggedImage(ctx, input.TaggedImage); err != nil {
+		return fmt.Errorf("failed to pull image %s: %w", input.TaggedImage, err)
+	}
+
+	return nil
+}
+
+// pullDisabledError is what a caller is told when the host has neither the
+// image nor permission to fetch it. Separate from EnsureTaggedImage so the
+// wording can be pinned by a test that needs no docker daemon.
+func pullDisabledError(pullVariable string, taggedImage string, serviceName string, action string) error {
+	message := []string{
+		fmt.Sprintf("%s environment variable detected. Not running pull command.", pullVariable),
+		fmt.Sprintf("docker image pull %s", taggedImage),
+		fmt.Sprintf("%s service %s failed", serviceName, action),
+	}
+
+	return errors.New(strings.Join(message, "\n"))
 }
 
 // FilterServicesInput is the input for the FilterServices function
