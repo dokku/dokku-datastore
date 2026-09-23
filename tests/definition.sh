@@ -50,6 +50,23 @@ cleanup() {
 }
 trap cleanup EXIT
 
+echo "==> $DEFINITION: a create naming an image with no version is refused"
+# the version this definition pins belongs to the image it pins, so there is
+# nothing to fall back to for another repository. Pasting it on anyway named a
+# tag nobody ever built, and the create then failed saying that image could not
+# be had. Nothing reaches docker here: the refusal lands before the pull and
+# before the service root is made, so this costs the daemon nothing
+refused_service="${SERVICE}-noversion"
+refused_root="$DOKKU_LIB_ROOT/services/$DATA_DIR/$refused_service"
+create_err="$(mktemp)"
+if "$BIN" create "$PLUGIN" "$refused_service" --image example.invalid/not-the-definition-image 2>"$create_err"; then
+  fail "expected a create naming an image with no version to be refused"
+fi
+grep -q -- "--image-version" "$create_err" || fail "expected the refusal to name the flag, got '$(cat "$create_err")'"
+grep -q "example.invalid/not-the-definition-image" "$create_err" || fail "expected the refusal to name the image, got '$(cat "$create_err")'"
+[[ ! -d "$refused_root" ]] || fail "a refused create left $refused_root behind"
+rm -f "$create_err"
+
 echo "==> $DEFINITION: create"
 "$BIN" create "$PLUGIN" "$SERVICE" --image-version "$IMAGE_VERSION"
 

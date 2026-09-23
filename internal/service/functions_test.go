@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -99,6 +101,10 @@ func writeRecord(t *testing.T, serviceRoot string, image string, imageVersion st
 // A service runs what it recorded. The definition's default only stands in for
 // a half it did not record, and an override only for a caller that named one -
 // which is create and upgrade, and nothing else.
+//
+// The default version is part of the default image rather than a half that can
+// be drawn on alone: a tag belongs to the repository that published it, so
+// there is nothing to fall back to for an image the definition does not ship.
 func TestImageForService(t *testing.T) {
 	redis := redisDatastore(t)
 	defaultImage := redis.Definition.DefaultImage
@@ -113,6 +119,7 @@ func TestImageForService(t *testing.T) {
 		imageOverride        string
 		imageVersionOverride string
 		expected             string
+		expectedErr          bool
 	}{
 		{
 			name:         "both halves recorded",
@@ -121,14 +128,25 @@ func TestImageForService(t *testing.T) {
 			expected:     "redis:8.9.0",
 		},
 		{
+			// the definition ships no tag for somebody else's repository, and
+			// pasting its own on named redis/redis-stack-server:<redis version>,
+			// which failed saying an image nobody ever built was missing
+			name:        "only a custom image recorded",
+			image:       "redis/redis-stack-server",
+			expectedErr: true,
+		},
+		{
+			// a service created before the IMAGE file existed recorded only its
+			// version, and the definition's image is the one it has been running
+			// all along, so this half is still filled in
 			name:         "only the version recorded",
 			imageVersion: "8.9.0",
 			expected:     defaultImage + ":8.9.0",
 		},
 		{
-			name:     "only the image recorded",
-			image:    "redis/redis-stack-server",
-			expected: "redis/redis-stack-server:" + defaultVersion,
+			name:     "the definition's own image recorded without a version",
+			image:    defaultImage,
+			expected: defaultImage + ":" + defaultVersion,
 		},
 		{
 			name:     "nothing recorded",
@@ -161,6 +179,33 @@ func TestImageForService(t *testing.T) {
 			imageVersionOverride: "7.2.0",
 			expected:             defaultImage + ":7.2.0",
 		},
+		{
+			// create with --image and no --image-version, which is where the
+			// false missing image was reached from
+			name:          "a custom image override with no version",
+			imageOverride: "redis/redis-stack-server",
+			expectedErr:   true,
+		},
+		{
+			name:                 "a custom image override with a version",
+			imageOverride:        "redis/redis-stack-server",
+			imageVersionOverride: "7.2.0-v10",
+			expected:             "redis/redis-stack-server:7.2.0-v10",
+		},
+		{
+			// the version the service already recorded is a version, so an
+			// image override alone is only refused where there is none
+			name:          "a custom image override over a recorded version",
+			imageVersion:  "7.2.0-v10",
+			imageOverride: "redis/redis-stack-server",
+			expected:      "redis/redis-stack-server:7.2.0-v10",
+		},
+		{
+			name:         "a private registry carries its port, not a tag",
+			image:        "registry.example.com:5000/redis",
+			imageVersion: "8.9.0",
+			expected:     "registry.example.com:5000/redis:8.9.0",
+		},
 	}
 
 	for _, test := range tests {
@@ -174,6 +219,13 @@ func TestImageForService(t *testing.T) {
 				ImageOverride:        test.imageOverride,
 				ImageVersionOverride: test.imageVersionOverride,
 			})
+			if test.expectedErr {
+				if !errors.Is(err, ErrNoImageVersion) {
+					t.Fatalf("expected a refusal, got %q and %v", actual, err)
+				}
+				return
+			}
+
 			if err != nil {
 				t.Fatalf("expected no error, got %v", err)
 			}
@@ -219,6 +271,41 @@ func TestTaggedImageAgreesWithImageForService(t *testing.T) {
 				t.Errorf("taggedImage answered %q where ImageForService answered %q", actual, resolved)
 			}
 		})
+	}
+}
+
+// What the read paths get for a record nothing can settle. They have nowhere to
+// return an error to, so they are handed the repository with an empty tag - a
+// reference docker refuses - rather than one it would resolve to latest. The
+// verbs are the callers that would run it, and they refuse first.
+func TestTaggedImageReportsARecordItCannotSettle(t *testing.T) {
+	redis := redisDatastore(t)
+	serviceRoot := withServiceRoot(t, redis, "lollipop")
+	writeRecord(t, serviceRoot, "redis/redis-stack-server", "")
+
+	if actual := redis.taggedImage("lollipop"); actual != "redis/redis-stack-server:" {
+		t.Errorf("expected the recorded repository with no tag, got %q", actual)
+	}
+}
+
+// An offline verb stops the service and runs a throwaway container against its
+// data, so which version it runs is the whole question. A service whose record
+// cannot answer is told rather than run at whatever the definition ships now.
+func TestAVerbRefusesARecordItCannotSettle(t *testing.T) {
+	redis := redisDatastore(t)
+	serviceRoot := withServiceRoot(t, redis, "lollipop")
+	writeRecord(t, serviceRoot, "redis/redis-stack-server", "")
+
+	err := redis.ExportService(context.Background(), ExportServiceInput{
+		ServiceName: "lollipop",
+		Writer:      io.Discard,
+	})
+	if !errors.Is(err, ErrNoImageVersion) {
+		t.Fatalf("expected a refusal, got %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "lollipop") {
+		t.Errorf("expected the refusal to name the service, got %q", err)
 	}
 }
 
@@ -341,6 +428,27 @@ func TestRecoveredImage(t *testing.T) {
 			running:  "redis",
 			expected: RecordedImage{},
 		},
+		{
+			// splitting on the first colon recorded the image as
+			// registry.example.com at the version 5000/redis:8.9.0, and every
+			// later decision was then made about a host name
+			name:            "a container image from a private registry",
+			running:         "registry.example.com:5000/redis:8.9.0",
+			expected:        RecordedImage{Image: "registry.example.com:5000/redis", ImageVersion: "8.9.0"},
+			expectedChanged: true,
+		},
+		{
+			name:     "a container image from a private registry with no tag",
+			running:  "registry.example.com:5000/redis",
+			expected: RecordedImage{},
+		},
+		{
+			// the colon in sha256: belongs to the digest, so there is no tag to
+			// learn rather than one called after the hash
+			name:     "a container image pinned by digest",
+			running:  "redis@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+			expected: RecordedImage{},
+		},
 	}
 
 	for _, test := range tests {
@@ -403,6 +511,23 @@ func TestRecoverRecordedImageSkipsAnUnchangedRecord(t *testing.T) {
 // name the service image; the rest name a step that runs one of the images the
 // plugin runs beside a service, and export stands in for every verb, which
 // passes its own name.
+// The wording an operator reads when they named an image and no version. The
+// sentinel is unwrapped to rather than wrapped, so its own text does not turn up
+// in front of the sentence.
+func TestNoImageVersionError(t *testing.T) {
+	err := NoImageVersionError("redis/redis-stack-server", "redis")
+
+	expected := "redis/redis-stack-server is not the image the redis definition ships, " +
+		"so it has no version to fall back on; name one with --image-version"
+	if err.Error() != expected {
+		t.Errorf("expected:\n%s\ngot:\n%s", expected, err.Error())
+	}
+
+	if !errors.Is(err, ErrNoImageVersion) {
+		t.Error("expected the refusal to be an ErrNoImageVersion")
+	}
+}
+
 func TestPullDisabledError(t *testing.T) {
 	actions := []string{
 		"creation",

@@ -45,8 +45,7 @@ func (c *fakeCommand) FlagSet() *flag.FlagSet {
 
 func redisDocumentationData(t *testing.T) DocumentationData {
 	t.Helper()
-	t.Setenv("REDIS_IMAGE", "")
-	t.Setenv("REDIS_IMAGE_VERSION", "")
+	clearImageEnv(t)
 
 	return NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["redis"]})
 }
@@ -79,6 +78,7 @@ func TestNewDocumentationData(t *testing.T) {
 }
 
 func TestNewDocumentationDataPrefersTheEnvironment(t *testing.T) {
+	clearImageEnv(t)
 	t.Setenv("REDIS_IMAGE", "valkey/valkey")
 	t.Setenv("REDIS_IMAGE_VERSION", "9.9.9")
 
@@ -97,8 +97,7 @@ func TestNewDocumentationDataPrefersTheEnvironment(t *testing.T) {
 // left at a plugin's root is no longer read, and must not be: it would be a
 // second pin, free to disagree with the one the services actually run.
 func TestNewDocumentationDataIgnoresAPluginDockerfile(t *testing.T) {
-	t.Setenv("REDIS_IMAGE", "")
-	t.Setenv("REDIS_IMAGE_VERSION", "")
+	clearImageEnv(t)
 
 	pluginDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(pluginDir, "Dockerfile"), []byte("FROM redis:1.2.3\n"), 0644); err != nil {

@@ -285,6 +285,20 @@ func TestImageFromDockerfile(t *testing.T) {
 			expectedVersion: "8.8.0",
 			expectedTrivial: true,
 		},
+		{
+			name:            "a private registry carries a port",
+			contents:        "FROM registry.example.com:5000/redis:8.8.0\n",
+			expectedImage:   "registry.example.com:5000/redis",
+			expectedVersion: "8.8.0",
+			expectedTrivial: true,
+		},
+		{
+			name:            "a private registry with no tag",
+			contents:        "FROM registry.example.com:5000/redis\n",
+			expectedImage:   "registry.example.com:5000/redis",
+			expectedVersion: "latest",
+			expectedTrivial: true,
+		},
 	}
 
 	for _, test := range tests {
@@ -304,6 +318,80 @@ func TestImageFromDockerfile(t *testing.T) {
 
 			if trivial != test.expectedTrivial {
 				t.Errorf("expected trivial %t, got %t", test.expectedTrivial, trivial)
+			}
+		})
+	}
+}
+
+// Where a reference is cut in two. The last colon rather than the first,
+// because a private registry carries its port in the reference and splitting on
+// the first recorded the host name as the image and the rest as the version.
+func TestCutImage(t *testing.T) {
+	tests := []struct {
+		name          string
+		reference     string
+		expectedName  string
+		expectedTag   string
+		expectedFound bool
+	}{
+		{
+			name:          "an image and a tag",
+			reference:     "redis:8.8.0",
+			expectedName:  "redis",
+			expectedTag:   "8.8.0",
+			expectedFound: true,
+		},
+		{
+			name:         "an image with no tag",
+			reference:    "redis",
+			expectedName: "redis",
+		},
+		{
+			name:          "a namespaced image",
+			reference:     "redis/redis-stack-server:7.2.0-v10",
+			expectedName:  "redis/redis-stack-server",
+			expectedTag:   "7.2.0-v10",
+			expectedFound: true,
+		},
+		{
+			name:          "a private registry and a tag",
+			reference:     "registry.example.com:5000/redis:8.8.0",
+			expectedName:  "registry.example.com:5000/redis",
+			expectedTag:   "8.8.0",
+			expectedFound: true,
+		},
+		{
+			// the only colon is the port, and a port is not a tag
+			name:         "a private registry with no tag",
+			reference:    "registry.example.com:5000/redis",
+			expectedName: "registry.example.com:5000/redis",
+		},
+		{
+			// the colon in sha256: belongs to the digest
+			name:         "a digest",
+			reference:    "redis@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+			expectedName: "redis@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		},
+		{
+			name:         "nothing at all",
+			reference:    "",
+			expectedName: "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			name, tag, found := CutImage(test.reference)
+			if name != test.expectedName {
+				t.Errorf("expected name %q, got %q", test.expectedName, name)
+			}
+
+			if tag != test.expectedTag {
+				t.Errorf("expected tag %q, got %q", test.expectedTag, tag)
+			}
+
+			if found != test.expectedFound {
+				t.Errorf("expected found %t, got %t", test.expectedFound, found)
 			}
 		})
 	}

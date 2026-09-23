@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku/plugins/common"
@@ -279,7 +280,7 @@ func recoveredImage(recorded RecordedImage, running string) (RecordedImage, bool
 		return recorded, false
 	}
 
-	image, imageVersion, found := strings.Cut(running, ":")
+	image, imageVersion, found := definition.CutImage(running)
 	if !found || image == "" || imageVersion == "" {
 		return recorded, false
 	}
@@ -446,35 +447,82 @@ func ReadRecordedImage(s *Datastore, serviceName string) RecordedImage {
 	}
 }
 
-// resolveTaggedImage is the single decision about which image a service runs:
-// what it recorded, then the definition's default for whichever half it did not
-// record, then any override the caller was given.
+// ErrNoImageVersion is what a reference that cannot be settled is, underneath
+// the message naming the image it could not be settled for.
+var ErrNoImageVersion = errors.New("no image version")
+
+// noImageVersionMessage is the operator-facing wording, which unwraps to the
+// sentinel. Wrapping would print the sentinel's own text in front of it, and
+// what this says is already what an operator has to read - the same reason
+// pullDisabledMessage is shaped this way.
+type noImageVersionMessage string
+
+func (message noImageVersionMessage) Error() string { return string(message) }
+
+func (message noImageVersionMessage) Unwrap() error { return ErrNoImageVersion }
+
+// NoImageVersionError names the image that has no version to fall back on, and
+// the flag that gives it one. Separate from resolveImage so the wording is
+// pinned by a test, and shared with upgradeVersion's refusal so a service being
+// moved onto such an image is told the same thing as one already on it.
+func NoImageVersionError(image string, plugin string) error {
+	return noImageVersionMessage(fmt.Sprintf("%s is not the image the %s definition ships, so it has no version to fall back on; name one with --image-version",
+		image, plugin))
+}
+
+// resolveImage is the single decision about which image a service runs: what it
+// recorded, then any override the caller was given, then the definition's
+// default for a half it still does not have.
 //
 // One function rather than two, because there were two and they disagreed. The
 // other read the files with os.ReadFile and trimmed the whole thing, so a file
 // with a second line produced a reference with a newline in the middle of it
 // that docker cannot resolve, while this one takes the first line the way every
 // other file in a service root is read.
-func resolveTaggedImage(s *Datastore, serviceName string, imageOverride string, imageVersionOverride string) string {
+//
+// The definition's image and the definition's version are one pair rather than
+// two halves to be drawn on separately. A version belongs to the repository that
+// published it, so pasting the definition's onto another repository names a tag
+// nobody ever built - and the command then fails saying that image is missing,
+// which is a fair description of a reference this invented. So a version is
+// substituted only for the definition's own image, and where it cannot be the
+// caller is told which image has no version rather than handed a made up one.
+//
+// What could be settled comes back alongside the refusal, because a caller about
+// to make a container has to stop where one that is only reporting on a service
+// still needs something to say.
+func resolveImage(s *Datastore, serviceName string, imageOverride string, imageVersionOverride string) (RecordedImage, error) {
 	recorded := ReadRecordedImage(s, serviceName)
 
-	image := recorded.Image
-	if image == "" {
-		image = s.Definition.DefaultImage
+	settled := RecordedImage{
+		Image:        recorded.Image,
+		ImageVersion: recorded.ImageVersion,
 	}
+
 	if imageOverride != "" {
-		image = imageOverride
+		settled.Image = imageOverride
+	}
+	if settled.Image == "" {
+		settled.Image = s.Definition.DefaultImage
 	}
 
-	imageVersion := recorded.ImageVersion
-	if imageVersion == "" {
-		imageVersion = s.Definition.DefaultImageVersion
-	}
 	if imageVersionOverride != "" {
-		imageVersion = imageVersionOverride
+		settled.ImageVersion = imageVersionOverride
+	}
+	if settled.ImageVersion != "" {
+		return settled, nil
 	}
 
-	return fmt.Sprintf("%s:%s", image, imageVersion)
+	// a service created before the IMAGE file existed recorded only its version,
+	// and the definition's image is the one it has been running all along. That
+	// is the half this fallback is for, and it is why the pair is only refused
+	// the other way around
+	if settled.Image == s.Definition.DefaultImage {
+		settled.ImageVersion = s.Definition.DefaultImageVersion
+		return settled, nil
+	}
+
+	return settled, NoImageVersionError(settled.Image, s.Definition.Dokku.Plugin)
 }
 
 // ImageForServiceInput is the input for the ImageForService function
@@ -492,19 +540,23 @@ type ImageForServiceInput struct {
 	ImageVersionOverride string
 }
 
-// ImageForService retrieves the image for a service.
+// ImageForService is the reference create and upgrade place a container by.
 //
-// The definition's default still stands in for a half the service did not
-// record, because the commands that only report on a service are better off
-// with a wrong answer than with none. A caller that is about to build a
-// container settles the record first and refuses when it cannot, which is what
-// Start does.
+// Both are about to fetch and run what comes back, so a version that could not
+// be settled is refused here rather than filled in from the definition. Start
+// does not come through this at all: it runs what the service recorded, and
+// refuses on its own account when that record is half there.
 func ImageForService(input ImageForServiceInput) (string, error) {
 	if input.ServiceName == "" {
 		return "", fmt.Errorf("service name is required")
 	}
 
-	return resolveTaggedImage(input.Datastore, input.ServiceName, input.ImageOverride, input.ImageVersionOverride), nil
+	settled, err := resolveImage(input.Datastore, input.ServiceName, input.ImageOverride, input.ImageVersionOverride)
+	if err != nil {
+		return "", err
+	}
+
+	return settled.Tagged(), nil
 }
 
 // pullTaggedImage pulls a tagged image

@@ -329,6 +329,9 @@ it *must* be compatible with the {{.Image}} image.
 export {{.PluginVariable}}_IMAGE="{{.Image}}"
 export {{.PluginVariable}}_IMAGE_VERSION="{{.ImageVersion}}"
 dokku {{.CommandPrefix}}:create lollipop
+an image other than {{.Image}} has no version to fall back on, because the
+version this plugin pins belongs to {{.Image}}, so name one alongside it.
+dokku {{.CommandPrefix}}:create lollipop --image <image> --image-version <version>
 you can also specify custom environment variables to start
 the {{.CommandPrefix}} service in semicolon-separated form.
 export {{.PluginVariable}}_CUSTOM_ENV="USER=alpha;HOST=beta"

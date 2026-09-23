@@ -20,11 +20,17 @@ type UpdateFlagFromEnvInput struct {
 	Datastore *service.Datastore
 }
 
-// UpdateFlagFromEnv updates the flags from the environment
+// UpdateFlagFromEnv fills the flags a command was not given from the
+// environment, and stops there.
+//
+// The definition's defaults are deliberately not applied here. Applying them
+// meant the resolver downstream was always handed two filled halves and could
+// never tell an image an operator named from one it had supplied itself - which
+// is how a custom image came to be run at the definition's version, at a tag
+// that repository had never published. The default now belongs to resolveImage,
+// which is the one place that knows the two halves are a pair.
 func UpdateFlagFromEnv(input UpdateFlagFromEnvInput) (UpdateFlagFromEnvInput, error) {
 	properties := input.Datastore.Properties()
-	defaultImage := properties.DefaultImage
-	defaultImageVersion := properties.DefaultImageVersion
 	configVariable := properties.ConfigVariable
 	envVariable := properties.EnvVariable
 
@@ -37,19 +43,11 @@ func UpdateFlagFromEnv(input UpdateFlagFromEnvInput) (UpdateFlagFromEnvInput, er
 	}
 
 	if input.Image == "" {
-		input.Image = os.Getenv("PLUGIN_IMAGE")
-	}
-
-	if input.Image == "" {
-		input.Image = defaultImage
+		input.Image = ImageFromEnv(properties)
 	}
 
 	if input.ImageVersion == "" {
-		input.ImageVersion = os.Getenv("PLUGIN_IMAGE_VERSION")
-	}
-
-	if input.ImageVersion == "" {
-		input.ImageVersion = defaultImageVersion
+		input.ImageVersion = ImageVersionFromEnv(properties)
 	}
 
 	return input, nil

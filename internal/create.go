@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
@@ -112,7 +112,7 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		ServiceName:          input.ServiceName,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to get image for service: %w", err)
+		return fmt.Errorf("unable to create %s: %w", input.ServiceName, err)
 	}
 
 	if err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
@@ -174,7 +174,7 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	// and when it did not this is the difference between a service that records
 	// the image it runs and one that records nothing and is placed by whatever
 	// the plugin ships the next time its container has to be made.
-	recordedImage, recordedImageVersion, _ := strings.Cut(taggedImage, ":")
+	recordedImage, recordedImageVersion, _ := definition.CutImage(taggedImage)
 	if err := service.CommitServiceConfig(service.CommitServiceConfigInput{
 		ConfigOptions:      input.ConfigOptions,
 		CustomEnv:          input.CustomEnv,

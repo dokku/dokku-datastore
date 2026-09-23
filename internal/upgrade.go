@@ -74,22 +74,29 @@ func (i UpgradeServiceInput) changesSettings() bool {
 // major version stays something the operator asks for by name, because it moves
 // where the data is mounted and cannot be undone by pointing the version back.
 //
-// A service running an image its definition does not ship has no newest to move
-// to, so it is told rather than moved onto something invented. A service with no
-// record at all takes the default: an upgrade was asked for in so many words,
-// which makes it a choice rather than a guess, and it is what puts a service
-// right that start has refused to place.
+// An image the definition does not ship has no newest to move to, so it is told
+// rather than moved onto something invented. That covers the image the service
+// already runs and the one an upgrade was asked to move it to alike: a version
+// belongs to the repository that published it, and the definition's is no more
+// applicable to a new image than to an old one. A service with no record at all
+// takes the default: an upgrade was asked for in so many words, which makes it
+// a choice rather than a guess, and it is what puts a service right that start
+// has refused to place.
 //
 // Pure, so which version an upgrade lands on is pinned by a test rather than by
 // a docker daemon.
-func upgradeVersion(d definition.Definition, recorded service.RecordedImage, requested string) (string, error) {
+func upgradeVersion(d definition.Definition, recorded service.RecordedImage, requestedImage string, requested string) (string, error) {
 	if requested != "" {
 		return requested, nil
 	}
 
-	if recorded.Image != "" && recorded.Image != d.DefaultImage {
-		return "", fmt.Errorf("it runs %s, which is not the image the %s definition ships; name a version with --image-version to upgrade it",
-			recorded.Image, d.Dokku.Plugin)
+	image := requestedImage
+	if image == "" {
+		image = recorded.Image
+	}
+
+	if image != "" && image != d.DefaultImage {
+		return "", service.NoImageVersionError(image, d.Dokku.Plugin)
 	}
 
 	return d.DefaultImageVersion, nil
@@ -108,7 +115,7 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		return err
 	}
 
-	imageVersion, err := upgradeVersion(input.Datastore.Definition, recorded, input.ImageVersion)
+	imageVersion, err := upgradeVersion(input.Datastore.Definition, recorded, input.Image, input.ImageVersion)
 	if err != nil {
 		return fmt.Errorf("unable to upgrade %s: %w", input.ServiceName, err)
 	}
@@ -120,7 +127,7 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		ServiceName:          input.ServiceName,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to get image for service: %w", err)
+		return fmt.Errorf("unable to upgrade %s: %w", input.ServiceName, err)
 	}
 
 	if err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
@@ -168,7 +175,7 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	// Recorded together with the image it was resolved from: a container rebuilt
 	// later is placed by these two files and nothing else, so a pin that moved
 	// without the image would mount the new path at the old version.
-	image, imageVersion, _ := strings.Cut(taggedImage, ":")
+	image, imageVersion, _ := definition.CutImage(taggedImage)
 	if err := service.RecordImage(service.RecordImageInput{
 		Datastore:    input.Datastore,
 		Image:        image,
