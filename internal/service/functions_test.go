@@ -584,3 +584,84 @@ func TestPullDisabledErrorIsErrPullDisabled(t *testing.T) {
 		t.Error("expected a failed pull not to look like a disabled one")
 	}
 }
+
+// An ambassador is kept only when it is running and fronts the container the
+// service has now. Everything else about an exposed service's ambassador is
+// replaced rather than started, since starting one linked to a container that
+// is gone or down is what docker refuses.
+func TestActionForAmbassador(t *testing.T) {
+	tests := []struct {
+		name      string
+		exposed   bool
+		status    string
+		frontedID string
+		serviceID string
+		expected  ambassadorAction
+	}{
+		{name: "not exposed, no ambassador", exposed: false, status: "missing", serviceID: "abc", expected: ambassadorNone},
+		{name: "not exposed, running ambassador", exposed: false, status: "running", frontedID: "abc", serviceID: "abc", expected: ambassadorRemove},
+		{name: "not exposed, stopped ambassador", exposed: false, status: "exited", frontedID: "old", serviceID: "abc", expected: ambassadorRemove},
+		{name: "exposed, no ambassador", exposed: true, status: "missing", serviceID: "abc", expected: ambassadorCreate},
+		{name: "exposed, running and fronting the service", exposed: true, status: "running", frontedID: "abc", serviceID: "abc", expected: ambassadorKeep},
+		{name: "exposed, fronting a container that is gone", exposed: true, status: "running", frontedID: "old", serviceID: "abc", expected: ambassadorReplace},
+		{name: "exposed, made before the label existed", exposed: true, status: "running", frontedID: "", serviceID: "abc", expected: ambassadorReplace},
+		{name: "exposed, no service container", exposed: true, status: "running", frontedID: "", serviceID: "", expected: ambassadorReplace},
+		{name: "exposed, stopped by a pause", exposed: true, status: "exited", frontedID: "abc", serviceID: "abc", expected: ambassadorReplace},
+		{name: "exposed, created and never started", exposed: true, status: "created", frontedID: "abc", serviceID: "abc", expected: ambassadorReplace},
+		{name: "exposed, dead", exposed: true, status: "dead", frontedID: "abc", serviceID: "abc", expected: ambassadorReplace},
+		{name: "exposed, restarting on a failed link", exposed: true, status: "restarting", frontedID: "abc", serviceID: "abc", expected: ambassadorReplace},
+		{name: "exposed, a state docker has not shipped yet", exposed: true, status: "hibernating", frontedID: "abc", serviceID: "abc", expected: ambassadorReplace},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if actual := actionForAmbassador(test.exposed, test.status, test.frontedID, test.serviceID); actual != test.expected {
+				t.Errorf("expected %d, got %d", test.expected, actual)
+			}
+		})
+	}
+}
+
+func TestAmbassadorRunArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    ambassadorRunArgsInput
+		expected string
+	}{
+		{
+			name: "one port",
+			input: ambassadorRunArgsInput{
+				AmbassadorName: "dokku.postgres.lake.ambassador",
+				CommandPrefix:  "postgres",
+				ContainerID:    "abc123",
+				ContainerName:  "dokku.postgres.lake",
+				ContainerPorts: []int{5432},
+				HostPorts:      []string{"5678"},
+				Image:          "dokku/ambassador:0.8.2",
+				LogArgs:        []string{"--log-opt=max-size=10m"},
+			},
+			expected: "container run -d --link=dokku.postgres.lake:postgres --name=dokku.postgres.lake.ambassador --restart=always --label=dokku=ambassador --label=dokku.ambassador=postgres --label=dokku.ambassador.container-id=abc123 --log-opt=max-size=10m --publish=5678:5432 dokku/ambassador:0.8.2",
+		},
+		{
+			name: "several ports, published in order",
+			input: ambassadorRunArgsInput{
+				AmbassadorName: "dokku.rabbitmq.queue.ambassador",
+				CommandPrefix:  "rabbitmq",
+				ContainerID:    "def456",
+				ContainerName:  "dokku.rabbitmq.queue",
+				ContainerPorts: []int{5672, 4369, 35197, 15672},
+				HostPorts:      []string{"1", "2", "3", "4"},
+				Image:          "dokku/ambassador:0.8.2",
+			},
+			expected: "container run -d --link=dokku.rabbitmq.queue:rabbitmq --name=dokku.rabbitmq.queue.ambassador --restart=always --label=dokku=ambassador --label=dokku.ambassador=rabbitmq --label=dokku.ambassador.container-id=def456 --publish=1:5672 --publish=2:4369 --publish=3:35197 --publish=4:15672 dokku/ambassador:0.8.2",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if actual := strings.Join(ambassadorRunArgs(test.input), " "); actual != test.expected {
+				t.Errorf("expected:\n%s\ngot:\n%s", test.expected, actual)
+			}
+		})
+	}
+}

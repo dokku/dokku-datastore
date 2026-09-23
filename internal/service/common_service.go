@@ -23,6 +23,17 @@ func AmbassadorContainerName(s *Datastore, serviceName string) string {
 	return fmt.Sprintf("dokku.%s.%s.ambassador", commandPrefix, serviceName)
 }
 
+// RemoveAmbassadorContainer removes the ambassador container for a service,
+// running or not
+func RemoveAmbassadorContainer(ctx context.Context, s *Datastore, serviceName string) error {
+	ambassadorName := AmbassadorContainerName(s, serviceName)
+	if err := backend.Remove(ctx, ambassadorName); err != nil {
+		return fmt.Errorf("failed to remove container %s: %w", ambassadorName, err)
+	}
+
+	return nil
+}
+
 // containerNames are the containers that make up a service, which is all the
 // backend needs to know about it.
 func containerNames(s *Datastore, serviceName string) backend.Names {
@@ -675,7 +686,14 @@ func Start(ctx context.Context, input StartInput) error {
 		// record would be a restart nobody asked for
 		input.recoverRecord(ctx, containerID)
 
-		return input.writeContainerID(containerID)
+		if err := input.writeContainerID(containerID); err != nil {
+			return err
+		}
+
+		// its ambassador is not, since that is not the service: one that went
+		// down on its own, or never came back after the daemon restarted, is
+		// put back by a start rather than by an unexpose and an expose
+		return input.reconcilePorts(ctx)
 
 	case unpauseContainer:
 		// docker refuses to start a container it froze, so it is thawed rather
@@ -689,7 +707,11 @@ func Start(ctx context.Context, input StartInput) error {
 			return err
 		}
 
-		return input.writeContainerID(containerID)
+		if err := input.writeContainerID(containerID); err != nil {
+			return err
+		}
+
+		return input.reconcilePorts(ctx)
 
 	case resumeContainer:
 		recorded := input.recoverRecord(ctx, containerID)
@@ -709,14 +731,7 @@ func Start(ctx context.Context, input StartInput) error {
 				return fmt.Errorf("failed to start container: %w", err)
 			}
 
-			if err := ServicePortReconcileStatus(ctx, ServicePortReconcileStatusInput{
-				Datastore:   input.Datastore,
-				ServiceName: input.ServiceName,
-			}); err != nil {
-				return fmt.Errorf("failed to reconcile port status: %w", err)
-			}
-
-			return nil
+			return input.reconcilePorts(ctx)
 		}
 
 		// the container disagrees with the record, so it is the container that
@@ -796,6 +811,19 @@ func (input StartInput) writeContainerID(containerID string) error {
 		Mode:      0644,
 		Username:  hostenv.SystemUser(),
 	})
+}
+
+// reconcilePorts brings the service's ambassador in line with the container
+// the service is now running on.
+func (input StartInput) reconcilePorts(ctx context.Context) error {
+	if err := ServicePortReconcileStatus(ctx, ServicePortReconcileStatusInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+	}); err != nil {
+		return fmt.Errorf("failed to reconcile port status: %w", err)
+	}
+
+	return nil
 }
 
 // recoverRecord settles the service's record from a container it already has.

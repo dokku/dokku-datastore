@@ -21,7 +21,7 @@ type UnexposeServiceInput struct {
 func UnexposeService(ctx context.Context, input UnexposeServiceInput) error {
 	ambassadorContainerName := service.AmbassadorContainerName(input.Datastore, input.ServiceName)
 	if service.ContainerExists(ctx, ambassadorContainerName) {
-		err := RemoveAmbassadorContainer(ctx, input.Datastore, input.ServiceName)
+		err := service.RemoveAmbassadorContainer(ctx, input.Datastore, input.ServiceName)
 		if err != nil {
 			return fmt.Errorf("failed to remove ambassador container: %w", err)
 		}

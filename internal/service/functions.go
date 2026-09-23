@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/backend"
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
@@ -759,54 +760,165 @@ type ServicePortReconcileStatusInput struct {
 	ServiceName string
 }
 
-// ServicePortReconcileStatus reconciles the port for a service
+// AmbassadorContainerIDLabel is the label an ambassador carries naming the
+// service container it was made to front.
+const AmbassadorContainerIDLabel = "dokku.ambassador.container-id"
+
+// ambassadorAction is what ServicePortReconcileStatus does with a service's
+// ambassador.
+type ambassadorAction int
+
+const (
+	// ambassadorNone leaves things be: the service is not exposed and has no
+	// ambassador
+	ambassadorNone ambassadorAction = iota
+
+	// ambassadorRemove takes away an ambassador a service that is not exposed
+	// was left with
+	ambassadorRemove
+
+	// ambassadorKeep leaves a running ambassador that fronts the service's
+	// current container alone
+	ambassadorKeep
+
+	// ambassadorCreate makes one for an exposed service that has none
+	ambassadorCreate
+
+	// ambassadorReplace takes away one that cannot be trusted to publish the
+	// service, and makes another in its place
+	ambassadorReplace
+)
+
+// actionForAmbassador maps the state of a service's ambassador onto what
+// ServicePortReconcileStatus does with it.
+//
+// An ambassador is only ever kept when it is running and says it fronts the
+// container the service has now. It holds no state, so anything else is
+// replaced rather than started: a stopped one was linked to a container that
+// may since have been removed and made again, and docker refuses to start a
+// container whose link target is not running, which is how an exposed service
+// used to fail to come back after a stop and a start. One made before the label
+// existed says nothing about what it fronts, and is replaced once for the same
+// reason.
+func actionForAmbassador(exposed bool, ambassadorStatus string, frontedID string, serviceID string) ambassadorAction {
+	if !exposed {
+		if ambassadorStatus == "missing" {
+			return ambassadorNone
+		}
+
+		return ambassadorRemove
+	}
+
+	if ambassadorStatus == "missing" {
+		return ambassadorCreate
+	}
+
+	if ambassadorStatus == "running" && frontedID != "" && frontedID == serviceID {
+		return ambassadorKeep
+	}
+
+	return ambassadorReplace
+}
+
+// ambassadorRunArgsInput is the input for ambassadorRunArgs.
+type ambassadorRunArgsInput struct {
+	// AmbassadorName is the name of the ambassador container
+	AmbassadorName string
+
+	// CommandPrefix is the datastore's command prefix, which is the alias the
+	// service container is linked under
+	CommandPrefix string
+
+	// ContainerID is the service container the ambassador fronts
+	ContainerID string
+
+	// ContainerName is the name of the service container
+	ContainerName string
+
+	// ContainerPorts are the ports the service listens on
+	ContainerPorts []int
+
+	// HostPorts are the host ports each container port is published on, in the
+	// same order
+	HostPorts []string
+
+	// Image is the ambassador image
+	Image string
+
+	// LogArgs are the log flags the service container was given
+	LogArgs []string
+}
+
+// ambassadorRunArgs builds the docker arguments that run a service's
+// ambassador.
+func ambassadorRunArgs(input ambassadorRunArgsInput) []string {
+	arguments := []string{
+		"container",
+		"run",
+		"-d",
+		"--link=" + fmt.Sprintf("%s:%s", input.ContainerName, input.CommandPrefix),
+		"--name=" + input.AmbassadorName,
+		"--restart=always",
+		"--label=dokku=ambassador",
+		"--label=dokku.ambassador=" + input.CommandPrefix,
+		"--label=" + AmbassadorContainerIDLabel + "=" + input.ContainerID,
+	}
+
+	// the same cap the service it fronts is given. It is the only other
+	// container a service leaves running, so an unbounded log here is the same
+	// bug in a smaller container
+	arguments = append(arguments, input.LogArgs...)
+
+	for i, hostPort := range input.HostPorts {
+		arguments = append(arguments, fmt.Sprintf("--publish=%s:%d", hostPort, input.ContainerPorts[i]))
+	}
+
+	return append(arguments, input.Image)
+}
+
+// ServicePortReconcileStatus makes a service's ambassador match whether the
+// service is exposed: one that fronts the service's current container when it
+// is, and none when it is not.
 func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileStatusInput) error {
 	serviceProperties := input.Datastore.Properties()
-	serviceFiles := Files(input.Datastore, input.ServiceName)
-	portFile := serviceFiles.Port
+	portFile := Files(input.Datastore, input.ServiceName).Port
 	containerName := ContainerName(input.Datastore, input.ServiceName)
-	ambassadorContainerName := fmt.Sprintf("%s.ambassador", containerName)
+	ambassadorName := AmbassadorContainerName(input.Datastore, input.ServiceName)
 
-	if !common.FileExists(portFile) || common.ReadFirstLine(portFile) == "" {
-		if ContainerExists(ctx, ambassadorContainerName) {
-			_, err := execx.Run(ctx, common.ExecCommandInput{
-				Command: common.DockerBin(),
-				Args:    []string{"container", "stop", ambassadorContainerName},
-			})
-			if err != nil {
-				return fmt.Errorf("failed to stop container %s: %w", ambassadorContainerName, err)
-			}
-		}
-
-		return nil
+	exposed := common.FileExists(portFile) && common.ReadFirstLine(portFile) != ""
+	ambassadorStatus := backend.Status(ctx, ambassadorName)
+	frontedID := ""
+	if ambassadorStatus != "missing" {
+		frontedID, _ = common.DockerInspect(ambassadorName, fmt.Sprintf("{{ index .Config.Labels %q }}", AmbassadorContainerIDLabel))
 	}
+	containerID := LiveContainerID(ctx, LiveContainerIDInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+	})
 
-	if common.ContainerIsRunning(ambassadorContainerName) {
+	switch actionForAmbassador(exposed, ambassadorStatus, frontedID, containerID) {
+	case ambassadorNone, ambassadorKeep:
 		return nil
-	}
-
-	if ContainerExists(ctx, ambassadorContainerName) {
-		_, err := execx.Run(ctx, common.ExecCommandInput{
-			Command: common.DockerBin(),
-			Args:    []string{"container", "start", ambassadorContainerName},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to start container %s: %w", ambassadorContainerName, err)
-		}
-		return nil
+	case ambassadorRemove:
+		return RemoveAmbassadorContainer(ctx, input.Datastore, input.ServiceName)
 	}
 
 	hostPorts := ExposedHostPorts(input.Datastore, input.ServiceName)
-	if len(hostPorts) == 0 {
-		return fmt.Errorf("port file %s is empty", portFile)
-	}
 	if len(hostPorts) != len(serviceProperties.Ports) {
 		return fmt.Errorf("port file %s holds %d ports, expected %d", portFile, len(hostPorts), len(serviceProperties.Ports))
 	}
 
-	// only this branch runs a container, and so only this branch needs the
-	// image. The ambassador is pinned and fetched when the plugin is installed,
-	// which is no help on a host that has been pruned since
+	// checked here rather than left to docker, which refuses a link to a
+	// container that is not running with an error that names the ambassador
+	// rather than the service that is actually down
+	if containerID == "" || backend.Status(ctx, containerID) != "running" {
+		return fmt.Errorf("unable to publish ports for %s: its container is not running", input.ServiceName)
+	}
+
+	// only a container that is about to be made needs the image. The
+	// ambassador is pinned and fetched when the plugin is installed, which is
+	// no help on a host that has been pruned since. Fetched before an
+	// ambassador is taken away, so a pull that fails leaves the one there was
 	if err := EnsureTaggedImage(ctx, EnsureTaggedImageInput{
 		Action:      "port publishing",
 		Datastore:   input.Datastore,
@@ -816,39 +928,34 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		return err
 	}
 
-	dockerRunOptions := []string{
-		"container",
-		"run",
-		"-d",
-		"--link=" + fmt.Sprintf("%s:%s", containerName, serviceProperties.CommandPrefix),
-		"--name=" + ambassadorContainerName,
-		"--restart=always",
-		"--label=dokku=ambassador",
-		"--label=dokku.ambassador=" + serviceProperties.CommandPrefix,
-	}
-
-	// the same cap the service it fronts is given. It is the only other
-	// container a service leaves running, so an unbounded log here is the same
-	// bug in a smaller container
 	logConfig, err := ServiceLogConfig(ctx, input.Datastore, input.ServiceName)
 	if err != nil {
 		return err
 	}
-	dockerRunOptions = append(dockerRunOptions, render.LogArgs(logConfig.Driver, logConfig.Options)...)
 
-	for i, hostPort := range hostPorts {
-		dockerRunOptions = append(dockerRunOptions, fmt.Sprintf("--publish=%s:%d", hostPort, serviceProperties.Ports[i]))
+	if ambassadorStatus != "missing" {
+		if err := RemoveAmbassadorContainer(ctx, input.Datastore, input.ServiceName); err != nil {
+			return err
+		}
 	}
-
-	dockerRunOptions = append(dockerRunOptions, hostenv.AmbassadorImage)
 
 	_, err = execx.Run(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
-		Args:    dockerRunOptions,
+		Args: ambassadorRunArgs(ambassadorRunArgsInput{
+			AmbassadorName: ambassadorName,
+			CommandPrefix:  serviceProperties.CommandPrefix,
+			ContainerID:    containerID,
+			ContainerName:  containerName,
+			ContainerPorts: serviceProperties.Ports,
+			HostPorts:      hostPorts,
+			Image:          hostenv.AmbassadorImage,
+			LogArgs:        render.LogArgs(logConfig.Driver, logConfig.Options),
+		}),
 	})
 	if err != nil {
-		return fmt.Errorf("failed to run container %s: %w", ambassadorContainerName, err)
+		return fmt.Errorf("failed to run container %s: %w", ambassadorName, err)
 	}
+
 	return nil
 }
 

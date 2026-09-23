@@ -171,6 +171,22 @@ dokku redis:set lollipop log-opt max-size=unlimited
 
 Both are settable at `create`, `clone` and `upgrade` as well, and both are reported by `info` as what was set rather than as what was inherited. A change reaches a container the next time one is built: `restart` keeps the container it has, so a service already running takes a `stop` and then a `start`.
 
+## Exposed services
+
+An exposed service publishes its ports through a second container, the ambassador, which is linked to the service container. Docker refuses to start a container linked to one that is not running, and the ambassador used to be started again rather than made again, so an exposed service could fail to come back after a `stop` and a `start` - `Cannot link to a non running container` - and lose its published port across an `upgrade` until it was unexposed and exposed by hand.
+
+The ambassador holds nothing of its own, so it is now treated as disposable. It is kept only while it is running and fronts the container the service has now, and is otherwise replaced. A `stop` takes it away even when the service container is already gone, and a `start` puts it back even when the service itself is already running.
+
+```shell
+# the port the service was exposed on comes back with it
+dokku redis:expose lollipop 6380
+dokku redis:stop lollipop
+dokku redis:start lollipop
+
+# and a running service whose ambassador went away gets it back
+dokku redis:start lollipop
+```
+
 ## Plugin documentation
 
 `trigger-help` and `readme` render the documentation a dokku datastore plugin ships, so that the plugin help and its readme cannot drift apart. Both read the description, argument sketch, long form prose and readme section that every command declares, alongside the arguments and flags the command already accepts.

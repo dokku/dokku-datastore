@@ -100,8 +100,10 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 		return fmt.Errorf("failed to start service: %w", err)
 	}
 
-	// the ports are reconciled against a service that answers, and an app told
-	// it is exposed has somewhere to connect to
+	// an app told the service is exposed has something answering on the port.
+	// The start above has already published it, since an ambassador only needs
+	// the container running; reconciling again afterwards is a no-op unless the
+	// service went down while it was being waited on
 	if err := WaitForService(ctx, WaitForServiceInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
@@ -116,27 +118,6 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to reconcile port status: %w", err)
-	}
-
-	return nil
-}
-
-// RemoveAmbassadorContainer removes the ambassador container for a service
-func RemoveAmbassadorContainer(ctx context.Context, s *service.Datastore, serviceName string) error {
-	ambassadorName := service.AmbassadorContainerName(s, serviceName)
-	_, err := common.CallExecCommandWithContext(ctx, common.ExecCommandInput{
-		Command: common.DockerBin(),
-		Args:    []string{"container", "stop", ambassadorName},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to stop container %s: %w", ambassadorName, err)
-	}
-	_, err = common.CallExecCommandWithContext(ctx, common.ExecCommandInput{
-		Command: common.DockerBin(),
-		Args:    []string{"container", "rm", ambassadorName},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to remove container %s: %w", ambassadorName, err)
 	}
 
 	return nil
