@@ -9,6 +9,26 @@ A re-implementation of the datastore codebases in golang.
 go build -ldflags "-X main.Version=0.1.0" .
 ```
 
+## Testing
+
+The unit tests need nothing but go. The integration tests are written in [bats](https://github.com/bats-core/bats-core) and run a definition's services against a real docker daemon, with no dokku installed. They load [bats-support](https://github.com/bats-core/bats-support) and [bats-assert](https://github.com/bats-core/bats-assert) from `BATS_LIB_PATH`, and are run one definition at a time.
+
+```shell
+go test ./...
+
+# the binary the integration tests run
+go build -o dokku-datastore .
+
+# one definition through the backend the host defaults to
+DEFINITION=redis bats tests/definition
+
+# or through the compose backend
+DEFINITION=redis DOKKU_DATASTORE_BACKEND=compose bats tests/definition
+
+# the same definition through both backends, compared as docker sees it
+DEFINITION=redis bats tests/backends.bats
+```
+
 ## Usage
 
 ```text

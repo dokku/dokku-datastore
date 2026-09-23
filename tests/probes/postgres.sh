@@ -7,10 +7,13 @@ ACTION="${1:?usage: $0 <write|clobber|read> <service>}"
 SERVICE="${2:?usage: $0 <write|clobber|read> <service>}"
 CONTAINER="dokku.postgres.$SERVICE"
 PASSWORD="$(cat "$DOKKU_LIB_ROOT/services/postgres/$SERVICE/PASSWORD")"
+# the database the service was created with, which is the service name with
+# anything a datastore would refuse in one replaced, rather than the name itself
+DATABASE="$(cat "$DOKKU_LIB_ROOT/services/postgres/$SERVICE/DATABASE_NAME")"
 
 sql() {
   docker container exec --env "PGPASSWORD=$PASSWORD" -i "$CONTAINER" \
-    psql -qtAX -h localhost -U postgres -d "$SERVICE" -c "$1"
+    psql -qtAX -h localhost -U postgres -d "$DATABASE" -c "$1"
 }
 
 case "$ACTION" in
