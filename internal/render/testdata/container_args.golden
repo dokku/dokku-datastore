@@ -132,6 +132,46 @@ redis-server
 --bind
 0.0.0.0
 
+### log options
+container
+create
+--cidfile=/var/lib/dokku/services/redis/lollipop/ID
+--env-file=/var/lib/dokku/services/redis/lollipop/ENV
+--hostname=dokku.redis.lollipop
+--label=dokku.service=redis
+--label=dokku=service
+--name=dokku.redis.lollipop
+--restart=always
+--volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
+--volume=/var/lib/dokku/services/redis/lollipop/data:/data
+--log-driver=json-file
+--log-opt=max-file=3
+--log-opt=max-size=20m
+redis:8.8.0
+redis-server
+/usr/local/etc/redis/redis.conf
+--bind
+0.0.0.0
+
+### log options with no driver
+container
+create
+--cidfile=/var/lib/dokku/services/redis/lollipop/ID
+--env-file=/var/lib/dokku/services/redis/lollipop/ENV
+--hostname=dokku.redis.lollipop
+--label=dokku.service=redis
+--label=dokku=service
+--name=dokku.redis.lollipop
+--restart=always
+--volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
+--volume=/var/lib/dokku/services/redis/lollipop/data:/data
+--log-opt=max-size=10m
+redis:8.8.0
+redis-server
+/usr/local/etc/redis/redis.conf
+--bind
+0.0.0.0
+
 ### no volumes at all
 container
 create
@@ -158,6 +198,9 @@ create
 --volume=/var/lib/dokku/services/redis/lollipop/data:/data
 --memory=512m
 --shm-size=128m
+--log-driver=json-file
+--log-opt=max-file=3
+--log-opt=max-size=20m
 --network=custom-network
 --network-alias=dokku-redis-lollipop
 valkey/valkey:9.0.0

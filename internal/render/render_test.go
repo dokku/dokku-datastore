@@ -106,12 +106,27 @@ func TestRendererReproducesTheGoldenArgs(t *testing.T) {
 			},
 		},
 		{
+			name: "log options",
+			mutate: func(input *Input) {
+				input.Scope.LogDriver = "json-file"
+				input.Scope.LogOptions = map[string]string{"max-size": "20m", "max-file": "3"}
+			},
+		},
+		{
+			name: "log options with no driver",
+			mutate: func(input *Input) {
+				input.Scope.LogOptions = map[string]string{"max-size": "10m"}
+			},
+		},
+		{
 			name: "everything at once",
 			mutate: func(input *Input) {
 				input.ConfigOptions = []string{"--appendonly", "yes"}
 				input.Scope.Image = "valkey/valkey"
 				input.Scope.ImageVersion = "9.0.0"
 				input.Scope.InitialNetwork = "custom-network"
+				input.Scope.LogDriver = "json-file"
+				input.Scope.LogOptions = map[string]string{"max-size": "20m", "max-file": "3"}
 				input.Scope.Memory = "512"
 				input.Scope.ShmSize = "128m"
 			},

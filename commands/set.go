@@ -202,14 +202,19 @@ func (c *SetCommand) Run(args []string) int {
 		return 1
 	}
 
-	// validate before announcing, so an unusable key does not print a line
-	// claiming a change that will not happen
+	// validate before announcing, so an unusable key or value does not print a
+	// line claiming a change that will not happen
 	if err := internal.ValidateProperty(key); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}
 
 	value := arguments["value"].StringValue()
+	if err := internal.ValidatePropertyValue(key, value); err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
+	}
+
 	if value == "" {
 		logger.Info(fmt.Sprintf("Unsetting %s", key))
 	} else {

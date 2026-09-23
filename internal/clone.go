@@ -42,6 +42,12 @@ type CloneServiceInput struct {
 	// InitialNetwork is the network the new container is attached to on create
 	InitialNetwork string
 
+	// LogDriver is the docker logging driver the new container is run with
+	LogDriver string
+
+	// LogOptions are the docker log options the new container is run with
+	LogOptions []string
+
 	// PostCreateNetworks are attached after the new container is created
 	PostCreateNetworks []string
 
@@ -81,6 +87,8 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 		Image:              image,
 		ImageVersion:       imageVersion,
 		InitialNetwork:     input.InitialNetwork,
+		LogDriver:          input.LogDriver,
+		LogOptions:         input.LogOptions,
 		Memory:             input.Memory,
 		Password:           input.Password,
 		PostCreateNetworks: input.PostCreateNetworks,

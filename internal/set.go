@@ -10,7 +10,7 @@ import (
 )
 
 // SettableProperties are the properties a service exposes through the set command
-var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty}
+var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.LogDriverProperty, service.LogOptProperty}
 
 // InvalidPropertyError reports a property the set command does not manage
 func InvalidPropertyError() error {
@@ -26,10 +26,32 @@ func ValidateProperty(key string) error {
 	return nil
 }
 
+// ValidatePropertyValue reports whether a value is one the property accepts.
+//
+// The first property validation there has been: every key before these took any
+// string at all, because a network name that does not exist is a network that
+// does not exist yet and nothing else could be said about it. A log option is
+// different - docker refuses to make a container from a malformed one, so the
+// service would be left unable to start by a command that said it had succeeded.
+func ValidatePropertyValue(key string, value string) error {
+	switch key {
+	case service.LogDriverProperty:
+		return service.ValidateLogDriver(value)
+	case service.LogOptProperty:
+		return service.ValidateLogOptions(value)
+	}
+
+	return nil
+}
+
 // SetProperty writes a property for a service, or deletes it when the value is
 // empty, matching how the bash datastore plugins treat an omitted value
 func SetProperty(s *service.Datastore, serviceName string, key string, value string) error {
 	if err := ValidateProperty(key); err != nil {
+		return err
+	}
+
+	if err := ValidatePropertyValue(key, value); err != nil {
 		return err
 	}
 

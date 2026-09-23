@@ -64,6 +64,23 @@ func TestContainerArgs(t *testing.T) {
 			mutate: func(input *ContainerArgsInput) { input.TaggedImage = "valkey/valkey:9.0.0" },
 		},
 		{
+			// sorted rather than in the order a map hands them over, or the
+			// command would differ between two runs of the same create
+			name: "log options",
+			mutate: func(input *ContainerArgsInput) {
+				input.LogDriver = "json-file"
+				input.LogOptions = map[string]string{"max-size": "20m", "max-file": "3"}
+			},
+		},
+		{
+			// the driver is the daemon's, which is what a service that names none
+			// is logged by, and the cap still has to reach the container
+			name: "log options with no driver",
+			mutate: func(input *ContainerArgsInput) {
+				input.LogOptions = map[string]string{"max-size": "10m"}
+			},
+		},
+		{
 			name: "no volumes at all",
 			mutate: func(input *ContainerArgsInput) {
 				input.Volumes = nil
@@ -75,6 +92,8 @@ func TestContainerArgs(t *testing.T) {
 			mutate: func(input *ContainerArgsInput) {
 				input.ConfigOptions = []string{"--appendonly", "yes"}
 				input.InitialNetwork = "custom-network"
+				input.LogDriver = "json-file"
+				input.LogOptions = map[string]string{"max-size": "20m", "max-file": "3"}
 				input.Memory = "512"
 				input.ShmSize = "128m"
 				input.TaggedImage = "valkey/valkey:9.0.0"
@@ -120,7 +139,7 @@ func TestContainerArgs(t *testing.T) {
 func TestContainerArgsOmitsUnsetValues(t *testing.T) {
 	args := strings.Join(DockerCreateArgs(redisContainerArgs()), " ")
 
-	for _, absent := range []string{"--memory", "--shm-size", "--network", "--network-alias"} {
+	for _, absent := range []string{"--memory", "--shm-size", "--network", "--network-alias", "--log-driver", "--log-opt"} {
 		if strings.Contains(args, absent) {
 			t.Errorf("expected %s to be absent when it is unset, got: %s", absent, args)
 		}

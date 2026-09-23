@@ -45,6 +45,8 @@ type composeService struct {
 	Volumes []string `yaml:"volumes,omitempty"`
 	ShmSize string   `yaml:"shm_size,omitempty"`
 
+	Logging *composeLogging `yaml:"logging,omitempty"`
+
 	// NetworkMode pins the default bridge when no network was asked for.
 	// Compose would otherwise invent a project network, and a service that was
 	// on the bridge would quietly move.
@@ -65,6 +67,15 @@ type composeServiceNet struct {
 type composeNetwork struct {
 	External bool   `yaml:"external"`
 	Name     string `yaml:"name"`
+}
+
+// composeLogging carries the docker logging a container is made with. It is a
+// pointer for the same reason composeDeploy is: a service with nothing to say
+// about its logging must emit no logging key at all, or compose would pin a
+// driver the docker path leaves to the daemon.
+type composeLogging struct {
+	Driver  string            `yaml:"driver,omitempty"`
+	Options map[string]string `yaml:"options,omitempty"`
 }
 
 // composeDeploy carries the memory limit, which is the one resource knob a
@@ -106,6 +117,13 @@ func Compose(input Input) ([]byte, error) {
 	if arguments.Memory != "" {
 		service.Deploy = &composeDeploy{
 			Resources: composeResources{Limits: composeLimits{Memory: arguments.Memory + "m"}},
+		}
+	}
+
+	if arguments.LogDriver != "" || len(arguments.LogOptions) > 0 {
+		service.Logging = &composeLogging{
+			Driver:  arguments.LogDriver,
+			Options: logOptions(arguments.LogOptions),
 		}
 	}
 
@@ -159,6 +177,25 @@ func environment(lines []string, declared map[string]string) map[string]string {
 
 	if len(values) == 0 {
 		return nil
+	}
+
+	return values
+}
+
+// logOptions renders the log options compose is handed.
+//
+// A dollar sign is doubled for the same reason it is in an environment value:
+// compose expands ${...} in one and docker's own --log-opt does not, so a tag
+// template containing one would mean two different things depending on which
+// backend made the container.
+func logOptions(options map[string]string) map[string]string {
+	if len(options) == 0 {
+		return nil
+	}
+
+	values := make(map[string]string, len(options))
+	for name, value := range options {
+		values[name] = strings.ReplaceAll(value, "$", "$$")
 	}
 
 	return values

@@ -38,6 +38,12 @@ type ContainerArgsInput struct {
 	// with no alias, which is what tests/link_networks.bats asserts.
 	InitialNetwork string
 
+	// LogDriver is the docker logging driver, empty for the daemon's default
+	LogDriver string
+
+	// LogOptions are the docker log options, already resolved
+	LogOptions map[string]string
+
 	// Memory is a container memory limit in megabytes, without the unit
 	Memory string
 
@@ -93,6 +99,8 @@ func DockerCreateArgs(input ContainerArgsInput) []string {
 		args = append(args, "--shm-size="+input.ShmSize)
 	}
 
+	args = append(args, LogArgs(input.LogDriver, input.LogOptions)...)
+
 	if input.InitialNetwork != "" {
 		args = append(args, "--network="+input.InitialNetwork)
 		args = append(args, "--network-alias="+input.NetworkAlias)
@@ -107,6 +115,33 @@ func DockerCreateArgs(input ContainerArgsInput) []string {
 		}
 
 		args = append(args, option)
+	}
+
+	return args
+}
+
+// LogArgs builds the docker flags for a container's logging.
+//
+// Separate from DockerCreateArgs because the service container is not the only
+// long lived container a service has: the ambassador an exposed service runs is
+// built by hand elsewhere, and it is capped by the same values rather than by
+// its own.
+func LogArgs(driver string, options map[string]string) []string {
+	args := []string{}
+
+	if driver != "" {
+		args = append(args, "--log-driver="+driver)
+	}
+
+	// sorted, because a map would otherwise emit a different command each run
+	names := make([]string, 0, len(options))
+	for name := range options {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		args = append(args, "--log-opt="+name+"="+options[name])
 	}
 
 	return args

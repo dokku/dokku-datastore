@@ -2,9 +2,26 @@ package internal
 
 import (
 	"os"
+	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/service"
 )
+
+// CheckLogConfig reports whether the log driver and options a command was given
+// are ones docker will take.
+//
+// Checked where the command starts rather than where the container is made: a
+// malformed option is refused by docker, so a create that only found out at the
+// end would have written the service's directories, its credentials and its
+// config files before saying so, and an upgrade would have taken the old
+// container away first.
+func CheckLogConfig(driver string, options []string) error {
+	if err := service.ValidateLogDriver(driver); err != nil {
+		return err
+	}
+
+	return service.ValidateLogOptions(strings.Join(options, ","))
+}
 
 // UpdateFlagFromEnvInput is the input for the UpdateFlagFromEnv function
 type UpdateFlagFromEnvInput struct {

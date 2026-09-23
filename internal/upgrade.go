@@ -35,6 +35,12 @@ type UpgradeServiceInput struct {
 	// ShmSize is the shared memory size for the container
 	ShmSize *string
 
+	// LogDriver is the docker logging driver the service container is run with
+	LogDriver *string
+
+	// LogOptions are the docker log options the service container is run with
+	LogOptions *[]string
+
 	// Datastore is the datastore the service belongs to
 	Datastore *service.Datastore
 
@@ -62,7 +68,9 @@ func (i UpgradeServiceInput) changesSettings() bool {
 		i.InitialNetwork != nil ||
 		i.PostCreateNetworks != nil ||
 		i.PostStartNetworks != nil ||
-		i.ShmSize != nil
+		i.ShmSize != nil ||
+		i.LogDriver != nil ||
+		i.LogOptions != nil
 }
 
 // upgradeVersion is the version an upgrade moves a service to: the one asked
@@ -104,6 +112,21 @@ func upgradeVersion(d definition.Definition, recorded service.RecordedImage, req
 
 // UpgradeService recreates a service's container on a different image
 func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
+	// before anything, because an upgrade takes the old container away before it
+	// makes the new one, and a log option docker will not accept would leave the
+	// service with neither
+	driver := ""
+	if input.LogDriver != nil {
+		driver = *input.LogDriver
+	}
+	options := []string{}
+	if input.LogOptions != nil {
+		options = *input.LogOptions
+	}
+	if err := CheckLogConfig(driver, options); err != nil {
+		return err
+	}
+
 	// before the version is decided, because deciding it needs to know which
 	// image the service runs, and a service that never recorded one only knows
 	// while its container is still there
@@ -278,6 +301,13 @@ func applyUpgradeSettings(input UpgradeServiceInput) error {
 	if input.PostStartNetworks != nil {
 		joined := strings.Join(*input.PostStartNetworks, ",")
 		properties["post-start-network"] = &joined
+	}
+	if input.LogDriver != nil {
+		properties[service.LogDriverProperty] = input.LogDriver
+	}
+	if input.LogOptions != nil {
+		joined := strings.Join(*input.LogOptions, ",")
+		properties[service.LogOptProperty] = &joined
 	}
 
 	for key, value := range properties {
