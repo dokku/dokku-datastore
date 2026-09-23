@@ -63,11 +63,12 @@ func TestUpgradeVersion(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		recorded    service.RecordedImage
-		requested   string
-		expected    string
-		expectedErr bool
+		name           string
+		recorded       service.RecordedImage
+		requestedImage string
+		requested      string
+		expected       string
+		expectedErr    bool
 	}{
 		{
 			name:      "a version asked for wins",
@@ -100,11 +101,35 @@ func TestUpgradeVersion(t *testing.T) {
 			requested: "17-3.5",
 			expected:  "17-3.5",
 		},
+		{
+			// the version belongs to the repository that published it, so the
+			// definition's is no more applicable to an image being moved to than
+			// to one already being run
+			name:           "an image asked for has no newest either",
+			recorded:       service.RecordedImage{Image: "postgres", ImageVersion: "17.0"},
+			requestedImage: "postgis/postgis",
+			expectedErr:    true,
+		},
+		{
+			name:           "an image asked for by name and version is taken",
+			recorded:       service.RecordedImage{Image: "postgres", ImageVersion: "17.0"},
+			requestedImage: "postgis/postgis",
+			requested:      "17-3.5",
+			expected:       "17-3.5",
+		},
+		{
+			// the definition's own image, named rather than assumed, still has
+			// a version to fall back on
+			name:           "the definition's own image asked for takes the default",
+			recorded:       service.RecordedImage{Image: "postgis/postgis", ImageVersion: "17-3.4"},
+			requestedImage: definition17.DefaultImage,
+			expected:       definition17.DefaultImageVersion,
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			actual, err := upgradeVersion(definition17, test.recorded, test.requested)
+			actual, err := upgradeVersion(definition17, test.recorded, test.requestedImage, test.requested)
 			if test.expectedErr {
 				if err == nil {
 					t.Fatalf("expected an error, got the version %q", actual)

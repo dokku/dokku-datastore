@@ -111,6 +111,24 @@ Where there is neither a record nor a container to recover one from, there is no
 dokku-datastore upgrade redis lollipop --image-version 8.9.0
 ```
 
+## An image the plugin does not ship
+
+A service may run an image other than the one its definition pins, which is how redis runs `redis/redis-stack-server` and postgres runs `postgis/postgis`. The version that image runs at has to be named alongside it, because a tag belongs to the repository that published it and the definition ships no tag for somebody else's: pasting its own on named `redis/redis-stack-server` at whatever version plain `redis` is on, which is a reference nobody ever built, and the command then failed saying that image was missing.
+
+```shell
+# refused, and says which image has no version rather than inventing one
+dokku-datastore create redis lollipop --image redis/redis-stack-server
+
+# and the same for an upgrade that moves a service onto one
+dokku-datastore create redis lollipop --image redis/redis-stack-server --image-version 7.2.0-v10
+```
+
+A service that records only a version still takes the definition's image, because that is the image it has been running all along - it predates the `IMAGE` file rather than having moved off it. Only the other half is refused.
+
+A reference is cut on its tag rather than on its first colon, so an image held in a private registry keeps the port that registry answers on: `registry.example.com:5000/redis:8.10` is that repository at `8.10` and not the host `registry.example.com` at a version of `5000/redis:8.10`.
+
+`<VARIABLE>_IMAGE` and `<VARIABLE>_IMAGE_VERSION` - `REDIS_IMAGE` for redis - name the same two things for a host that would rather not pass them on every create. These are the names the plugin readme documents, and now the names `create` reads; the bash plugins derived an internal `PLUGIN_IMAGE` from them, and that pair is still read, after them, for a host carried over.
+
 ## The images a plugin needs
 
 A service's own image is not the only one a datastore plugin runs. Four more are pinned by the plugin itself - an ambassador to publish a service's ports, a probe to wait until it answers, busybox to take its data back off it, and the tool that ships a dump to s3 - and a definition may name one of its own on a command, which is how couchdb dumps with a tool its image does not have.

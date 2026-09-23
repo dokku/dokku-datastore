@@ -627,6 +627,14 @@ func verbAction(name string) string {
 
 // run executes one of the definition's declared commands.
 func (s *Datastore) run(ctx context.Context, serviceName string, name string, options runOptions) error {
+	// before anything is rendered, because a verb that runs offline stops the
+	// service and runs a throwaway container against its data. Which version
+	// does that is the whole question, so a service whose record cannot say is
+	// told rather than run at whatever the definition ships now
+	if _, err := resolveImage(s, serviceName, "", ""); err != nil {
+		return fmt.Errorf("unable to run %s against %s: %w", verbAction(name), serviceName, err)
+	}
+
 	scope := s.scope(serviceName)
 	scope.Args = options.Arguments
 
@@ -815,11 +823,20 @@ func (s *Datastore) URL(serviceName string, schemeOverride string) string {
 // taggedImage is the image a service runs, which is what it recorded at create
 // time and the definition's default otherwise.
 //
-// The decision itself lives in resolveTaggedImage, because this used to be a
-// second copy of it that read the files differently and so could answer
-// something else for the same service.
+// The decision itself lives in resolveImage, because this used to be a second
+// copy of it that read the files differently and so could answer something else
+// for the same service.
+//
+// A string rather than an error, because scope, volumes and URL are read paths
+// with nowhere to return one. What comes back where nothing could be settled is
+// the recorded repository with an empty tag, which docker refuses outright -
+// deliberately, over filling the tag in: the callers that would run it are the
+// verbs, an offline one of which stops the service and runs a throwaway
+// container against its data, and there is no version to do that at. They are
+// guarded in run, and this is what is left if a caller is ever added beside them.
 func (s *Datastore) taggedImage(serviceName string) string {
-	return resolveTaggedImage(s, serviceName, "", "")
+	settled, _ := resolveImage(s, serviceName, "", "")
+	return settled.Tagged()
 }
 
 // scope assembles what the definition's templates are rendered against. Nothing
@@ -873,9 +890,15 @@ func (s *Datastore) scope(serviceName string) definition.Scope {
 	}
 }
 
-// cutTaggedImage splits an image reference into its name and tag.
+// cutTaggedImage splits an image reference into its name and tag, reading an
+// untagged reference the way docker does.
+//
+// The split itself is definition.CutImage, which is the one place that knows a
+// private registry's port is not a tag. The latest here is docker's own reading
+// of a reference with no tag, and belongs to the callers that have to render
+// one rather than to the split.
 func cutTaggedImage(reference string) (string, string) {
-	image, version, found := strings.Cut(reference, ":")
+	image, version, found := definition.CutImage(reference)
 	if !found {
 		return image, "latest"
 	}

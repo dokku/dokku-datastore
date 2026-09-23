@@ -336,7 +336,7 @@ func ImageFromDockerfile(contents []byte) (image string, version string, trivial
 				reference = argDefault(contents)
 			}
 
-			image, version, found = cutImage(reference)
+			image, version, found = CutImage(reference)
 		default:
 			// anything else is a real build: a COPY of vendored tooling, a RUN
 			trivial = false
@@ -371,10 +371,28 @@ func argDefault(contents []byte) string {
 	return ""
 }
 
-// cutImage splits an image reference into its name and tag.
-func cutImage(reference string) (string, string, bool) {
-	image, version, found := strings.Cut(reference, ":")
-	return image, version, found
+// CutImage splits an image reference into its repository and its tag.
+//
+// The last colon rather than the first, and only one that comes after the last
+// slash. A private registry carries its port in the reference, so redis:8.10
+// and registry.example.com:5000/redis:8.10 both have to split on the tag and
+// neither on the port: splitting on the first colon recorded the second of
+// those as the image registry.example.com at the version 5000/redis:8.10, and
+// every later decision was made about a host name.
+//
+// A reference pinned by digest has no tag at all - the colon in sha256: belongs
+// to the digest - so it comes back whole and untagged rather than cut in half.
+func CutImage(reference string) (string, string, bool) {
+	if strings.Contains(reference, "@") {
+		return reference, "", false
+	}
+
+	colon := strings.LastIndex(reference, ":")
+	if colon < 0 || colon < strings.LastIndex(reference, "/") {
+		return reference, "", false
+	}
+
+	return reference[:colon], reference[colon+1:], true
 }
 
 // allCommands is every command a definition declares, base and custom, for the

@@ -3,7 +3,6 @@ package internal
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"text/template"
@@ -88,7 +87,7 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		port = ports[0]
 	}
 
-	image, imageVersion := resolveImage(properties)
+	image, imageVersion := documentedImage(properties)
 
 	return DocumentationData{
 		CommandPrefix:  properties.CommandPrefix,
@@ -103,16 +102,22 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 	}
 }
 
-// resolveImage works out which image the plugin runs. The plugin exports it as
-// an environment variable at runtime, so that is preferred over the datastore's
-// own default; the definition supplies the rest.
+// documentedImage works out which image the readme and the help are written
+// about. An operator exports it as an environment variable at runtime, so that
+// is preferred over the datastore's own default; the definition supplies the
+// rest.
+//
+// The environment is read through the same helper create reads it with, so the
+// image an operator is shown is the image they would get. It used to be read
+// here under one pair of names and there under another, and only one of the two
+// pairs was ever set.
 //
 // A plugin no longer pins the image in a Dockerfile of its own. It pins it in the
 // definition, which is where the default here comes from, so the two cannot say
 // different things.
-func resolveImage(properties service.ServiceStruct) (string, string) {
-	image := os.Getenv(properties.PluginVariable + "_IMAGE")
-	imageVersion := os.Getenv(properties.PluginVariable + "_IMAGE_VERSION")
+func documentedImage(properties service.ServiceStruct) (string, string) {
+	image := ImageFromEnv(properties)
+	imageVersion := ImageVersionFromEnv(properties)
 
 	if image == "" {
 		image = properties.DefaultImage
