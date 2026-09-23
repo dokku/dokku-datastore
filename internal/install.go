@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/cron"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
@@ -204,20 +203,14 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 		serviceFiles := service.Files(input.Datastore, serviceName)
 
 		// older services recorded the image only on the container, so recover it
-		// onto disk where everything else now looks for it
-		if !common.FileExists(serviceFiles.Image) || !common.FileExists(serviceFiles.ImageVersion) {
-			taggedImage := service.Version(ctx, service.VersionInput{
-				Datastore:   input.Datastore,
-				ServiceName: serviceName,
-			})
-			if image, imageVersion, found := strings.Cut(taggedImage, ":"); found {
-				if err := writeServiceFile(serviceFiles.Image, image); err != nil {
-					return err
-				}
-				if err := writeServiceFile(serviceFiles.ImageVersion, imageVersion); err != nil {
-					return err
-				}
-			}
+		// onto disk where everything else now looks for it. Gated on what the
+		// files say rather than on whether they exist, because an empty file is
+		// read as saying nothing everywhere else and was never repaired here.
+		if _, err := service.RecoverRecordedImage(ctx, service.RecoverRecordedImageInput{
+			Datastore:   input.Datastore,
+			ServiceName: serviceName,
+		}); err != nil {
+			return err
 		}
 
 		// a service created before the pin existed gets the definition its

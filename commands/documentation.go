@@ -783,7 +783,9 @@ func (c *StartCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *StartCommand) Documentation() string {
 	return `start the service
-dokku {{.CommandPrefix}}:start lollipop`
+dokku {{.CommandPrefix}}:start lollipop
+A service comes back on the version it was created with, or was last upgraded to, whatever version the plugin ships now. The image is fetched if the host no longer has it.
+A service that has never recorded a version and has no container left to read one from cannot be placed, and is reported rather than started on a guess. Use {{.CommandPrefix}}:upgrade to say which version it should run.`
 }
 
 // Group is the readme usage section the command is documented under
@@ -872,7 +874,10 @@ func (c *UpgradeCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *UpgradeCommand) Documentation() string {
 	return `you can upgrade an existing service to a new image or image-version
-dokku {{.CommandPrefix}}:upgrade lollipop`
+dokku {{.CommandPrefix}}:upgrade lollipop
+This is the only command that changes the version a service runs. With no version named it moves to the newest the service's own major version ships, which leaves the data where it is.
+dokku {{.CommandPrefix}}:upgrade lollipop --image-version 1.2.3
+Moving across a major version has to be asked for by name, because it is not a tag change: the data is mounted somewhere different under the new one, and pointing the version back does not undo it.`
 }
 
 // Group is the readme usage section the command is documented under

@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/service"
 )
@@ -54,15 +53,24 @@ type CloneServiceInput struct {
 // copies the data across
 func CloneService(ctx context.Context, input CloneServiceInput) error {
 	// the clone runs on whatever image the source service is on, so that the
-	// copied data is never handed to a different version than it came from
-	sourceImage := service.Version(ctx, service.VersionInput{
+	// copied data is never handed to a different version than it came from.
+	// Taken from the source's record rather than from its container, which is
+	// what every other command is placed by; a source that never recorded one
+	// has it written down here from the container it is running, since a clone
+	// already requires the source to be up.
+	recorded, err := service.RecoverRecordedImage(ctx, service.RecoverRecordedImageInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})
-	image, imageVersion, found := strings.Cut(sourceImage, ":")
-	if !found {
-		return fmt.Errorf("unable to determine the image %s is running", input.ServiceName)
+	if err != nil {
+		return err
 	}
+	if !recorded.Complete() {
+		return fmt.Errorf("unable to determine the image %s runs", input.ServiceName)
+	}
+
+	sourceImage := recorded.Tagged()
+	image, imageVersion := recorded.Image, recorded.ImageVersion
 
 	input.Logger.Header2(fmt.Sprintf("Cloning %s to %s @ %s", input.ServiceName, input.NewServiceName, sourceImage)) //nolint:errcheck
 

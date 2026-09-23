@@ -16,6 +16,9 @@ DEFINITION="${1:?usage: $0 <definition>}"
 DEFINITION_ROOT="internal/registry/definitions/$DEFINITION"
 BIN="${BIN:-$PWD/dokku-datastore}"
 SERVICE="${SERVICE:-ci}"
+# a second service, made without naming a version, for the one check that needs
+# one. Destroyed as soon as it has been looked at, and again by the trap.
+UNPINNED_SERVICE="$SERVICE-unpinned"
 
 export DOKKU_LIB_ROOT="${DOKKU_LIB_ROOT:-$(mktemp -d)}"
 export DOKKU_LIB_HOST_ROOT="$DOKKU_LIB_ROOT"
@@ -41,7 +44,8 @@ fail() {
 }
 
 cleanup() {
-  "$BIN" destroy "$PLUGIN" "$SERVICE" --force >/dev/null 2>&1 || true
+  "$BIN" destroy "$PLUGIN" "$SERVICE" --force >/dev/null 2>/dev/null || true
+  "$BIN" destroy "$PLUGIN" "$UNPINNED_SERVICE" --force >/dev/null 2>/dev/null || true
   rm -rf "$DOKKU_LIB_ROOT"
 }
 trap cleanup EXIT
@@ -142,6 +146,101 @@ if [[ "$round_trip" -eq 1 ]]; then
 fi
 
 rm -f "$dump" "$dump.err"
+
+# The version a service runs is what it recorded, and only an upgrade changes
+# that. These run last because two of them deliberately leave the service down,
+# and everything before this point needs it up.
+SERVICE_ROOT="$DOKKU_LIB_ROOT/services/$DATA_DIR/$SERVICE"
+CONTAINER="dokku.$PLUGIN.$SERVICE"
+recorded_image="$("$BIN" info "$PLUGIN" "$SERVICE" --image)"
+recorded_version="$("$BIN" info "$PLUGIN" "$SERVICE" --image-version)"
+recorded="$recorded_image:$recorded_version"
+start_err="$(mktemp)"
+
+echo "==> $DEFINITION: start brings the service back on the version it recorded"
+"$BIN" stop "$PLUGIN" "$SERVICE"
+"$BIN" start "$PLUGIN" "$SERVICE"
+running="$("$BIN" info "$PLUGIN" "$SERVICE" --version)"
+[[ "$running" == "$recorded" ]] || fail "expected start to come back on $recorded, got '$running'"
+
+echo "==> $DEFINITION: start records the image of a service that never did"
+"$BIN" pause "$PLUGIN" "$SERVICE"
+rm -f "$SERVICE_ROOT/IMAGE" "$SERVICE_ROOT/IMAGE_VERSION"
+"$BIN" start "$PLUGIN" "$SERVICE"
+[[ "$(cat "$SERVICE_ROOT/IMAGE")" == "$recorded_image" ]] || fail "start did not write down the image the container runs"
+[[ "$(cat "$SERVICE_ROOT/IMAGE_VERSION")" == "$recorded_version" ]] || fail "start did not write down the version the container runs"
+
+echo "==> $DEFINITION: a pause and a start is still a restart"
+before="$(docker container inspect "$CONTAINER" --format '{{ .Id }}')"
+"$BIN" pause "$PLUGIN" "$SERVICE"
+"$BIN" start "$PLUGIN" "$SERVICE"
+after="$(docker container inspect "$CONTAINER" --format '{{ .Id }}')"
+[[ "$before" == "$after" ]] || fail "start recreated the container instead of starting the one it had"
+
+echo "==> $DEFINITION: the record wins over a container that disagrees with it"
+"$BIN" pause "$PLUGIN" "$SERVICE"
+echo "0.0.0-nonexistent" >"$SERVICE_ROOT/IMAGE_VERSION"
+if "$BIN" start "$PLUGIN" "$SERVICE" 2>"$start_err"; then
+  fail "expected start to go looking for the version the record names"
+fi
+grep -q "0.0.0-nonexistent" "$start_err" || fail "expected start to name the recorded version, got '$(cat "$start_err")'"
+# the image is fetched before the stale container is taken away, so a start that
+# cannot get that far leaves the service with the container it already had
+docker container inspect "$CONTAINER" >/dev/null 2>/dev/null || fail "a failed start removed the container it could not replace"
+echo "$recorded_version" >"$SERVICE_ROOT/IMAGE_VERSION"
+"$BIN" start "$PLUGIN" "$SERVICE"
+
+echo "==> $DEFINITION: start refuses a service it cannot place"
+"$BIN" stop "$PLUGIN" "$SERVICE"
+rm -f "$SERVICE_ROOT/IMAGE" "$SERVICE_ROOT/IMAGE_VERSION"
+if "$BIN" start "$PLUGIN" "$SERVICE" 2>"$start_err"; then
+  fail "expected start to refuse a service with no record and no container"
+fi
+grep -q "upgrade" "$start_err" || fail "expected start to say what to run instead, got '$(cat "$start_err")'"
+echo "$recorded_image" >"$SERVICE_ROOT/IMAGE"
+echo "$recorded_version" >"$SERVICE_ROOT/IMAGE_VERSION"
+
+# the container is gone by now, so the image can go too. Skipped rather than
+# forced if anything else on the host still holds it.
+if docker image rm --force "$recorded" >/dev/null 2>/dev/null && ! docker image inspect "$recorded" >/dev/null 2>/dev/null; then
+  echo "==> $DEFINITION: start explains an image it is not allowed to fetch"
+  PULL_VARIABLE="$(echo "$PLUGIN" | tr '[:lower:]' '[:upper:]')_DISABLE_PULL"
+  if env "$PULL_VARIABLE=true" "$BIN" start "$PLUGIN" "$SERVICE" 2>"$start_err"; then
+    fail "expected start to refuse with pulling turned off"
+  fi
+  grep -q "docker image pull $recorded" "$start_err" || fail "expected start to say what to pull, got '$(cat "$start_err")'"
+
+  echo "==> $DEFINITION: start fetches the version the service recorded"
+  "$BIN" start "$PLUGIN" "$SERVICE"
+  running="$("$BIN" info "$PLUGIN" "$SERVICE" --version)"
+  [[ "$running" == "$recorded" ]] || fail "expected start to pull back $recorded, got '$running'"
+else
+  echo "    skipped: $recorded is still in use and cannot be removed"
+  "$BIN" start "$PLUGIN" "$SERVICE"
+fi
+
+rm -f "$start_err"
+
+echo "==> $DEFINITION: a bare upgrade stays on the definition the service was created with"
+# the service was created on the version this definition pins, so a bare upgrade
+# lands on the one it is already running. What is being checked is that it did
+# not reach for a newer definition to get there
+"$BIN" upgrade "$PLUGIN" "$SERVICE"
+upgraded_version="$("$BIN" info "$PLUGIN" "$SERVICE" --image-version)"
+[[ "$upgraded_version" == "$recorded_version" ]] || fail "a bare upgrade moved the version from $recorded_version to '$upgraded_version'"
+upgraded_definition="$("$BIN" info "$PLUGIN" "$SERVICE" --definition)"
+[[ "$upgraded_definition" == "$DEFINITION" ]] || fail "a bare upgrade moved the service from $DEFINITION to '$upgraded_definition'"
+
+echo "==> $DEFINITION: a create with no version still records one"
+# only that both halves are there, not which version they name: with no version
+# given, a datastore split by major version lands on its newest definition
+# rather than on the one this run is for
+"$BIN" create "$PLUGIN" "$UNPINNED_SERVICE"
+unpinned_image="$("$BIN" info "$PLUGIN" "$UNPINNED_SERVICE" --image)"
+unpinned_version="$("$BIN" info "$PLUGIN" "$UNPINNED_SERVICE" --image-version)"
+[[ -n "$unpinned_image" ]] || fail "a create with no version left IMAGE empty"
+[[ -n "$unpinned_version" ]] || fail "a create with no version left IMAGE_VERSION empty"
+"$BIN" destroy "$PLUGIN" "$UNPINNED_SERVICE" --force
 
 echo "==> $DEFINITION: destroy leaves nothing behind"
 "$BIN" destroy "$PLUGIN" "$SERVICE" --force

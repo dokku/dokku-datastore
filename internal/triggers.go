@@ -112,6 +112,17 @@ func StartLinkedServices(ctx context.Context, input TriggerInput, appName string
 		}); err != nil {
 			return err
 		}
+
+		// the app is about to be handed a connection string, so the datastore
+		// has to be answering rather than merely created: this trigger is the
+		// one place where something else deploys against what it just started
+		if err := WaitForService(ctx, WaitForServiceInput{
+			Datastore:   datastore,
+			ServiceName: serviceName,
+			Logger:      input.Logger,
+		}); err != nil {
+			return err
+		}
 	}
 
 	return nil
