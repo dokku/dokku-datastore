@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
@@ -115,5 +116,31 @@ func TestWaitForServiceSkipsADefinitionWithNoWaitPort(t *testing.T) {
 		ServiceName: "lollipop",
 	}); err != nil {
 		t.Errorf("expected no error, got %v", err)
+	}
+}
+
+// The commands that wait wire SIGINT to the context, so an operator who gives
+// up on a service that is not coming back gets their terminal returned rather
+// than the rest of the timeout.
+func TestWaitForRunningContainerStopsWhenTheContextIsCancelled(t *testing.T) {
+	redis, ok := service.Datastores["redis"]
+	if !ok {
+		t.Fatal("expected redis to be registered")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	started := time.Now()
+	err := waitForRunningContainer(ctx, WaitForServiceInput{
+		Datastore:   redis,
+		ServiceName: "a-service-that-does-not-exist",
+	})
+	if err == nil {
+		t.Error("expected the cancelled context to be reported")
+	}
+
+	if elapsed := time.Since(started); elapsed > RunningContainerTimeout/2 {
+		t.Errorf("expected the wait to give up at once, took %s", elapsed)
 	}
 }

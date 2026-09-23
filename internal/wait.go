@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
@@ -54,6 +55,45 @@ func WaitArgs(input WaitArgsInput) []string {
 	return args
 }
 
+// RunningContainerTimeout bounds the wait for a container to report running.
+// It covers the gap between starting one and docker agreeing that it is up,
+// which is a question about docker rather than about the datastore inside, so
+// it is far shorter than the readiness probe's own timeout.
+const RunningContainerTimeout = 30 * time.Second
+
+// RunningContainerInterval is how often the container's state is asked for
+// while waiting for it to come up.
+const RunningContainerInterval = 250 * time.Millisecond
+
+// waitForRunningContainer blocks until the service's container reports running.
+//
+// A container that never gets there is not reported here. The probe that
+// follows says what an operator needs to know - that nothing answered, and what
+// the datastore itself said on the way down - and it says it the same way
+// whether the container is missing, stopped or merely deaf.
+func waitForRunningContainer(ctx context.Context, input WaitForServiceInput) error {
+	deadline := time.Now().Add(RunningContainerTimeout)
+	for {
+		status := service.Status(ctx, service.StatusInput{
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+		})
+		if status == "running" {
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(RunningContainerInterval):
+		}
+	}
+}
+
 // WaitForServiceInput is the input for WaitForService.
 type WaitForServiceInput struct {
 	// Datastore is the service's datastore
@@ -82,6 +122,14 @@ func WaitForService(ctx context.Context, input WaitForServiceInput) error {
 	// one, so this is here to keep a future one from waiting for nothing.
 	if properties.WaitPort == 0 {
 		return nil
+	}
+
+	// the probe reaches the service with --link, and docker refuses to link to a
+	// container that is not up yet. Starting a container that already exists
+	// returns before it has necessarily got there, so a service that is on its
+	// way up would otherwise be reported as one that never answered
+	if err := waitForRunningContainer(ctx, input); err != nil {
+		return err
 	}
 
 	arguments := WaitArgs(WaitArgsInput{
