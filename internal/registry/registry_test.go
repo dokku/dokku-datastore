@@ -531,8 +531,8 @@ func TestElasticsearchVariantFollowsTheImageVersion(t *testing.T) {
 	}
 }
 
-// The versions differ in one setting: seven names a master node explicitly and
-// the later lines dropped that, which is the whole reason they are separate
+// The versions differ in one setting: security, which seven predates and the
+// later lines turn on by default, which is the reason they are separate
 // definitions rather than one.
 func TestElasticsearchVersionsDifferWhereTheyShould(t *testing.T) {
 	loaded, err := Load(LoadInput{})
@@ -542,14 +542,6 @@ func TestElasticsearchVersionsDifferWhereTheyShould(t *testing.T) {
 
 	seven, _ := loaded.Definition("elasticsearch-7")
 	nine, _ := loaded.Definition("elasticsearch-9")
-
-	if !strings.Contains(seven.Configs["elasticsearch_yml"].Content, "node.master") {
-		t.Error("expected seven to name a master node")
-	}
-
-	if strings.Contains(nine.Configs["elasticsearch_yml"].Content, "node.master") {
-		t.Error("expected nine to have dropped the master node setting")
-	}
 
 	// security arrived on by default in eight, and the plugin hands over an
 	// address with nothing to authenticate with
@@ -566,6 +558,54 @@ func TestElasticsearchVersionsDifferWhereTheyShould(t *testing.T) {
 		if found.Dokku.Plugin != "elasticsearch" {
 			t.Errorf("expected %s to be the elasticsearch plugin, got %q", found.Name, found.Dokku.Plugin)
 		}
+	}
+}
+
+// Elasticsearch sizes its own heap from the container's memory limit unless
+// elasticsearch.yml names a legacy role setting, in which case it pins the heap
+// to a gigabyte whatever the limit. That is what kept a seven with a 512m limit
+// from ever starting. The heap is set from the environment, so nothing in the
+// create hook edits jvm.options either: since 7.11 it names no heap to edit.
+func TestElasticsearchLeavesTheHeapToTheMemoryLimit(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	legacyRoleSettings := []string{
+		"node.master",
+		"node.ingest",
+		"node.data",
+		"node.voting_only",
+		"node.ml",
+		"node.transform",
+		"node.remote_cluster_client",
+	}
+
+	for _, variant := range []string{"elasticsearch-7", "elasticsearch-8", "elasticsearch-9"} {
+		t.Run(variant, func(t *testing.T) {
+			found, ok := loaded.Definition(variant)
+			if !ok {
+				t.Fatalf("expected a %s definition", variant)
+			}
+
+			content := found.Configs["elasticsearch_yml"].Content
+			for _, setting := range legacyRoleSettings {
+				if strings.Contains(content, setting) {
+					t.Errorf("expected no %s, which pins the heap to a gigabyte", setting)
+				}
+			}
+
+			if found.Dokku.Hooks.PreCreate == nil {
+				t.Fatal("expected a pre create hook")
+			}
+
+			for _, part := range found.Dokku.Hooks.PreCreate.Exec {
+				if strings.Contains(part, "jvm.options") {
+					t.Errorf("expected the pre create hook to leave jvm.options alone, got %q", part)
+				}
+			}
+		})
 	}
 }
 

@@ -198,3 +198,89 @@ func TestRenderDoesNotEscapeLikeHTML(t *testing.T) {
 		t.Errorf("expected the password to survive verbatim, got %q", rendered)
 	}
 }
+
+// A declared variable that renders to nothing is left out rather than passed
+// empty. The declared environment is applied after the custom one, so an empty
+// value would clear whatever the operator set under the same name.
+func TestRenderLeavesOutAnEnvironmentVariableThatRendersEmpty(t *testing.T) {
+	input := redisInput(t)
+	input.Definition.Service.Environment = map[string]string{
+		"HEAP": "{{ if not .Memory }}small{{ end }}",
+	}
+	input.Scope.Memory = "512"
+	input.Environment = []string{"HEAP=custom"}
+
+	args, err := ContainerArgs(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	if value, ok := args.Env["HEAP"]; ok {
+		t.Errorf("expected HEAP to be left out, got %q", value)
+	}
+
+	for _, arg := range DockerCreateArgs(args) {
+		if strings.HasPrefix(arg, "--env=HEAP=") {
+			t.Errorf("expected no --env for HEAP, got %s", arg)
+		}
+	}
+
+	rendered, err := Compose(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	if !strings.Contains(string(rendered), "HEAP: custom") {
+		t.Errorf("expected the custom value to survive, got:\n%s", string(rendered))
+	}
+}
+
+// Elasticsearch sizes its heap from the container's memory limit, so a service
+// with one is left to do that. One with no limit would take half the host, so
+// its heap is held to 512m.
+func TestElasticsearchHeapFollowsTheMemoryLimit(t *testing.T) {
+	loaded, err := registry.Load(registry.LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	tests := []struct {
+		name     string
+		memory   string
+		expected string
+	}{
+		{name: "no limit", memory: "", expected: "-Xms512m -Xmx512m"},
+		{name: "a limit", memory: "512", expected: ""},
+	}
+
+	for _, variant := range []string{"elasticsearch-7", "elasticsearch-8", "elasticsearch-9"} {
+		found, ok := loaded.Definition(variant)
+		if !ok {
+			t.Fatalf("expected a %s definition", variant)
+		}
+
+		for _, test := range tests {
+			t.Run(variant+" "+test.name, func(t *testing.T) {
+				args, err := ContainerArgs(Input{
+					Definition: found,
+					Scope: definition.Scope{
+						ServiceName:   "lollipop",
+						ContainerName: "dokku.elasticsearch.lollipop",
+						Image:         "elasticsearch",
+						ImageVersion:  "7.17.28",
+						HostRoot:      "/var/lib/dokku/services/elasticsearch/lollipop",
+						ServiceRoot:   "/var/lib/dokku/services/elasticsearch/lollipop",
+						Memory:        test.memory,
+					},
+				})
+				if err != nil {
+					t.Fatalf("unable to render: %s", err)
+				}
+
+				if actual := args.Env["ES_JAVA_OPTS"]; actual != test.expected {
+					t.Errorf("expected ES_JAVA_OPTS %q, got %q", test.expected, actual)
+				}
+			})
+		}
+	}
+}

@@ -53,11 +53,18 @@ func ContainerArgs(input Input) (ContainerArgsInput, error) {
 		return ContainerArgsInput{}, err
 	}
 
+	// a variable that renders to nothing is left out, the way RenderAll drops
+	// an empty element. The declared environment is applied after the custom
+	// one, so passing it empty would clear a value the operator set.
 	environment := map[string]string{}
 	for name, value := range service.Environment {
 		rendered, err := definition.Render(value, input.Scope)
 		if err != nil {
 			return ContainerArgsInput{}, err
+		}
+
+		if rendered == "" {
+			continue
 		}
 
 		environment[name] = rendered
