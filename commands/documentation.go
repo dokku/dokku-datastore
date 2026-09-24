@@ -278,7 +278,14 @@ func (c *CloneCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *CloneCommand) Documentation() string {
 	return `you can clone an existing service to a new one
-dokku {{.CommandPrefix}}:clone lollipop lollipop-2`
+dokku {{.CommandPrefix}}:clone lollipop lollipop-2
+the new service starts from the settings of the one it copies: its config options,
+custom env, memory, shm size, networks, log driver, log options, restart policy
+and backup keyserver. A flag passed to clone overrides that one setting, and a
+flag passed empty clears it
+dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --restart no --custom-env ""
+the password, exposed ports, links and backup credentials, schedule and encryption
+are not copied.`
 }
 
 // Group is the readme usage section the command is documented under

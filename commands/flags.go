@@ -66,3 +66,13 @@ func changedSlice(f *flag.FlagSet, name string, value []string) *[]string {
 
 	return &value
 }
+
+// changedInt is changedString for a number flag, where zero is a value a flag
+// can be given rather than a sign it was not.
+func changedInt(f *flag.FlagSet, name string, value int) *int {
+	if !f.Changed(name) {
+		return nil
+	}
+
+	return &value
+}

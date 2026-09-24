@@ -27,8 +27,6 @@ type CloneCommand struct {
 	configOptions string
 	// customEnv is the custom environment variables to use for the service
 	customEnv string
-	// image is the image to use for the service
-	// imageVersion is the image version to use for the service
 	// memory is the memory limit to use for the service
 	memory int
 	// initialNetwork is the initial network to use for the service
@@ -135,8 +133,6 @@ func (c *CloneCommand) AutocompleteFlags() complete.Flags {
 		complete.Flags{
 			"--config-options":      complete.PredictAnything,
 			"--custom-env":          complete.PredictAnything,
-			"--image":               complete.PredictAnything,
-			"--image-version":       complete.PredictAnything,
 			"--memory":              complete.PredictAnything,
 			"--initial-network":     complete.PredictAnything,
 			"--password":            complete.PredictAnything,
@@ -270,32 +266,27 @@ func (c *CloneCommand) Run(args []string) int {
 		return 1
 	}
 
-	updatedFlags, err := internal.UpdateFlagFromEnv(internal.UpdateFlagFromEnvInput{
-		ConfigOptions: c.configOptions,
-		CustomEnv:     c.customEnv,
-		Datastore:     datastore,
-	})
-	if err != nil {
-		logger.Error(internal.ErrorInput{Error: err})
-		return 1
-	}
-
 	if err := internal.CloneService(ctx, internal.CloneServiceInput{
-		ConfigOptions:      updatedFlags.ConfigOptions,
-		CustomEnv:          updatedFlags.CustomEnv,
-		Datastore:          datastore,
-		InitialNetwork:     c.initialNetwork,
-		LogDriver:          c.logDriver,
-		LogOptions:         c.logOpt,
-		RestartPolicy:      c.restart,
-		Logger:             logger,
-		Memory:             c.memory,
-		NewServiceName:     newServiceName,
-		Password:           c.password,
-		PostCreateNetworks: c.postCreateNetwork,
-		PostStartNetworks:  c.postStartNetwork,
-		ServiceName:        serviceName,
-		ShmSize:            c.shmSize,
+		Datastore:      datastore,
+		Logger:         logger,
+		NewServiceName: newServiceName,
+		Password:       c.password,
+		ServiceName:    serviceName,
+
+		// the clone starts from what the source runs with, so only a flag that
+		// was given changes a setting. The environment defaults are not read
+		// here: they fill in a new service, and the source already says what
+		// this one should have
+		ConfigOptions:      changedString(flags, "config-options", c.configOptions),
+		CustomEnv:          changedString(flags, "custom-env", c.customEnv),
+		InitialNetwork:     changedString(flags, "initial-network", c.initialNetwork),
+		LogDriver:          changedString(flags, "log-driver", c.logDriver),
+		LogOptions:         changedSlice(flags, "log-opt", c.logOpt),
+		Memory:             changedInt(flags, "memory", c.memory),
+		PostCreateNetworks: changedSlice(flags, "post-create-network", c.postCreateNetwork),
+		PostStartNetworks:  changedSlice(flags, "post-start-network", c.postStartNetwork),
+		RestartPolicy:      changedString(flags, "restart", c.restart),
+		ShmSize:            changedString(flags, "shm-size", c.shmSize),
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
