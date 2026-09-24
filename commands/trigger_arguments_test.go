@@ -37,9 +37,27 @@ func TestTriggerCommandsAcceptExtraArguments(t *testing.T) {
 			args:      []string{"redis", "my-app", "something-else"},
 		},
 		{
+			// dokku sends the builder, the app and the source directory
+			name:      "trigger-pre-build",
+			arguments: (&TriggerPreBuildCommand{}).Arguments(),
+			args:      []string{"redis", "herokuish", "my-app", "/tmp/src", "something-else"},
+		},
+		{
+			// dokku sends the builder, the app and the image
+			name:      "trigger-pre-release-builder",
+			arguments: (&TriggerPreReleaseBuilderCommand{}).Arguments(),
+			args:      []string{"redis", "herokuish", "my-app", "dokku/my-app:latest"},
+		},
+		{
+			// dokku sends nothing at all
 			name:      "trigger-pre-restore",
 			arguments: (&TriggerPreRestoreCommand{}).Arguments(),
-			args:      []string{"redis", "my-app", "something-else"},
+			args:      []string{"redis"},
+		},
+		{
+			name:      "trigger-pre-restore with extras",
+			arguments: (&TriggerPreRestoreCommand{}).Arguments(),
+			args:      []string{"redis", "docker-local", "my-app"},
 		},
 		{
 			name:      "trigger-post-app-clone-setup",

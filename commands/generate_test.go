@@ -3,10 +3,12 @@ package commands
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/dokku/dokku-datastore/internal"
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/registry"
 	"github.com/dokku/dokku-datastore/internal/service"
@@ -235,4 +237,49 @@ func treeOf(t *testing.T, root string) string {
 
 	sort.Strings(records)
 	return strings.Join(records, "\n")
+}
+
+// Every plugin gets a file for each trigger the binary implements, so a new one
+// reaches the plugins through their next generate rather than by hand, and a
+// definition's own triggers are written beside them.
+func TestGenerateWritesEveryTrigger(t *testing.T) {
+	pluginDir := t.TempDir()
+	command := &GenerateCommand{pluginDir: pluginDir}
+
+	written, err := command.writeTriggers(service.Datastores["solr"])
+	if err != nil {
+		t.Fatalf("unable to write the triggers: %s", err)
+	}
+
+	expected := append(slices.Clone(internal.BuiltinTriggers), "post-extract")
+	if len(written) != len(expected) {
+		t.Errorf("expected %d triggers, got %v", len(expected), written)
+	}
+
+	for _, name := range expected {
+		path := filepath.Join(pluginDir, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Errorf("expected %s to be written: %s", name, err)
+			continue
+		}
+
+		if info.Mode().Perm() != 0755 {
+			t.Errorf("expected %s to be executable, got %v", name, info.Mode().Perm())
+		}
+
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("unable to read %s: %s", path, err)
+		}
+
+		dispatch := "trigger-" + name
+		if name == "post-extract" {
+			dispatch = "trigger post-extract"
+		}
+
+		if !strings.Contains(string(contents), `dokku-datastore" `+dispatch+` "$PLUGIN_COMMAND_PREFIX" "$@"`) {
+			t.Errorf("expected %s to dispatch to %q, got:\n%s", name, dispatch, contents)
+		}
+	}
 }

@@ -152,8 +152,14 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"trigger-post-app-rename-setup": func() (cli.Command, error) {
 			return &commands.TriggerPostAppRenameSetupCommand{Meta: meta}, nil
 		},
+		"trigger-pre-build": func() (cli.Command, error) {
+			return &commands.TriggerPreBuildCommand{Meta: meta}, nil
+		},
 		"trigger-pre-delete": func() (cli.Command, error) {
 			return &commands.TriggerPreDeleteCommand{Meta: meta}, nil
+		},
+		"trigger-pre-release-builder": func() (cli.Command, error) {
+			return &commands.TriggerPreReleaseBuilderCommand{Meta: meta}, nil
 		},
 		"trigger-pre-restore": func() (cli.Command, error) {
 			return &commands.TriggerPreRestoreCommand{Meta: meta}, nil
