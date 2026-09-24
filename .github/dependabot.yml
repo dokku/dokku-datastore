@@ -154,3 +154,18 @@ updates:
     schedule:
       interval: "daily"
     open-pull-requests-limit: 10
+
+  - package-ecosystem: "bundler"
+    directory: "/.github"
+    schedule:
+      interval: "daily"
+
+  # the root images are what the tool is built and shipped in rather than a
+  # datastore, so they drop the docker label to stay out of the release notes'
+  # datastore section
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    labels:
+      - "dependencies"
