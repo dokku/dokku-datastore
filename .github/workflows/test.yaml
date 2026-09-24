@@ -61,10 +61,20 @@ jobs:
         with:
           go-version-file: "go.mod"
       - run: go build -o dokku-datastore .
+      - id: setup-bats
+        uses: bats-core/bats-action@77d6fb60505b4d0d1d73e48bd035b55074bbfb43  # 4.0.0
+        with:
+          bats-version: "1.14.0"
+          assert-version: "2.2.4"
+          detik-install: false
+          file-install: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       # no dokku: the binary needs a data root and a user to own what it writes,
       # which keeps this a check of the definition rather than of dokku
-      - run: ./tests/definition.sh "${{ matrix.definition }}"
+      - run: bats --print-output-on-failure tests/definition
         env:
+          BATS_LIB_PATH: ${{ steps.setup-bats.outputs.lib-path }}
+          DEFINITION: ${{ matrix.definition }}
           DOKKU_DATASTORE_BACKEND: ${{ matrix.backend }}
 
   backend-agreement:
@@ -81,7 +91,18 @@ jobs:
         with:
           go-version-file: "go.mod"
       - run: go build -o dokku-datastore .
+      - id: setup-bats
+        uses: bats-core/bats-action@77d6fb60505b4d0d1d73e48bd035b55074bbfb43  # 4.0.0
+        with:
+          bats-version: "1.14.0"
+          assert-version: "2.2.4"
+          detik-install: false
+          file-install: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       # the same definition through both backends, compared as docker sees it:
       # a difference here is a bug in the renderer, since both are handed one
       # set of resolved values
-      - run: ./tests/backends.sh "${{ matrix.definition }}"
+      - run: bats --print-output-on-failure tests/backends.bats
+        env:
+          BATS_LIB_PATH: ${{ steps.setup-bats.outputs.lib-path }}
+          DEFINITION: ${{ matrix.definition }}

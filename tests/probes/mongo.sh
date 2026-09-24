@@ -7,11 +7,14 @@ ACTION="${1:?usage: $0 <write|clobber|read> <service>}"
 SERVICE="${2:?usage: $0 <write|clobber|read> <service>}"
 CONTAINER="dokku.mongo.$SERVICE"
 PASSWORD="$(cat "$DOKKU_LIB_ROOT/services/mongo/$SERVICE/PASSWORD")"
+# the database the service was created with, which is the service name with
+# anything a datastore would refuse in one replaced, rather than the name itself
+DATABASE="$(cat "$DOKKU_LIB_ROOT/services/mongo/$SERVICE/DATABASE_NAME")"
 
 mongo_eval() {
   docker container exec -i "$CONTAINER" mongosh \
-    -u "$SERVICE" -p "$PASSWORD" --authenticationDatabase "$SERVICE" \
-    "$SERVICE" --quiet --eval "$1"
+    -u "$SERVICE" -p "$PASSWORD" --authenticationDatabase "$DATABASE" \
+    "$DATABASE" --quiet --eval "$1"
 }
 
 case "$ACTION" in

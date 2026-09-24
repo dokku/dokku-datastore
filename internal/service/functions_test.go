@@ -71,6 +71,19 @@ func TestValidateServiceName(t *testing.T) {
 	}
 }
 
+// The message is what someone with a refused name reads to find a name that
+// works, so it has to name every character the validation accepts.
+func TestInvalidServiceNameMessageNamesEveryValidCharacter(t *testing.T) {
+	expected := "Please specify a valid name for the service. Valid characters are: [A-Za-z0-9_-]+"
+	if InvalidServiceNameMessage != expected {
+		t.Errorf("expected %q, got %q", expected, InvalidServiceNameMessage)
+	}
+
+	if err := ValidateServiceName("service-with_both"); err != nil {
+		t.Errorf("expected a name using the dash and the underscore to be valid, got %q", err)
+	}
+}
+
 // redisDatastore is the datastore the image tests are written against. Redis
 // has one definition, so what it pins is unambiguous.
 func redisDatastore(t *testing.T) *Datastore {
@@ -849,5 +862,100 @@ func TestCommitServiceConfigKeepsTheEnvironmentPrivate(t *testing.T) {
 		if info.Mode().Perm() != expected {
 			t.Errorf("expected %s to be %o, got %o", filepath.Base(filename), expected, info.Mode().Perm())
 		}
+	}
+}
+
+// Some datastores refuse a hyphen or a dot in a database name, so the name a
+// service records has them replaced, the way the bash plugins' write_database_name
+// did, and that recorded name is the one every template is handed.
+func TestWriteDatabaseName(t *testing.T) {
+	redis := redisDatastore(t)
+
+	tests := []struct {
+		serviceName string
+		expected    string
+	}{
+		{serviceName: "lollipop", expected: "lollipop"},
+		{serviceName: "lolli-pop", expected: "lolli_pop"},
+		{serviceName: "lolli_pop", expected: "lolli_pop"},
+		{serviceName: "lolli-pop-2", expected: "lolli_pop_2"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.serviceName, func(t *testing.T) {
+			withServiceRoot(t, redis, test.serviceName)
+
+			if err := WriteDatabaseName(WriteDatabaseNameInput{
+				Datastore:   redis,
+				ServiceName: test.serviceName,
+			}); err != nil {
+				t.Fatalf("failed to write the database name: %v", err)
+			}
+
+			content, err := os.ReadFile(Files(redis, test.serviceName).DatabaseName)
+			if err != nil {
+				t.Fatalf("failed to read the database name: %v", err)
+			}
+			if actual := strings.TrimSpace(string(content)); actual != test.expected {
+				t.Errorf("expected the database name %q, got %q", test.expected, actual)
+			}
+
+			if actual := redis.scope(test.serviceName).Database; actual != test.expected {
+				t.Errorf("expected templates to be handed the database %q, got %q", test.expected, actual)
+			}
+		})
+	}
+}
+
+// A service with no recorded database name is given one, the way the bash
+// plugins' get_database_name did: the service name as it is, since that is the
+// database such a service was created with.
+func TestDatabaseNameSeedsAMissingRecord(t *testing.T) {
+	redis := redisDatastore(t)
+	withServiceRoot(t, redis, "lolli-pop")
+	filename := Files(redis, "lolli-pop").DatabaseName
+
+	if actual := DatabaseName(redis, "lolli-pop"); actual != "lolli-pop" {
+		t.Errorf("expected the service name %q, got %q", "lolli-pop", actual)
+	}
+
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("expected the database name to be recorded: %v", err)
+	}
+	if actual := strings.TrimSpace(string(content)); actual != "lolli-pop" {
+		t.Errorf("expected the recorded database name %q, got %q", "lolli-pop", actual)
+	}
+
+	if actual := redis.scope("lolli-pop").Database; actual != "lolli-pop" {
+		t.Errorf("expected templates to be handed the database %q, got %q", "lolli-pop", actual)
+	}
+}
+
+func TestDatabaseNameKeepsAnExistingRecord(t *testing.T) {
+	redis := redisDatastore(t)
+	withServiceRoot(t, redis, "lolli-pop")
+	filename := Files(redis, "lolli-pop").DatabaseName
+
+	if err := os.WriteFile(filename, []byte("lolli_pop\n"), 0644); err != nil {
+		t.Fatalf("failed to write the database name: %v", err)
+	}
+
+	if actual := DatabaseName(redis, "lolli-pop"); actual != "lolli_pop" {
+		t.Errorf("expected the recorded name %q, got %q", "lolli_pop", actual)
+	}
+}
+
+// reading a name must not make a service root for a service that does not exist
+func TestDatabaseNameWritesNothingForAMissingService(t *testing.T) {
+	redis := redisDatastore(t)
+	withServiceRoot(t, redis, "lollipop")
+
+	if actual := DatabaseName(redis, "missing"); actual != "missing" {
+		t.Errorf("expected the service name %q, got %q", "missing", actual)
+	}
+
+	if _, err := os.Stat(Folders(redis, "missing").Root); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected no service root for a missing service, got %v", err)
 	}
 }

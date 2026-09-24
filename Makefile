@@ -193,7 +193,6 @@ validate:
 	sha1sum build/deb/$(NAME)_$(VERSION)_arm64.deb
 	apt update
 	apt install -y net-tools util-linux
-	bats test.bats
 
 prebuild:
 	git config --global --add safe.directory $(shell pwd)

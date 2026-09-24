@@ -7,10 +7,13 @@ ACTION="${1:?usage: $0 <write|clobber|read> <service>}"
 SERVICE="${2:?usage: $0 <write|clobber|read> <service>}"
 CONTAINER="dokku.mariadb.$SERVICE"
 PASSWORD="$(cat "$DOKKU_LIB_ROOT/services/mariadb/$SERVICE/ROOTPASSWORD")"
+# the database the service was created with, which is the service name with
+# anything a datastore would refuse in one replaced, rather than the name itself
+DATABASE="$(cat "$DOKKU_LIB_ROOT/services/mariadb/$SERVICE/DATABASE_NAME")"
 
 sql() {
   docker container exec --env "MYSQL_PWD=$PASSWORD" -i "$CONTAINER" \
-    dokku-mariadb-client --user=root --skip-column-names --batch "$SERVICE" -e "$1"
+    dokku-mariadb-client --user=root --skip-column-names --batch "$DATABASE" -e "$1"
 }
 
 case "$ACTION" in

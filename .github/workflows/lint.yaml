@@ -46,6 +46,9 @@ jobs:
         uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38
         env:
           SHELLCHECK_OPTS: -s bash
+        with:
+          # the integration tests have a bats shebang, which is not found on its own
+          additional_files: ".bats"
   shfmt:
     name: shfmt
     runs-on: ubuntu-24.04
