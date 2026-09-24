@@ -64,6 +64,26 @@ teardown_file() {
   assert_output "${SERVICE//-/_}"
 }
 
+@test "($DEFINITION) a service with no recorded database name is given one" {
+  # the way get_database_name did in the bash plugins: the service name as it
+  # is, since that is the database a service made before the name was recorded
+  # was created with
+  local recorded
+  recorded="$(cat "$(service_root)/DATABASE_NAME")"
+  rm -f "$(service_root)/DATABASE_NAME"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --database-name
+  assert_success
+  assert_output "$SERVICE"
+
+  run cat "$(service_root)/DATABASE_NAME"
+  assert_success
+  assert_output "$SERVICE"
+
+  # and back to the database this service was actually created with
+  echo "$recorded" >"$(service_root)/DATABASE_NAME"
+}
+
 @test "($DEFINITION) info reports the state the service was created with" {
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --definition
   assert_success

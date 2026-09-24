@@ -109,7 +109,7 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info["backend"] = common.ReadFirstLine(serviceFiles.Backend)
 	info[service.KeyserverProperty] = service.Keyserver(input.Datastore, input.ServiceName)
 	info["custom-env"] = customEnv(serviceFiles.Env)
-	info["database-name"] = common.ReadFirstLine(serviceFiles.DatabaseName)
+	info["database-name"] = service.DatabaseName(input.Datastore, input.ServiceName)
 	info["definition"] = common.ReadFirstLine(serviceFiles.Definition)
 	info["image"] = common.ReadFirstLine(serviceFiles.Image)
 	info["image-version"] = common.ReadFirstLine(serviceFiles.ImageVersion)

@@ -1097,11 +1097,41 @@ type WriteDatabaseNameInput struct {
 
 // WriteDatabaseName writes the database name to the service
 func WriteDatabaseName(input WriteDatabaseNameInput) error {
-	serviceFiles := Files(input.Datastore, input.ServiceName)
+	// some datastores refuse special characters in a database name, so they are
+	// normalised out the way the bash plugins' write_database_name did
 	sanitizedDatabaseName := strings.ReplaceAll(input.ServiceName, ".", "_")
 	sanitizedDatabaseName = strings.ReplaceAll(sanitizedDatabaseName, "-", "_")
+	return writeDatabaseNameFile(input.Datastore, input.ServiceName, sanitizedDatabaseName)
+}
+
+// DatabaseName reads the database name a service recorded. A service with no
+// record is given one, the way the bash plugins' get_database_name did: the
+// service name as it is, unsanitized, since that is the database a service
+// made before the name was recorded was created with.
+func DatabaseName(s *Datastore, serviceName string) string {
+	serviceFiles := Files(s, serviceName)
+	if common.FileExists(serviceFiles.DatabaseName) {
+		if database := common.ReadFirstLine(serviceFiles.DatabaseName); database != "" {
+			return database
+		}
+
+		return serviceName
+	}
+
+	// only for a service that exists, so that reading a name never makes a
+	// service root for one that does not. A record that cannot be written still
+	// leaves the name it would have held, which is what the caller needs
+	if common.DirectoryExists(Folders(s, serviceName).Root) {
+		_ = writeDatabaseNameFile(s, serviceName, serviceName)
+	}
+
+	return serviceName
+}
+
+func writeDatabaseNameFile(s *Datastore, serviceName string, databaseName string) error {
+	serviceFiles := Files(s, serviceName)
 	err := common.WriteStringToFile(common.WriteStringToFileInput{
-		Content:   sanitizedDatabaseName,
+		Content:   databaseName,
 		Filename:  serviceFiles.DatabaseName,
 		GroupName: hostenv.SystemGroup(),
 		Mode:      0644,

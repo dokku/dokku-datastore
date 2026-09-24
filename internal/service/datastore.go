@@ -870,16 +870,11 @@ func (s *Datastore) scope(serviceName string) definition.Scope {
 		ports[port.Name] = port.Target
 	}
 
-	database := common.ReadFirstLine(serviceFiles.DatabaseName)
-	if database == "" {
-		database = serviceName
-	}
-
 	return definition.Scope{
 		ServiceName:   serviceName,
 		ContainerName: ContainerName(s, serviceName),
 		Host:          DNSHostname(s, serviceName),
-		Database:      database,
+		Database:      DatabaseName(s, serviceName),
 		Plugin:        dokku.Plugin,
 		Title:         dokku.Title,
 		Variable:      dokku.Variable,
