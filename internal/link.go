@@ -173,6 +173,9 @@ type LinkServiceInput struct {
 	// Datastore is the datastore the service belongs to
 	Datastore *service.Datastore
 
+	// Logger reports progress
+	Logger Ui
+
 	// NoRestart is whether to skip restarting the app
 	NoRestart bool
 
@@ -193,6 +196,36 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 	serviceURL := input.Datastore.URL(input.ServiceName, SchemeForApp(input.Datastore, environment))
 	linkedKeys := ConfigKeysForURL(environment, serviceURL)
 
+	// the links file decides whether the app is linked, as it does for unlink,
+	// destroy, linked and links. An app on it whose url was repointed is still
+	// linked, and linking it again would only add a second alias.
+	linked := slices.Contains(service.LinkedApps(ctx, service.LinkedAppsInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+	}), input.AppName)
+	if linked && len(linkedKeys) > 0 {
+		return fmt.Errorf("Already linked as %s", strings.Join(linkedKeys, " ")) //nolint:staticcheck // matches the bash datastore plugins
+	}
+	if linked {
+		return fmt.Errorf("Already linked to app %s", input.AppName) //nolint:staticcheck // matches the bash datastore plugins
+	}
+
+	// an app whose config already holds the url, set by hand or left over from
+	// a links file that lost its name, is missing everything but the config.
+	// That config is left as it is, so the alias and querystring do not apply
+	// and nothing changes that would restart the app.
+	if len(linkedKeys) > 0 {
+		if err := addLink(ctx, input.Datastore, input.ServiceName, input.AppName); err != nil {
+			return err
+		}
+
+		input.Logger.Warn(WarnInput{
+			Warning: fmt.Sprintf("App %s already holds the url for service %s as %s, so none was set. The app has no container link until it is restarted", input.AppName, input.ServiceName, strings.Join(linkedKeys, " ")),
+		})
+
+		return callServiceAction(ctx, input.Datastore, "post-link-complete", input.ServiceName, input.AppName)
+	}
+
 	alias := input.Datastore.Properties().DefaultAlias
 	if input.Alias != "" {
 		alias = input.Alias
@@ -207,32 +240,11 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 		return errors.New("Unable to use default or generated URL alias") //nolint:staticcheck // matches the bash datastore plugins
 	}
 
-	// checked after the alias so that relinking reports the existing key rather
-	// than complaining about the alias it would have generated
-	if len(linkedKeys) > 0 {
-		return fmt.Errorf("Already linked as %s", strings.Join(linkedKeys, " ")) //nolint:staticcheck // matches the bash datastore plugins
-	}
-
-	if err := callServiceAction(ctx, input.Datastore, "pre-link", input.ServiceName, input.AppName); err != nil {
-		return err
-	}
-
-	if err := service.AddLinkedApp(ctx, service.LinkedAppsInput{
-		Datastore:   input.Datastore,
-		ServiceName: input.ServiceName,
-	}, input.AppName); err != nil {
-		return err
-	}
-
-	if err := dockerOption(ctx, "add", input.Datastore, input.ServiceName, input.AppName); err != nil {
-		return err
-	}
-
 	if input.Querystring != "" {
 		serviceURL = fmt.Sprintf("%s?%s", serviceURL, input.Querystring)
 	}
 
-	if err := callServiceAction(ctx, input.Datastore, "post-link", input.ServiceName, input.AppName); err != nil {
+	if err := addLink(ctx, input.Datastore, input.ServiceName, input.AppName); err != nil {
 		return err
 	}
 
@@ -327,6 +339,27 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 	}
 
 	return callServiceAction(ctx, input.Datastore, "post-unlink-complete", input.ServiceName, input.AppName)
+}
+
+// addLink records an app as linked to a service and gives it the container link,
+// firing the triggers around both
+func addLink(ctx context.Context, s *service.Datastore, serviceName string, appName string) error {
+	if err := callServiceAction(ctx, s, "pre-link", serviceName, appName); err != nil {
+		return err
+	}
+
+	if err := service.AddLinkedApp(ctx, service.LinkedAppsInput{
+		Datastore:   s,
+		ServiceName: serviceName,
+	}, appName); err != nil {
+		return err
+	}
+
+	if err := dockerOption(ctx, "add", s, serviceName, appName); err != nil {
+		return err
+	}
+
+	return callServiceAction(ctx, s, "post-link", serviceName, appName)
 }
 
 // callServiceAction fires one of the service-action triggers for a link change

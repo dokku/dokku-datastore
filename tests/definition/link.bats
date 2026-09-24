@@ -82,6 +82,76 @@ teardown_file() {
   refute_output --partial "$UNLINKED_APP"
 }
 
+@test "($DEFINITION) link sets the default alias when a key merely containing it exists" {
+  echo '{}' >"$FAKE_CONFIG_ROOT/$APP.json"
+  dokku config:set --no-restart "$APP" "EXTERNAL_$ALIAS=something"
+
+  run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --dsn
+  assert_success
+  local dsn="$output"
+
+  run jq -r --arg key "$ALIAS" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output "$dsn"
+
+  run jq -r --arg key "EXTERNAL_$ALIAS" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output "something"
+
+  run "$BIN" unlink "$PLUGIN" "$SERVICE" "$APP" --no-restart
+  assert_success
+}
+
+@test "($DEFINITION) link --alias takes the default alias when a key merely containing it exists" {
+  echo '{}' >"$FAKE_CONFIG_ROOT/$APP.json"
+  dokku config:set --no-restart "$APP" "OTHER_$ALIAS=something"
+
+  run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart --alias "${ALIAS%_URL}"
+  assert_success
+  refute_output --partial "already in use"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --dsn
+  assert_success
+  local dsn="$output"
+
+  run jq -r --arg key "$ALIAS" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output "$dsn"
+
+  run "$BIN" unlink "$PLUGIN" "$SERVICE" "$APP" --no-restart
+  assert_success
+}
+
+@test "($DEFINITION) link finishes a link whose url was set by hand" {
+  echo '{}' >"$FAKE_CONFIG_ROOT/$APP.json"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --dsn
+  assert_success
+  dokku config:set --no-restart "$APP" "$ALIAS=$output"
+
+  run "$BIN" linked "$PLUGIN" "$SERVICE" "$APP"
+  assert_failure
+
+  # the bug this closes: the app was refused as already linked, and was left
+  # without its container link and off the list of linked apps
+  run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart
+  assert_success
+  assert_output --partial "none was set"
+
+  run "$BIN" linked "$PLUGIN" "$SERVICE" "$APP"
+  assert_success
+
+  run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart
+  assert_failure
+  assert_output --partial "Already linked as $ALIAS"
+
+  run "$BIN" unlink "$PLUGIN" "$SERVICE" "$APP" --no-restart
+  assert_success
+}
+
 @test "($DEFINITION) unlink and destroy agree once the app's url is repointed" {
   run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart
   assert_success

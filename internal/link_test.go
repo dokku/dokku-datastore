@@ -239,6 +239,173 @@ func TestUnlinkService(t *testing.T) {
 	}
 }
 
+// Linking goes by the links file as unlinking does. A key that merely contains
+// the alias no longer stands in for it, and an app whose config already holds
+// the url is given the rest of the link rather than refused.
+func TestLinkService(t *testing.T) {
+	tests := []struct {
+		name          string
+		alias         string
+		links         []string
+		config        func(serviceURL string) map[string]string
+		expectedError string
+		expectedCalls func(serviceURL string, option string) []string
+		expectedLinks []string
+		expectedWarn  bool
+	}{
+		{
+			name:  "a key merely containing the alias does not take its place",
+			links: []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"EXTERNAL_REDIS_URL": "something"}
+			},
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{
+					"docker-options:add my-app build,deploy,run " + option,
+					"config:set --no-restart my-app REDIS_URL=" + serviceURL,
+				}
+			},
+			expectedLinks: []string{"my-app"},
+		},
+		{
+			name:  "a key merely containing the alias does not stop it being passed",
+			alias: "REDIS",
+			links: []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"CELERY_REDIS_URL": "redis://:other@elsewhere:6379"}
+			},
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{
+					"docker-options:add my-app build,deploy,run " + option,
+					"config:set --no-restart my-app REDIS_URL=" + serviceURL,
+				}
+			},
+			expectedLinks: []string{"my-app"},
+		},
+		{
+			name:  "the default alias holding another url",
+			links: []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"REDIS_URL": "redis://:other@elsewhere:6379"}
+			},
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{
+					"docker-options:add my-app build,deploy,run " + option,
+					"config:set --no-restart my-app DOKKU_REDIS_AQUA_URL=" + serviceURL,
+				}
+			},
+			expectedLinks: []string{"my-app"},
+		},
+		{
+			name:  "not in the links file, with the url in the config",
+			links: []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"REDIS_URL": serviceURL}
+			},
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{"docker-options:add my-app build,deploy,run " + option}
+			},
+			expectedLinks: []string{"my-app"},
+			expectedWarn:  true,
+		},
+		{
+			name:  "not in the links file, with the url under the alias passed",
+			alias: "FOO",
+			links: []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"FOO_URL": serviceURL}
+			},
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{"docker-options:add my-app build,deploy,run " + option}
+			},
+			expectedLinks: []string{"my-app"},
+			expectedWarn:  true,
+		},
+		{
+			name:  "linked, with the url in the config",
+			links: []string{"my-app"},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"REDIS_URL": serviceURL}
+			},
+			expectedError: "Already linked as REDIS_URL",
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{}
+			},
+			expectedLinks: []string{"my-app"},
+		},
+		{
+			name:  "linked, with the url repointed at another datastore",
+			links: []string{"my-app"},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"REDIS_URL": "redis://:other@elsewhere:6379"}
+			},
+			expectedError: "Already linked to app my-app",
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{}
+			},
+			expectedLinks: []string{"my-app"},
+		},
+		{
+			name:  "the alias passed holding another value",
+			alias: "FOO",
+			links: []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"FOO_URL": "something"}
+			},
+			expectedError: "Specified alias FOO already in use",
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{}
+			},
+			expectedLinks: []string{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			datastore := linkedServices(t, map[string][]string{"lollipop": test.links})
+
+			serviceURL := datastore.URL("lollipop", "")
+			if serviceURL == "" {
+				t.Fatal("expected the service url to render")
+			}
+
+			calls := fakeDokku(t, test.config(serviceURL))
+			ui := cli.NewMockUi()
+
+			err := LinkService(t.Context(), LinkServiceInput{
+				Alias:       test.alias,
+				AppName:     "my-app",
+				Datastore:   datastore,
+				Logger:      Ui{Ui: ui},
+				NoRestart:   true,
+				ServiceName: "lollipop",
+			})
+
+			if test.expectedError == "" && err != nil {
+				t.Fatalf("expected no error, got %s", err)
+			}
+			if test.expectedError != "" && (err == nil || err.Error() != test.expectedError) {
+				t.Fatalf("expected %q, got %v", test.expectedError, err)
+			}
+
+			option := fmt.Sprintf("--link %s:%s", service.ContainerName(datastore, "lollipop"), service.DNSHostname(datastore, "lollipop"))
+			if actual := recordedCalls(t, calls); !slices.Equal(actual, test.expectedCalls(serviceURL, option)) {
+				t.Errorf("expected the calls %q, got %q", test.expectedCalls(serviceURL, option), actual)
+			}
+
+			actualLinks := service.LinkedApps(t.Context(), service.LinkedAppsInput{Datastore: datastore, ServiceName: "lollipop"})
+			if !slices.Equal(actualLinks, test.expectedLinks) {
+				t.Errorf("expected the links %v, got %v", test.expectedLinks, actualLinks)
+			}
+
+			warned := strings.Contains(ui.ErrorWriter.String(), "none was set")
+			if warned != test.expectedWarn {
+				t.Errorf("expected a warning to be %t, got the output %q", test.expectedWarn, ui.ErrorWriter.String())
+			}
+		})
+	}
+}
+
 func TestAlternateAlias(t *testing.T) {
 	datastore := service.Datastores["redis"]
 
