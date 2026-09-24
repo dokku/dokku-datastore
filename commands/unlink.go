@@ -231,6 +231,7 @@ func (c *UnlinkCommand) Run(args []string) int {
 	if err := internal.UnlinkService(ctx, internal.UnlinkServiceInput{
 		AppName:     appName,
 		Datastore:   datastore,
+		Logger:      logger,
 		NoRestart:   c.noRestart,
 		ServiceName: serviceName,
 	}); err != nil {

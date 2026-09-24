@@ -1,11 +1,16 @@
 package internal
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/mitchellh/cli"
 )
 
 func TestConfigKeysForURL(t *testing.T) {
@@ -51,6 +56,184 @@ func TestConfigKeysForURL(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if actual := ConfigKeysForURL(test.environment, serviceURL); !slices.Equal(actual, test.expected) {
 				t.Errorf("expected %v, got %v", test.expected, actual)
+			}
+		})
+	}
+}
+
+// A url that failed to render is empty, and every value contains the empty
+// string: matching on it would have unlink unset the app's whole config.
+func TestConfigKeysForURLWithAnEmptyURL(t *testing.T) {
+	environment := map[string]string{"REDIS_URL": "redis://host:6379", "UNRELATED": "something-else"}
+
+	if actual := ConfigKeysForURL(environment, ""); len(actual) != 0 {
+		t.Errorf("expected an empty url to match nothing, got %v", actual)
+	}
+}
+
+// fakeDokku puts a dokku on the path that prints the given config for
+// config:export and records every command it is asked to run, so a link change
+// can be checked without a dokku install. It returns the file the commands are
+// recorded in.
+func fakeDokku(t *testing.T, environment map[string]string) string {
+	t.Helper()
+
+	bin := t.TempDir()
+	config := filepath.Join(bin, "config.json")
+	calls := filepath.Join(bin, "calls")
+
+	contents, err := json.Marshal(environment)
+	if err != nil {
+		t.Fatalf("failed to encode the config: %s", err)
+	}
+	if err := os.WriteFile(config, contents, 0644); err != nil {
+		t.Fatalf("failed to write the config: %s", err)
+	}
+
+	script := fmt.Sprintf("#!/bin/sh\necho \"$*\" >> %q\nif [ \"$1\" = config:export ]; then cat %q; fi\n", calls, config)
+	if err := os.WriteFile(filepath.Join(bin, "dokku"), []byte(script), 0755); err != nil {
+		t.Fatalf("failed to write the fake dokku: %s", err)
+	}
+
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	// the service-action triggers are skipped outside a dokku install
+	t.Setenv("PLUGIN_PATH", "")
+
+	return calls
+}
+
+// recordedCalls returns the dokku commands the fake was asked to run, bar the
+// config:export every link change starts with
+func recordedCalls(t *testing.T, calls string) []string {
+	t.Helper()
+
+	contents, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("failed to read the recorded calls: %s", err)
+	}
+
+	recorded := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
+		if !strings.HasPrefix(line, "config:export") {
+			recorded = append(recorded, line)
+		}
+	}
+
+	return recorded
+}
+
+// The links file decides whether an app is linked, since that is what destroy,
+// linked and links read. An app whose url was repointed at another datastore
+// used to be reported as not linked by unlink while destroy still refused.
+func TestUnlinkService(t *testing.T) {
+	tests := []struct {
+		name          string
+		links         []string
+		config        func(serviceURL string) map[string]string
+		expectedError string
+		expectedCalls func(option string) []string
+		expectedWarn  bool
+	}{
+		{
+			name:  "linked, with the url in the config",
+			links: []string{"my-app"},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"REDIS_URL": serviceURL}
+			},
+			expectedCalls: func(option string) []string {
+				return []string{
+					"docker-options:remove my-app build,deploy,run " + option,
+					"config:unset --no-restart my-app REDIS_URL",
+				}
+			},
+		},
+		{
+			name:  "linked, with the url repointed at another datastore",
+			links: []string{"my-app"},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"REDIS_URL": "redis://:other@elsewhere:6379"}
+			},
+			expectedCalls: func(option string) []string {
+				return []string{"docker-options:remove my-app build,deploy,run " + option}
+			},
+			expectedWarn: true,
+		},
+		{
+			name:  "not in the links file, with the url in the config",
+			links: []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"REDIS_URL": serviceURL}
+			},
+			expectedCalls: func(option string) []string {
+				return []string{
+					"docker-options:remove my-app build,deploy,run " + option,
+					"config:unset --no-restart my-app REDIS_URL",
+				}
+			},
+		},
+		{
+			name:  "not linked at all",
+			links: []string{"other-app"},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"REDIS_URL": "redis://:other@elsewhere:6379"}
+			},
+			expectedError: "Not linked to app my-app",
+			expectedCalls: func(option string) []string {
+				return []string{}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			datastore := linkedServices(t, map[string][]string{"lollipop": test.links})
+
+			dokkuRoot := t.TempDir()
+			t.Setenv("DOKKU_ROOT", dokkuRoot)
+			if err := os.MkdirAll(filepath.Join(dokkuRoot, "my-app"), 0755); err != nil {
+				t.Fatalf("failed to create the app root: %s", err)
+			}
+
+			serviceURL := datastore.URL("lollipop", "")
+			if serviceURL == "" {
+				t.Fatal("expected the service url to render")
+			}
+
+			calls := fakeDokku(t, test.config(serviceURL))
+			ui := cli.NewMockUi()
+
+			err := UnlinkService(t.Context(), UnlinkServiceInput{
+				AppName:     "my-app",
+				Datastore:   datastore,
+				Logger:      Ui{Ui: ui},
+				NoRestart:   true,
+				ServiceName: "lollipop",
+			})
+
+			if test.expectedError == "" && err != nil {
+				t.Fatalf("expected no error, got %s", err)
+			}
+			if test.expectedError != "" && (err == nil || err.Error() != test.expectedError) {
+				t.Fatalf("expected %q, got %v", test.expectedError, err)
+			}
+
+			option := fmt.Sprintf("--link %s:%s", service.ContainerName(datastore, "lollipop"), service.DNSHostname(datastore, "lollipop"))
+			if actual := recordedCalls(t, calls); !slices.Equal(actual, test.expectedCalls(option)) {
+				t.Errorf("expected the calls %q, got %q", test.expectedCalls(option), actual)
+			}
+
+			// the app is out of the links file either way, and an app that was
+			// never linked leaves the file as it was
+			expectedLinks := slices.DeleteFunc(slices.Clone(test.links), func(app string) bool { return app == "my-app" })
+			actualLinks := service.LinkedApps(t.Context(), service.LinkedAppsInput{Datastore: datastore, ServiceName: "lollipop"})
+			if !slices.Equal(actualLinks, expectedLinks) {
+				t.Errorf("expected the links %v, got %v", expectedLinks, actualLinks)
+			}
+
+			warned := strings.Contains(ui.ErrorWriter.String(), "none was unset")
+			if warned != test.expectedWarn {
+				t.Errorf("expected a warning to be %t, got the output %q", test.expectedWarn, ui.ErrorWriter.String())
 			}
 		})
 	}
