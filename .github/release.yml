@@ -1,0 +1,26 @@
+---
+changelog:
+  categories:
+    - title: Enhancements
+      labels:
+        - enhancement
+    - title: Bug fixes
+      labels:
+        - bug
+    - title: Datastores
+      labels:
+        - docker
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Tests
+      labels:
+        - tests
+    - title: Dependencies
+      labels:
+        - go
+        - github_actions
+        - dependencies
+    - title: Other changes
+      labels:
+        - "*"
