@@ -255,6 +255,26 @@ dokku redis:unexpose lollipop
 dokku redis:expose lollipop 127.0.0.1:6380
 ```
 
+## Linked apps
+
+Whether a service was linked to an app was decided in two places. `destroy`, `linked` and `links` read the service's list of linked apps, while `unlink` looked for a config variable on the app holding the service's url. An app whose `DATABASE_URL` was changed to point at another datastore was linked according to the first and not according to the second: `destroy` refused with `Cannot delete linked service`, `unlink` failed with `Not linked to app`, and yet after that failed `unlink` the `destroy` went through.
+
+The list of linked apps now decides for every command. An app on it is unlinked the same way whether or not its config still points at the service. The variable it holds is left alone when it names something else, nothing is unset, the app is not restarted, and a warning says so. `unlink` still fails with `Not linked to app` when the app is neither on the list nor has the url, and then changes nothing.
+
+`destroy` names the apps a service is still linked to, rather than only refusing.
+
+```shell
+dokku postgres:link lollipop playground
+dokku config:set playground DATABASE_URL=postgres://elsewhere:5432/db
+
+# refuses, and names playground
+dokku postgres:destroy lollipop
+
+# unlinks, warning that DATABASE_URL is left as it is
+dokku postgres:unlink lollipop playground
+dokku postgres:destroy lollipop
+```
+
 ## Plugin documentation
 
 `trigger-help` and `readme` render the documentation a dokku datastore plugin ships, so that the plugin help and its readme cannot drift apart. Both read the description, argument sketch, long form prose and readme section that every command declares, alongside the arguments and flags the command already accepts.

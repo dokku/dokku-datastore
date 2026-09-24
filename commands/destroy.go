@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
@@ -189,8 +190,11 @@ func (c *DestroyCommand) Run(args []string) int {
 		ServiceName: serviceName,
 	})
 	if len(linkedApps) > 0 {
+		// the apps are named, because the link is recorded in a file the
+		// operator never sees and the app's config may no longer mention it
 		logger.Error(internal.ErrorInput{
-			Error: internal.ErrLinkedService,
+			Message: fmt.Sprintf("Linked to app(s): %s. Unlink them before destroying the service", strings.Join(linkedApps, ", ")),
+			Error:   internal.ErrLinkedService,
 		})
 		return 1
 	}

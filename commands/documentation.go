@@ -369,7 +369,9 @@ func (c *DestroyCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *DestroyCommand) Documentation() string {
 	return `destroy the service, it's data, and the running container
-dokku {{.CommandPrefix}}:destroy lollipop`
+dokku {{.CommandPrefix}}:destroy lollipop
+a service that is still linked to an app is not destroyed, and the apps it
+is linked to are named. unlink them first.`
 }
 
 // Group is the readme usage section the command is documented under
@@ -568,9 +570,9 @@ if you want your container to be reachable from outside, you should
 use the 'expose' subcommand. another service can be linked to your app:
 dokku {{.CommandPrefix}}:link other_service playground
 it is possible to change the protocol for {{.DefaultAlias}}_URL by setting the
-environment variable {{.PluginVariable}}_DATABASE_SCHEME on the app. doing so will
-after linking will cause the plugin to think the service is not
-linked, and we advise you to unlink before proceeding.
+environment variable {{.PluginVariable}}_DATABASE_SCHEME on the app. doing so
+after linking means unlink no longer finds the variable it set, and leaves it
+in place, so we advise you to unlink before proceeding.
 dokku config:set playground {{.PluginVariable}}_DATABASE_SCHEME={{.Scheme}}2
 dokku {{.CommandPrefix}}:link lollipop playground
 this will cause {{.DefaultAlias}}_URL to be set as:
@@ -878,7 +880,11 @@ func (c *UnlinkCommand) Usage() string {
 func (c *UnlinkCommand) Documentation() string {
 	return `you can unlink a {{.CommandPrefix}} service
 > NOTE: this will restart your app and unset related environment variables
-dokku {{.CommandPrefix}}:unlink lollipop playground`
+dokku {{.CommandPrefix}}:unlink lollipop playground
+an app is still linked after its {{.DefaultAlias}}_URL is changed to point
+elsewhere, and is unlinked the same way. the variable it now holds is not
+the service's, so it is left alone, nothing is unset, the app is not
+restarted, and a warning says so.`
 }
 
 // Group is the readme usage section the command is documented under

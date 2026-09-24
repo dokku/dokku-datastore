@@ -132,6 +132,13 @@ func UnsetAppConfig(ctx context.Context, appName string, keys []string, restart 
 // given service url, sorted so the output is stable
 func ConfigKeysForURL(environment map[string]string, serviceURL string) []string {
 	keys := []string{}
+
+	// every value contains the empty string, so a url that failed to render
+	// would otherwise claim the whole config, and unlink would unset all of it
+	if serviceURL == "" {
+		return keys
+	}
+
 	for key, value := range environment {
 		if strings.Contains(value, serviceURL) {
 			keys = append(keys, key)
@@ -246,6 +253,9 @@ type UnlinkServiceInput struct {
 	// Datastore is the datastore the service belongs to
 	Datastore *service.Datastore
 
+	// Logger reports progress
+	Logger Ui
+
 	// NoRestart is whether to skip restarting the app
 	NoRestart bool
 
@@ -275,12 +285,22 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 	serviceURL := input.Datastore.URL(input.ServiceName, SchemeForApp(input.Datastore, environment))
 	linkedKeys := ConfigKeysForURL(environment, serviceURL)
 
+	// the links file is what destroy, linked and links read, so it is what
+	// decides whether the app is linked. An app whose url was repointed at
+	// another datastore is still linked until it is unlinked, and one whose
+	// config still holds the url is linked even if the file lost its name.
+	linked := slices.Contains(service.LinkedApps(ctx, service.LinkedAppsInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+	}), input.AppName)
+	if !linked && len(linkedKeys) == 0 {
+		return fmt.Errorf("Not linked to app %s", input.AppName) //nolint:staticcheck // matches the bash datastore plugins
+	}
+
 	if err := callServiceAction(ctx, input.Datastore, "pre-unlink", input.ServiceName, input.AppName); err != nil {
 		return err
 	}
 
-	// the links file and the docker options are cleaned up even when the app has
-	// no config pointing at the service, so a partial link cannot be stranded
 	if err := service.RemoveLinkedApp(ctx, service.LinkedAppsInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
@@ -292,15 +312,17 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 		return err
 	}
 
-	if len(linkedKeys) == 0 {
-		return fmt.Errorf("Not linked to app %s", input.AppName) //nolint:staticcheck // matches the bash datastore plugins
-	}
-
 	if err := callServiceAction(ctx, input.Datastore, "post-unlink", input.ServiceName, input.AppName); err != nil {
 		return err
 	}
 
-	if err := UnsetAppConfig(ctx, input.AppName, linkedKeys, !input.NoRestart); err != nil {
+	if len(linkedKeys) == 0 {
+		// nothing to unset means nothing to restart for, so the running app
+		// keeps its container link until it is next restarted or deployed
+		input.Logger.Warn(WarnInput{
+			Warning: fmt.Sprintf("No config on app %s points at service %s, so none was unset. The app keeps its container link until it is restarted", input.AppName, input.ServiceName),
+		})
+	} else if err := UnsetAppConfig(ctx, input.AppName, linkedKeys, !input.NoRestart); err != nil {
 		return err
 	}
 
