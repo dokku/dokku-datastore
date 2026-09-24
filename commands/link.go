@@ -225,6 +225,7 @@ func (c *LinkCommand) Run(args []string) int {
 		Alias:       c.alias,
 		AppName:     appName,
 		Datastore:   datastore,
+		Logger:      logger,
 		NoRestart:   c.noRestart,
 		Querystring: c.querystring,
 		ServiceName: serviceName,

@@ -275,6 +275,19 @@ dokku postgres:unlink lollipop playground
 dokku postgres:destroy lollipop
 ```
 
+`link` goes by the same list. An app whose config already held the service's url, set by hand rather than by `link`, was refused with `Already linked as DATABASE_URL`, and was left without its container link and off the list, so it could not reach the service and `destroy` did not know it was in use. Such an app is now added to the list and given its container link. Its config is left as it is, so `--alias` and `--querystring` do not apply and the app is not restarted, and a warning says it has no container link until it is. An app already on the list is still refused, including one whose url was repointed, which used to be linked a second time under a `DOKKU_POSTGRES_AQUA_URL`-style alias.
+
+The bash plugins also took a key that merely contained the alias, such as `EXTERNAL_DATABASE_URL`, for the alias itself, and linked the app under a `DOKKU_POSTGRES_AQUA_URL`-style alias instead, or refused `--alias DATABASE` as already in use. Only a key named exactly `DATABASE_URL` counts.
+
+```shell
+dokku config:set playground DATABASE_URL=postgres://postgres:password@dokku-postgres-lollipop:5432/lollipop
+
+# adds playground to the list and gives it the container link,
+# warning that the app is not restarted
+dokku postgres:link lollipop playground
+dokku ps:restart playground
+```
+
 ## Plugin documentation
 
 `trigger-help` and `readme` render the documentation a dokku datastore plugin ships, so that the plugin help and its readme cannot drift apart. Both read the description, argument sketch, long form prose and readme section that every command declares, alongside the arguments and flags the command already accepts.
