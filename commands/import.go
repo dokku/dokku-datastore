@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -22,6 +23,9 @@ type ImportCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+
+	// file is a path on the dokku host to import instead of stdin
+	file string
 }
 
 // Name returns the name of the command
@@ -31,7 +35,7 @@ func (c *ImportCommand) Name() string {
 
 // Synopsis returns the synopsis of the command
 func (c *ImportCommand) Synopsis() string {
-	return "Imports data into a service from stdin"
+	return "Imports data into a service from stdin or a file"
 }
 
 // Help returns the help text for the command
@@ -43,7 +47,8 @@ func (c *ImportCommand) Help() string {
 func (c *ImportCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Imports into a redis service named test": fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Imports into a redis service named test":               fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Imports a file on the dokku host into a redis service": fmt.Sprintf("%s %s redis test --file /var/lib/dokku/data/storage/data.dump", appName, c.Name()),
 	}
 }
 
@@ -79,6 +84,7 @@ func (c *ImportCommand) ParsedArguments(args []string) (map[string]command.Argum
 func (c *ImportCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.StringVarP(&c.file, "file", "f", "", "a file on the dokku host to import instead of reading stdin")
 	return f
 }
 
@@ -87,7 +93,9 @@ func (c *ImportCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--file": complete.PredictFiles("*"),
+		},
 	)
 }
 
@@ -185,20 +193,16 @@ func (c *ImportCommand) Run(args []string) int {
 		return 1
 	}
 
-	// refuse to truncate the service when nothing was piped in
-	stat, err := os.Stdin.Stat()
+	reader, err := importSource(c.file, os.Stdin)
 	if err != nil {
-		logger.Error(internal.ErrorInput{Error: fmt.Errorf("unable to inspect stdin: %w", err)})
+		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}
-	if stat.Mode()&os.ModeCharDevice != 0 {
-		logger.Error(internal.ErrorInput{Error: errors.New("No data provided on stdin.")}) //nolint:staticcheck // matches the bash datastore plugins
-		return 1
-	}
+	defer reader.Close() //nolint:errcheck
 
 	if err := datastore.ImportService(ctx, service.ImportServiceInput{
 		Datastore:   datastore,
-		Reader:      os.Stdin,
+		Reader:      reader,
 		ServiceName: serviceName,
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
@@ -206,4 +210,41 @@ func (c *ImportCommand) Run(args []string) int {
 	}
 
 	return 0
+}
+
+// importSource is what an import reads from: the file when one is named, and
+// stdin otherwise.
+//
+// The file is opened by this process, so it is a path on the dokku host rather
+// than on the machine running ssh. A redirection inside a quoted ssh command is
+// never run through a shell there, which is why a dump already on the host has
+// to be named instead.
+func importSource(path string, stdin *os.File) (io.ReadCloser, error) {
+	if path != "" {
+		stat, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("unable to read %s on the dokku host: %w", path, err)
+		}
+		if !stat.Mode().IsRegular() {
+			return nil, fmt.Errorf("unable to import %s: not a regular file on the dokku host", path)
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("unable to read %s on the dokku host: %w", path, err)
+		}
+
+		return file, nil
+	}
+
+	// refuse to truncate the service when nothing was piped in
+	stat, err := stdin.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("unable to inspect stdin: %w", err)
+	}
+	if stat.Mode()&os.ModeCharDevice != 0 {
+		return nil, errors.New("No data provided on stdin.") //nolint:staticcheck // matches the bash datastore plugins
+	}
+
+	return io.NopCloser(stdin), nil
 }

@@ -487,13 +487,16 @@ func (c *ImportCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *ImportCommand) Usage() string {
-	return `<service>`
+	return `<service> [-f|--file <path>]`
 }
 
 // Documentation returns the long form documentation for the command
 func (c *ImportCommand) Documentation() string {
 	return `import a datastore dump
-dokku {{.CommandPrefix}}:import lollipop < data.dump`
+dokku {{.CommandPrefix}}:import lollipop < data.dump
+a dump that is already on the dokku host can be imported with --file.
+the path is on the dokku host, not on the machine running ssh.
+dokku {{.CommandPrefix}}:import lollipop --file /var/lib/dokku/data/storage/data.dump`
 }
 
 // Group is the readme usage section the command is documented under
