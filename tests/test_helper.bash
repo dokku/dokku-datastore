@@ -92,6 +92,19 @@ restart_policy_of() {
   container_inspect "$1" '{{ .HostConfig.RestartPolicy.Name }}:{{ .HostConfig.RestartPolicy.MaximumRetryCount }}'
 }
 
+# the source of whatever a container has mounted at a path, and whether it is
+# writable, as <source>:<rw>. Empty when nothing is mounted there
+mount_of() {
+  container_inspect "$1" "{{ range .Mounts }}{{ if eq .Destination \"$2\" }}{{ .Source }}:{{ .RW }}{{ end }}{{ end }}"
+}
+
+# a host directory to mount, under the data root so that it goes with it
+mount_source() {
+  local directory="$DOKKU_LIB_ROOT/mounts/$1"
+  mkdir -p "$directory"
+  echo "$directory"
+}
+
 # a stop removes the container and a start builds a new one, which is the only
 # way a create-time setting reaches a service that is already running
 rebuild_service() {

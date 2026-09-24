@@ -54,6 +54,7 @@ var InfoKeys = []InfoKey{
 	{Name: "log-driver", Description: "show the docker logging driver the service container is run with"},
 	{Name: "log-opt", Description: "show the docker log options the service container is run with"},
 	{Name: "memory", Description: "show the memory limit the service container is run with"},
+	{Name: "mounts", Description: "show the host paths and docker volumes mounted into the service container"},
 	{Name: "post-create-network", Description: "show the networks to attach to after service container creation"},
 	{Name: "post-start-network", Description: "show the networks to attach to after service container start"},
 	{Name: "restart-policy", Description: "show the restart policy the service container is run with"},
@@ -121,6 +122,11 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info[service.LogOptProperty] = common.PropertyGet(commandPrefix, input.ServiceName, service.LogOptProperty)
 	info[service.RestartPolicyProperty] = service.ServiceRestartPolicy(input.Datastore, input.ServiceName)
 	info["memory"] = common.ReadFirstLine(serviceFiles.Memory)
+	// every field, in the grammar the mount command reads, rather than only the
+	// ones docker is handed. A property that cannot be read reports as empty,
+	// the way every other value here does
+	mounts, _ := service.ServiceMounts(input.Datastore, input.ServiceName)
+	info["mounts"] = service.MountSpecs(mounts)
 	info["shm-size"] = common.ReadFirstLine(serviceFiles.ShmSize)
 
 	info["backup-authenticated"] = strconv.FormatBool(common.FileExists(filepath.Join(serviceFolders.Backup, accessKeyIDFile)))

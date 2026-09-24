@@ -46,6 +46,10 @@ type UpgradeServiceInput struct {
 	// with
 	RestartPolicy *string
 
+	// Mounts are the host paths and docker volumes mounted into the service
+	// container
+	Mounts *[]service.Mount
+
 	// Datastore is the datastore the service belongs to
 	Datastore *service.Datastore
 
@@ -76,7 +80,8 @@ func (i UpgradeServiceInput) changesSettings() bool {
 		i.ShmSize != nil ||
 		i.LogDriver != nil ||
 		i.LogOptions != nil ||
-		i.RestartPolicy != nil
+		i.RestartPolicy != nil ||
+		i.Mounts != nil
 }
 
 // upgradeVersion is the version an upgrade moves a service to: the one asked
@@ -182,6 +187,16 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	if currentImage == taggedImage && !input.changesSettings() {
 		input.Logger.Info(fmt.Sprintf("Service %s already running %s", input.ServiceName, taggedImage)) //nolint:errcheck
 		return nil
+	}
+
+	// before the old container is taken away, for the same reason the log
+	// config is checked first, and against the definition the upgrade lands on:
+	// one that crosses a major version can mount its data somewhere else. The
+	// mounts the service already has are checked too, since a host path removed
+	// since it was mounted would otherwise only be found once there is no
+	// container left to go back to
+	if err := checkUpgradeMounts(input, taggedImage); err != nil {
+		return err
 	}
 
 	linkedApps := service.LinkedApps(ctx, service.LinkedAppsInput{
@@ -329,10 +344,40 @@ func applyUpgradeSettings(input UpgradeServiceInput) error {
 		properties[service.RestartPolicyProperty] = input.RestartPolicy
 	}
 
+	if input.Mounts != nil {
+		if err := service.WriteMounts(input.Datastore, input.ServiceName, *input.Mounts); err != nil {
+			return err
+		}
+	}
+
 	for key, value := range properties {
 		if err := common.PropertyWrite(plugin, input.ServiceName, key, *value); err != nil {
 			return fmt.Errorf("failed to write the %s property: %w", key, err)
 		}
+	}
+
+	return nil
+}
+
+// checkUpgradeMounts reports whether the mounts a service will have after an
+// upgrade can be given to the container it is upgraded to: the ones the upgrade
+// was asked for, and otherwise the ones the service already has.
+func checkUpgradeMounts(input UpgradeServiceInput, taggedImage string) error {
+	var mounts []service.Mount
+	if input.Mounts != nil {
+		mounts = *input.Mounts
+	} else {
+		stored, err := service.ServiceMounts(input.Datastore, input.ServiceName)
+		if err != nil {
+			return err
+		}
+		mounts = stored
+	}
+
+	_, imageVersion, _ := definition.CutImage(taggedImage)
+	target := input.Datastore.ForImageVersion(imageVersion)
+	if err := service.CheckMounts(target.Definition, mounts); err != nil {
+		return fmt.Errorf("unable to upgrade %s: %w", input.ServiceName, err)
 	}
 
 	return nil

@@ -280,8 +280,8 @@ func (c *CloneCommand) Documentation() string {
 	return `you can clone an existing service to a new one
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2
 the new service starts from the settings of the one it copies: its config options,
-custom env, memory, shm size, networks, log driver, log options, restart policy
-and backup keyserver. A flag passed to clone overrides that one setting, and a
+custom env, memory, shm size, networks, log driver, log options, restart policy,
+mounts and backup keyserver. A flag passed to clone overrides that one setting, and a
 flag passed empty clears it
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --restart no --custom-env ""
 the password, exposed ports, links and backup credentials, schedule and encryption
@@ -347,7 +347,10 @@ the container log is bounded by whatever 'dokku logs:set --global max-size' says
 by dokku's own default where it says nothing, which a service may override for itself.
 dokku {{.CommandPrefix}}:create lollipop --log-opt max-size=20m,max-file=3
 the container is restarted by docker whenever it stops, which a service may change for itself.
-dokku {{.CommandPrefix}}:create lollipop --restart unless-stopped`
+dokku {{.CommandPrefix}}:create lollipop --restart unless-stopped
+the config options are handed to the process the container runs, not to docker, so
+a host path or docker volume is mounted with --volume, which may be repeated.
+dokku {{.CommandPrefix}}:create lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro`
 }
 
 // Group is the readme usage section the command is documented under
@@ -681,6 +684,39 @@ func (c *LogsCommand) Group() string {
 
 // Description returns the one line description of the command, in the idiom of the
 // plugin rather than of the binary
+func (c *MountCommand) Description() string {
+	return `mount a host path or docker volume into the service container`
+}
+
+// Usage returns the argument sketch rendered after the command name
+func (c *MountCommand) Usage() string {
+	return `[--replace] <service> <source:container-dir[:options]>...`
+}
+
+// Documentation returns the long form documentation for the command
+func (c *MountCommand) Documentation() string {
+	return `mount a host directory into the service container
+dokku {{.CommandPrefix}}:mount lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra
+the source is an absolute host path, which must already exist, or the name of a docker volume.
+options follow a second colon: ro or rw, docker's own mount options, and volume-subpath=<path>
+and volume-chown=<option>, which are recorded but not applied
+dokku {{.CommandPrefix}}:mount lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra:ro,z
+the same can be said with flags instead
+dokku {{.CommandPrefix}}:mount lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra --volume-readonly --volume-options z
+mounting the same source at the same directory again rewrites its options
+dokku {{.CommandPrefix}}:mount lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra
+replace every mount the service has with the ones given
+dokku {{.CommandPrefix}}:mount --replace lollipop /srv/a:/opt/a:ro /srv/b:/opt/b
+> NOTE: a mount reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.`
+}
+
+// Group is the readme usage section the command is documented under
+func (c *MountCommand) Group() string {
+	return definition.GroupBasicUsage
+}
+
+// Description returns the one line description of the command, in the idiom of the
+// plugin rather than of the binary
 func (c *PauseCommand) Description() string {
 	return `pause a running {{.Title}} service`
 }
@@ -894,6 +930,31 @@ func (c *UnlinkCommand) Group() string {
 
 // Description returns the one line description of the command, in the idiom of the
 // plugin rather than of the binary
+func (c *UnmountCommand) Description() string {
+	return `remove one or all mounts from the service container`
+}
+
+// Usage returns the argument sketch rendered after the command name
+func (c *UnmountCommand) Usage() string {
+	return `[--all] <service> [<source:container-dir>...]`
+}
+
+// Documentation returns the long form documentation for the command
+func (c *UnmountCommand) Documentation() string {
+	return `remove a mount, naming it the way it was mounted
+dokku {{.CommandPrefix}}:unmount lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra
+remove every mount the service has
+dokku {{.CommandPrefix}}:unmount --all lollipop
+> NOTE: the mount is removed from the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.`
+}
+
+// Group is the readme usage section the command is documented under
+func (c *UnmountCommand) Group() string {
+	return definition.GroupBasicUsage
+}
+
+// Description returns the one line description of the command, in the idiom of the
+// plugin rather than of the binary
 func (c *UpgradeCommand) Description() string {
 	return `upgrade service <service> to the specified versions`
 }
@@ -909,7 +970,9 @@ func (c *UpgradeCommand) Documentation() string {
 dokku {{.CommandPrefix}}:upgrade lollipop
 This is the only command that changes the version a service runs. With no version named it moves to the newest the service's own major version ships, which leaves the data where it is.
 dokku {{.CommandPrefix}}:upgrade lollipop --image-version 1.2.3
-Moving across a major version has to be asked for by name, because it is not a tag change: the data is mounted somewhere different under the new one, and pointing the version back does not undo it.`
+Moving across a major version has to be asked for by name, because it is not a tag change: the data is mounted somewhere different under the new one, and pointing the version back does not undo it.
+A service keeps the mounts it has unless --volume is passed, which replaces them, and each one is checked against the new container before the old one is taken away.
+dokku {{.CommandPrefix}}:upgrade lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro`
 }
 
 // Group is the readme usage section the command is documented under

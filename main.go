@@ -125,6 +125,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"restart": func() (cli.Command, error) {
 			return &commands.RestartCommand{Meta: meta}, nil
 		},
+		"mount": func() (cli.Command, error) {
+			return &commands.MountCommand{Meta: meta}, nil
+		},
 		"logs": func() (cli.Command, error) {
 			return &commands.LogsCommand{Meta: meta}, nil
 		},
@@ -160,6 +163,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		},
 		"trigger-service-list": func() (cli.Command, error) {
 			return &commands.TriggerServiceListCommand{Meta: meta}, nil
+		},
+		"unmount": func() (cli.Command, error) {
+			return &commands.UnmountCommand{Meta: meta}, nil
 		},
 		"unexpose": func() (cli.Command, error) {
 			return &commands.UnexposeCommand{Meta: meta}, nil

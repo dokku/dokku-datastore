@@ -233,6 +233,33 @@ func TestComposeCarriesTheRestartPolicy(t *testing.T) {
 	}
 }
 
+// The compose backend is handed the same mounts the docker path is, after the
+// definition's own volumes.
+func TestComposeCarriesTheMounts(t *testing.T) {
+	input := redisInput(t)
+	input.Scope.Mounts = []string{"/srv/extra:/data/extra:ro,z", "some-volume:/opt/extra"}
+
+	rendered, err := Compose(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	document := string(rendered)
+	for _, mount := range input.Scope.Mounts {
+		if !strings.Contains(document, "- "+mount) {
+			t.Errorf("expected the mount %s to be carried, got:\n%s", mount, document)
+		}
+	}
+
+	definitionVolume := strings.Index(document, "/lollipop/data:/data\n")
+	if definitionVolume == -1 {
+		t.Fatalf("expected the definition's data volume, got:\n%s", document)
+	}
+	if strings.Index(document, "/srv/extra:/data/extra") < definitionVolume {
+		t.Errorf("expected the mounts to follow the definition's volumes, got:\n%s", document)
+	}
+}
+
 // A bare no is a boolean to a YAML 1.1 reader, and compose would be handed
 // false rather than a policy, so it has to reach the file as a string.
 func TestComposeQuotesARestartPolicyOfNo(t *testing.T) {

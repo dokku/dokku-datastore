@@ -40,6 +40,18 @@ teardown_file() {
   [[ ! -d "$(service_root "not.valid")" ]] || fail "a refused create left $(service_root "not.valid") behind"
 }
 
+@test "($DEFINITION) a create mounting a host path that does not exist is refused" {
+  [[ "$DOKKU_LIB_HOST_ROOT" == "$DOKKU_LIB_ROOT" ]] || skip "dockerd sees another host root, so the host path is not checked"
+
+  # docker would otherwise create it, empty and owned by root, and the service
+  # would start on that. Refused before the pull and before the service root is
+  # made, so this costs the daemon nothing
+  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-nomount" --image-version "$IMAGE_VERSION" --volume "$DOKKU_LIB_ROOT/not-there:/opt/dokku-mount"
+  assert_failure
+  assert_stderr --partial "does not exist"
+  [[ ! -d "$(service_root "$SERVICE-nomount")" ]] || fail "a refused create left $(service_root "$SERVICE-nomount") behind"
+}
+
 @test "($DEFINITION) the service is running and reports a connection string" {
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --status
   assert_success

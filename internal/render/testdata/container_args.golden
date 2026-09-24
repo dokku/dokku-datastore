@@ -190,6 +190,26 @@ redis-server
 --bind
 0.0.0.0
 
+### mounts
+container
+create
+--cidfile=/var/lib/dokku/services/redis/lollipop/ID
+--env-file=/var/lib/dokku/services/redis/lollipop/ENV
+--hostname=dokku.redis.lollipop
+--label=dokku.service=redis
+--label=dokku=service
+--name=dokku.redis.lollipop
+--restart=always
+--volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
+--volume=/var/lib/dokku/services/redis/lollipop/data:/data
+--volume=/srv/extra:/data/extra:ro,z
+--volume=some-volume:/opt/extra
+redis:8.8.0
+redis-server
+/usr/local/etc/redis/redis.conf
+--bind
+0.0.0.0
+
 ### no volumes at all
 container
 create

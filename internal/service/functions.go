@@ -92,6 +92,9 @@ type CommitServiceConfigInput struct {
 
 	// RestartPolicy is the docker restart policy for the service container
 	RestartPolicy string
+
+	// Mounts are the mounts for the service container beyond the definition's
+	Mounts []Mount
 }
 
 // CommitServiceConfig commits the service config for a given service
@@ -180,6 +183,10 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, RestartPolicyProperty, input.RestartPolicy)
 	if err != nil {
 		return fmt.Errorf("failed to write %s property: %w", RestartPolicyProperty, err)
+	}
+
+	if err := WriteMounts(input.Datastore, input.ServiceName, input.Mounts); err != nil {
+		return err
 	}
 
 	return nil

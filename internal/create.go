@@ -69,6 +69,10 @@ type CreateServiceInput struct {
 	// empty for the default
 	RestartPolicy string
 
+	// Mounts are the host paths and docker volumes to mount into the service
+	// container beyond the definition's own
+	Mounts []service.Mount
+
 	// Memory is the memory limit to use for the service
 	Memory int
 
@@ -116,6 +120,12 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	}
 
 	if err := service.ValidateRestartPolicy(input.RestartPolicy); err != nil {
+		return err
+	}
+
+	// against the definition the version settled on, which is the one whose
+	// volumes a mount must not land on
+	if err := service.CheckMounts(input.Datastore.Definition, input.Mounts); err != nil {
 		return err
 	}
 
@@ -219,6 +229,7 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		PostCreateNetworks: input.PostCreateNetworks,
 		PostStartNetworks:  input.PostStartNetworks,
 		RestartPolicy:      input.RestartPolicy,
+		Mounts:             input.Mounts,
 		ServiceName:        input.ServiceName,
 		ShmSize:            input.ShmSize,
 	}); err != nil {

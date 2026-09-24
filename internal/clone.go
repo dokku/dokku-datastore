@@ -59,6 +59,10 @@ type CloneServiceInput struct {
 	// RestartPolicy is the docker restart policy the new container is run with
 	RestartPolicy *string
 
+	// Mounts are the host paths and docker volumes mounted into the new
+	// container
+	Mounts *[]service.Mount
+
 	// PostCreateNetworks are attached after the new container is created
 	PostCreateNetworks *[]string
 
@@ -82,6 +86,7 @@ type serviceSettings struct {
 	LogDriver          string
 	LogOptions         []string
 	Memory             int
+	Mounts             []service.Mount
 	PostCreateNetworks []string
 	PostStartNetworks  []string
 	RestartPolicy      string
@@ -107,6 +112,11 @@ func readServiceSettings(datastore *service.Datastore, serviceName string) (serv
 		memory = parsed
 	}
 
+	mounts, err := service.ServiceMounts(datastore, serviceName)
+	if err != nil {
+		return serviceSettings{}, err
+	}
+
 	return serviceSettings{
 		ConfigOptions:      service.ConfigOptions(datastore, serviceName),
 		CustomEnv:          customEnv(serviceFiles.Env),
@@ -115,6 +125,7 @@ func readServiceSettings(datastore *service.Datastore, serviceName string) (serv
 		LogDriver:          common.PropertyGet(commandPrefix, serviceName, service.LogDriverProperty),
 		LogOptions:         splitList(common.PropertyGet(commandPrefix, serviceName, service.LogOptProperty)),
 		Memory:             memory,
+		Mounts:             mounts,
 		PostCreateNetworks: splitList(service.PostCreateNetwork(datastore, serviceName)),
 		PostStartNetworks:  splitList(service.PostStartNetwork(datastore, serviceName)),
 		RestartPolicy:      service.ServiceRestartPolicy(datastore, serviceName),
@@ -161,6 +172,10 @@ func (s serviceSettings) withOverrides(input CloneServiceInput) serviceSettings 
 
 	if input.Memory != nil {
 		s.Memory = *input.Memory
+	}
+
+	if input.Mounts != nil {
+		s.Mounts = *input.Mounts
 	}
 
 	return s
@@ -219,6 +234,7 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 		LogDriver:          settings.LogDriver,
 		LogOptions:         settings.LogOptions,
 		Memory:             settings.Memory,
+		Mounts:             settings.Mounts,
 		Password:           input.Password,
 		PostCreateNetworks: settings.PostCreateNetworks,
 		PostStartNetworks:  settings.PostStartNetworks,

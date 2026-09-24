@@ -18,6 +18,7 @@ func cloneSource() serviceSettings {
 		LogDriver:          "json-file",
 		LogOptions:         []string{"max-size=20m", "max-file=3"},
 		Memory:             512,
+		Mounts:             []service.Mount{{Source: "/srv/a", ContainerPath: "/opt/a", Readonly: true, VolumeOptions: "z"}},
 		PostCreateNetworks: []string{"created-one", "created-two"},
 		PostStartNetworks:  []string{"started"},
 		RestartPolicy:      "unless-stopped",
@@ -39,6 +40,7 @@ func TestCloneFlagOverridesOneSetting(t *testing.T) {
 	policy := "no"
 	networks := []string{"elsewhere"}
 	memory := 1024
+	mounts := []service.Mount{{Source: "other", ContainerPath: "/opt/other"}}
 
 	tests := []struct {
 		name     string
@@ -60,6 +62,11 @@ func TestCloneFlagOverridesOneSetting(t *testing.T) {
 			input:    CloneServiceInput{Memory: &memory},
 			expected: func(s *serviceSettings) { s.Memory = memory },
 		},
+		{
+			name:     "the mounts",
+			input:    CloneServiceInput{Mounts: &mounts},
+			expected: func(s *serviceSettings) { s.Mounts = mounts },
+		},
 	}
 
 	for _, test := range tests {
@@ -80,6 +87,7 @@ func TestCloneCanClearASetting(t *testing.T) {
 	empty := ""
 	none := []string{}
 	unlimited := 0
+	unmounted := []service.Mount{}
 
 	actual := cloneSource().withOverrides(CloneServiceInput{
 		ConfigOptions:      &empty,
@@ -88,6 +96,7 @@ func TestCloneCanClearASetting(t *testing.T) {
 		LogDriver:          &empty,
 		LogOptions:         &none,
 		Memory:             &unlimited,
+		Mounts:             &unmounted,
 		PostCreateNetworks: &none,
 		PostStartNetworks:  &none,
 		RestartPolicy:      &empty,
@@ -98,6 +107,7 @@ func TestCloneCanClearASetting(t *testing.T) {
 	expected := serviceSettings{
 		Keyserver:          "keys.example.com",
 		LogOptions:         none,
+		Mounts:             unmounted,
 		PostCreateNetworks: none,
 		PostStartNetworks:  none,
 	}
@@ -132,6 +142,10 @@ func TestReadServiceSettings(t *testing.T) {
 		if err := SetProperty(datastore, "lollipop", key, value); err != nil {
 			t.Fatalf("failed to set the %s property: %s", key, err)
 		}
+	}
+
+	if err := service.WriteMounts(datastore, "lollipop", cloneSource().Mounts); err != nil {
+		t.Fatalf("failed to write the mounts: %s", err)
 	}
 
 	actual, err := readServiceSettings(datastore, "lollipop")

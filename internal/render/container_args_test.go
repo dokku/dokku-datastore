@@ -87,6 +87,14 @@ func TestContainerArgs(t *testing.T) {
 			mutate: func(input *ContainerArgsInput) { input.RestartPolicy = "on-failure:3" },
 		},
 		{
+			// what the operator mounted follows the definition's own volumes,
+			// options and all
+			name: "mounts",
+			mutate: func(input *ContainerArgsInput) {
+				input.Volumes = append(input.Volumes, "/srv/extra:/data/extra:ro,z", "some-volume:/opt/extra")
+			},
+		},
+		{
 			name: "no volumes at all",
 			mutate: func(input *ContainerArgsInput) {
 				input.Volumes = nil
