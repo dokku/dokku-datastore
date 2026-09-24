@@ -1048,9 +1048,15 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 // specified. It matches the message the bash datastore plugins emit.
 const MissingServiceNameMessage = "Please specify a valid name for the service"
 
+// validServiceNamePattern is every character a service name may use. The
+// validation and the message that explains it are both built from it, so the
+// message cannot leave out a character the validation accepts.
+const validServiceNamePattern = "[A-Za-z0-9_-]+"
+
 // InvalidServiceNameMessage is the message emitted when a service name contains
-// unsupported characters. It matches the message the bash datastore plugins emit.
-const InvalidServiceNameMessage = MissingServiceNameMessage + ". Valid characters are: [A-Za-z0-9_]+"
+// unsupported characters. It follows the message the bash datastore plugins
+// emit, except that it names the dash they accepted but left out of it.
+const InvalidServiceNameMessage = MissingServiceNameMessage + ". Valid characters are: " + validServiceNamePattern
 
 // MissingAppNameMessage is the message emitted when an app name is not
 // specified. It matches the message the bash datastore plugins emit.
@@ -1071,7 +1077,7 @@ func ValidateServiceName(serviceName string) error {
 		return ErrMissingServiceName
 	}
 
-	if !regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(serviceName) {
+	if !regexp.MustCompile("^" + validServiceNamePattern + "$").MatchString(serviceName) {
 		return ErrInvalidServiceName
 	}
 

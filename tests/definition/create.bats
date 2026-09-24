@@ -31,6 +31,15 @@ teardown_file() {
   [[ ! -d "$(service_root "$SERVICE-noversion")" ]] || fail "a refused create left $(service_root "$SERVICE-noversion") behind"
 }
 
+@test "($DEFINITION) a create naming an invalid service is refused with the characters it may use" {
+  # the dash is accepted, so the message has to say so, or someone with a
+  # refused name is told a name like this file's own service is not allowed
+  run --separate-stderr "$BIN" create "$PLUGIN" "not.valid" --image-version "$IMAGE_VERSION"
+  assert_failure
+  assert_stderr --partial "Valid characters are: [A-Za-z0-9_-]+"
+  [[ ! -d "$(service_root "not.valid")" ]] || fail "a refused create left $(service_root "not.valid") behind"
+}
+
 @test "($DEFINITION) the service is running and reports a connection string" {
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --status
   assert_success

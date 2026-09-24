@@ -71,6 +71,19 @@ func TestValidateServiceName(t *testing.T) {
 	}
 }
 
+// The message is what someone with a refused name reads to find a name that
+// works, so it has to name every character the validation accepts.
+func TestInvalidServiceNameMessageNamesEveryValidCharacter(t *testing.T) {
+	expected := "Please specify a valid name for the service. Valid characters are: [A-Za-z0-9_-]+"
+	if InvalidServiceNameMessage != expected {
+		t.Errorf("expected %q, got %q", expected, InvalidServiceNameMessage)
+	}
+
+	if err := ValidateServiceName("service-with_both"); err != nil {
+		t.Errorf("expected a name using the dash and the underscore to be valid, got %q", err)
+	}
+}
+
 // redisDatastore is the datastore the image tests are written against. Redis
 // has one definition, so what it pins is unambiguous.
 func redisDatastore(t *testing.T) *Datastore {
