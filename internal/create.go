@@ -185,6 +185,16 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		}
 	}
 
+	// before anything is rendered: a config file written below is seeded once and
+	// never rendered again, so one that named the database before it was recorded
+	// would carry the unsanitized service name for the life of the service
+	if err := service.WriteDatabaseName(service.WriteDatabaseNameInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+	}); err != nil {
+		return fmt.Errorf("failed to write database name: %w", err)
+	}
+
 	err = input.Datastore.CreateService(ctx, input.ServiceName)
 	if err != nil {
 		return fmt.Errorf("failed to create service: %w", err)
@@ -213,13 +223,6 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		ShmSize:            input.ShmSize,
 	}); err != nil {
 		return fmt.Errorf("failed to commit service config: %w", err)
-	}
-
-	if err := service.WriteDatabaseName(service.WriteDatabaseNameInput{
-		Datastore:   input.Datastore,
-		ServiceName: input.ServiceName,
-	}); err != nil {
-		return fmt.Errorf("failed to write database name: %w", err)
 	}
 
 	_, err = execx.PlugnTrigger(ctx, common.PlugnTriggerInput{

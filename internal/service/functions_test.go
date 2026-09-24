@@ -851,3 +851,45 @@ func TestCommitServiceConfigKeepsTheEnvironmentPrivate(t *testing.T) {
 		}
 	}
 }
+
+// Some datastores refuse a hyphen or a dot in a database name, so the name a
+// service records has them replaced, the way the bash plugins' write_database_name
+// did, and that recorded name is the one every template is handed.
+func TestWriteDatabaseName(t *testing.T) {
+	redis := redisDatastore(t)
+
+	tests := []struct {
+		serviceName string
+		expected    string
+	}{
+		{serviceName: "lollipop", expected: "lollipop"},
+		{serviceName: "lolli-pop", expected: "lolli_pop"},
+		{serviceName: "lolli_pop", expected: "lolli_pop"},
+		{serviceName: "lolli-pop-2", expected: "lolli_pop_2"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.serviceName, func(t *testing.T) {
+			withServiceRoot(t, redis, test.serviceName)
+
+			if err := WriteDatabaseName(WriteDatabaseNameInput{
+				Datastore:   redis,
+				ServiceName: test.serviceName,
+			}); err != nil {
+				t.Fatalf("failed to write the database name: %v", err)
+			}
+
+			content, err := os.ReadFile(Files(redis, test.serviceName).DatabaseName)
+			if err != nil {
+				t.Fatalf("failed to read the database name: %v", err)
+			}
+			if actual := strings.TrimSpace(string(content)); actual != test.expected {
+				t.Errorf("expected the database name %q, got %q", test.expected, actual)
+			}
+
+			if actual := redis.scope(test.serviceName).Database; actual != test.expected {
+				t.Errorf("expected templates to be handed the database %q, got %q", test.expected, actual)
+			}
+		})
+	}
+}

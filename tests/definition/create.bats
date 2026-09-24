@@ -49,6 +49,21 @@ teardown_file() {
   assert_output "$DEFINITION"
 }
 
+@test "($DEFINITION) the database is named after the service with its hyphens replaced" {
+  # some datastores refuse a hyphen in a database name, so the one a service
+  # records has it replaced, and that is the name every template is handed. The
+  # service this file creates has a hyphen in its name for exactly this reason
+  [[ "$SERVICE" == *-* ]] || skip "$SERVICE has no hyphen to replace"
+
+  run cat "$(service_root)/DATABASE_NAME"
+  assert_success
+  assert_output "${SERVICE//-/_}"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --database-name
+  assert_success
+  assert_output "${SERVICE//-/_}"
+}
+
 @test "($DEFINITION) info reports the state the service was created with" {
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --definition
   assert_success
