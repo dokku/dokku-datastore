@@ -189,7 +189,7 @@ An option a service names is passed to docker as it stands. What is inherited is
 dokku redis:set lollipop log-opt max-size=unlimited
 ```
 
-Both are settable at `create`, `clone` and `upgrade` as well, and both are reported by `info` as what was set rather than as what was inherited. A change reaches a container the next time one is built: `restart` keeps the container it has, so a service already running takes a `stop` and then a `start`.
+Both are settable at `create`, `clone` and `upgrade` as well, and both are reported by `info` as what was set rather than as what was inherited. A `clone` passed neither takes the source's. A change reaches a container the next time one is built: `restart` keeps the container it has, so a service already running takes a `stop` and then a `start`.
 
 ## Container restart policy
 
@@ -205,13 +205,31 @@ dokku redis:set lollipop restart-policy
 
 The accepted values are docker's own - `no`, `always`, `unless-stopped`, `on-failure` and `on-failure:<max-retries>` - and anything else is refused before it is written, since docker refuses to make a container with it. The ambassador an exposed service runs takes the same policy as the service.
 
-It is settable at `create`, `clone` and `upgrade` as well, with `--restart`, the flag `docker container create` takes. `info` reports what was set, empty when nothing was, which means `always`. A change reaches a container the next time one is built, the same as the log settings: `restart` keeps the container it has, so a service already running takes a `stop` and then a `start`.
+It is settable at `create`, `clone` and `upgrade` as well, with `--restart`, the flag `docker container create` takes. A `clone` not passed it takes the source's. `info` reports what was set, empty when nothing was, which means `always`. A change reaches a container the next time one is built, the same as the log settings: `restart` keeps the container it has, so a service already running takes a `stop` and then a `start`.
 
 ```shell
 dokku-datastore create redis lollipop --restart on-failure:5
 ```
 
 A definition still cannot set `restart:` itself. The policy belongs to the service rather than to the datastore it runs.
+
+## Cloned services
+
+A clone was made on the source's image and given its data, but nothing else about the source carried over: every other setting came from the flags passed to `clone`, so a clone made without repeating all of them landed on the defaults rather than on what the source runs with.
+
+A clone now starts from the source's settings - its config options, custom env, memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy and backup keyserver. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
+
+```shell
+# the same settings as lollipop
+dokku-datastore clone redis lollipop lollipop-2
+
+# the same settings as lollipop, except these two
+dokku-datastore clone redis lollipop lollipop-3 --restart no --custom-env ""
+```
+
+The `<VARIABLE>_CONFIG_OPTIONS` and `<VARIABLE>_CUSTOM_ENV` environment variables are not read by `clone`. They fill in a new service, and the source already says what its clone should have. The networks are copied as well, since a container joins a network under its own service name and a clone next to its source does not clash with it.
+
+The password, the exposed ports, the app links and the backup credentials, schedule and encryption are not copied. The password is generated for each service, an exposed port would clash with the source's on the host, links belong to the apps, and a copied backup schedule would ship a second set of backups to the source's bucket.
 
 ## Exposed services
 

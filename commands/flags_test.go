@@ -94,3 +94,40 @@ func TestReportFormat(t *testing.T) {
 		})
 	}
 }
+
+// A number flag given as zero is still a flag that was given, which is how a
+// clone is told to drop the memory limit its source has.
+func TestChangedInt(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		expected *int
+	}{
+		{name: "not given", args: []string{}},
+		{name: "given", args: []string{"--memory", "512"}, expected: new(512)},
+		{name: "given as zero", args: []string{"--memory", "0"}, expected: new(0)},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var memory int
+			f := flag.NewFlagSet("test", flag.ContinueOnError)
+			f.IntVar(&memory, "memory", 0, "")
+			if err := f.Parse(test.args); err != nil {
+				t.Fatalf("failed to parse flags: %v", err)
+			}
+
+			actual := changedInt(f, "memory", memory)
+			if test.expected == nil {
+				if actual != nil {
+					t.Errorf("expected nil, got %d", *actual)
+				}
+				return
+			}
+
+			if actual == nil || *actual != *test.expected {
+				t.Errorf("expected %d, got %v", *test.expected, actual)
+			}
+		})
+	}
+}
