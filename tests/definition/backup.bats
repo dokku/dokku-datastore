@@ -73,4 +73,45 @@ teardown_file() {
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --status
   assert_success
   assert_output "running"
+
+  # the same dump named as a file on the host rather than piped in. stdin is a
+  # char device here, which import refuses unless it has a file to read instead
+  if [[ -x "$probe" ]]; then
+    run "$probe" clobber "$SERVICE"
+    assert_success
+  fi
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" --file "$dump" </dev/null
+  assert_success
+
+  if [[ -x "$probe" ]]; then
+    run --separate-stderr "$probe" read "$SERVICE"
+    assert_success
+    assert_output "known"
+  fi
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --status
+  assert_success
+  assert_output "running"
+}
+
+@test "($DEFINITION) import of a missing file leaves the data alone" {
+  local probe="$REPO_ROOT/tests/probes/$DEFINITION.sh"
+  if [[ -x "$probe" ]]; then
+    run "$probe" write "$SERVICE"
+    assert_success
+  fi
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" --file "$BATS_TEST_TMPDIR/missing.dump" </dev/null
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement import"
+  fi
+  assert_failure
+  assert_output --partial "missing.dump"
+
+  if [[ -x "$probe" ]]; then
+    run --separate-stderr "$probe" read "$SERVICE"
+    assert_success
+    assert_output "known"
+  fi
 }

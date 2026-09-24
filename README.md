@@ -54,7 +54,7 @@ Available commands are:
     exists                                Checks if a service exists
     export                                Exports a service's data to stdout
     expose                                Exposes a service
-    import                                Imports data into a service from stdin
+    import                                Imports data into a service from stdin or a file
     info                                  Gets information about a service
     link                                  Links a service to an app
     linked                                Checks if a service is linked to an app
@@ -253,6 +253,20 @@ dokku-datastore create elasticsearch lollipop --volume /srv/hunspell:/usr/share/
 ```
 
 The mounts go into the service container only, not into the containers `connect`, `enter`, `export`, `import` and the hooks run in, nor into the ambassador an exposed service runs.
+
+## Importing a file on the dokku host
+
+`import` read only stdin, so a dump had to be piped in from wherever the command was run. A dump already on the dokku host could not be imported over ssh: `ssh dokku@dokku.me "postgres:import lollipop < /path/to/data.dump"` hands the whole string to dokku, which splits it into words without a shell, so the `<` and the path arrive as arguments rather than as a redirection.
+
+`import` now takes `--file`, which names a file to read instead of stdin. The path is on the dokku host, not on the machine running ssh, and must be a regular file.
+
+```shell
+# a dump on the dokku host
+dokku postgres:import lollipop --file /var/lib/dokku/data/storage/data.dump
+
+# a dump on this machine, redirected here rather than on the dokku host
+ssh dokku@dokku.me postgres:import lollipop < data.dump
+```
 
 ## Cloned services
 
