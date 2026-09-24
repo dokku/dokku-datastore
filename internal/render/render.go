@@ -90,6 +90,10 @@ func ContainerArgs(input Input) (ContainerArgsInput, error) {
 		volumes = append(volumes, file.Mount)
 	}
 
+	// what the operator mounted comes last, and was checked against the two
+	// above when it was given, so it never lands on a path either one holds
+	volumes = append(volumes, input.Scope.Mounts...)
+
 	return ContainerArgsInput{
 		CommandPrefix:  input.Definition.Dokku.Plugin,
 		Command:        command,

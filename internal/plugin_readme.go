@@ -37,7 +37,7 @@ var readmeSections = []struct {
 	{
 		Group:    definition.GroupBasicUsage,
 		Title:    "Basic Usage",
-		Commands: []string{"create", "destroy", "info", "list", "logs", "link", "unlink", "set"},
+		Commands: []string{"create", "destroy", "info", "list", "logs", "link", "unlink", "set", "mount", "unmount"},
 	},
 	{
 		Group:    definition.GroupServiceLifecycle,

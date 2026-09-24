@@ -51,6 +51,11 @@ type Scope struct {
 	// the service set it. Empty means the default, which the renderer applies.
 	RestartPolicy string
 
+	// Mounts are the docker -v arguments for the mounts the service was given
+	// beyond the definition's own, already rendered. They follow the
+	// definition's volumes, so one may sit inside a directory those mount.
+	Mounts []string
+
 	// Args are the positional arguments of an extra subcommand.
 	Args map[string]string
 }

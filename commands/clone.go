@@ -47,6 +47,9 @@ type CloneCommand struct {
 	logOpt []string
 	// restart is the docker restart policy to use for the service container
 	restart string
+	// volume are the host paths and docker volumes to mount into the service
+	// container
+	volume []string
 }
 
 // Name returns the name of the command
@@ -110,7 +113,7 @@ func (c *CloneCommand) ParsedArguments(args []string) (map[string]command.Argume
 func (c *CloneCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
-	f.StringVarP(&c.configOptions, "config-options", "c", "", "extra arguments to pass to the container create command")
+	f.StringVarP(&c.configOptions, "config-options", "c", "", "extra arguments for the process the service container runs, not docker flags; use mount for mounts")
 	f.StringVarP(&c.customEnv, "custom-env", "C", "", "semi-colon delimited environment variables to start the service with")
 	f.IntVarP(&c.memory, "memory", "m", 0, "container memory limit in megabytes (default: unlimited)")
 	f.StringVarP(&c.initialNetwork, "initial-network", "N", "", "the initial network to attach the service to")
@@ -122,6 +125,9 @@ func (c *CloneCommand) FlagSet() *flag.FlagSet {
 	f.StringVar(&c.logDriver, "log-driver", "", "the docker logging driver to run the service container with (default: the daemon's own)")
 	f.StringSliceVar(&c.logOpt, "log-opt", []string{}, "a comma-separated list of key=value docker log options for the service container")
 	f.StringVar(&c.restart, "restart", "", "the docker restart policy to run the service container with (default: always)")
+	// an array rather than a slice, since a slice flag splits on the comma a
+	// mount's own option list is separated by
+	f.StringArrayVar(&c.volume, "volume", []string{}, "a host path or docker volume to mount into the service container, as <source>:<container-dir>[:<options>], repeatable")
 	return f
 }
 
@@ -143,6 +149,7 @@ func (c *CloneCommand) AutocompleteFlags() complete.Flags {
 			"--log-driver":          complete.PredictAnything,
 			"--log-opt":             complete.PredictAnything,
 			"--restart":             complete.PredictSet("no", "always", "unless-stopped", "on-failure"),
+			"--volume":              complete.PredictAnything,
 		},
 	)
 }
@@ -266,6 +273,12 @@ func (c *CloneCommand) Run(args []string) int {
 		return 1
 	}
 
+	mounts, err := changedMounts(flags, "volume", c.volume)
+	if err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
+	}
+
 	if err := internal.CloneService(ctx, internal.CloneServiceInput{
 		Datastore:      datastore,
 		Logger:         logger,
@@ -283,6 +296,7 @@ func (c *CloneCommand) Run(args []string) int {
 		LogDriver:          changedString(flags, "log-driver", c.logDriver),
 		LogOptions:         changedSlice(flags, "log-opt", c.logOpt),
 		Memory:             changedInt(flags, "memory", c.memory),
+		Mounts:             mounts,
 		PostCreateNetworks: changedSlice(flags, "post-create-network", c.postCreateNetwork),
 		PostStartNetworks:  changedSlice(flags, "post-start-network", c.postStartNetwork),
 		RestartPolicy:      changedString(flags, "restart", c.restart),

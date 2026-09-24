@@ -3,6 +3,8 @@ package commands
 import (
 	"os"
 
+	"github.com/dokku/dokku-datastore/internal"
+	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/posener/complete"
 	flag "github.com/spf13/pflag"
 )
@@ -75,4 +77,20 @@ func changedInt(f *flag.FlagSet, name string, value int) *int {
 	}
 
 	return &value
+}
+
+// changedMounts is changedSlice for the --volume flag, read into mounts, so
+// that --volume "" asks for no mounts at all, which is how a clone drops the
+// ones its source has.
+func changedMounts(f *flag.FlagSet, name string, value []string) (*[]service.Mount, error) {
+	if !f.Changed(name) {
+		return nil, nil
+	}
+
+	mounts, err := internal.ParseMountSpecs(value)
+	if err != nil {
+		return nil, err
+	}
+
+	return &mounts, nil
 }

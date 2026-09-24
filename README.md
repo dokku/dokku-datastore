@@ -61,6 +61,7 @@ Available commands are:
     links                                 Lists all apps that are linked to a given service
     list                                  Lists all services of a given datastore type
     logs                                  Gets the logs of a service
+    mount                                 Mounts a host path or docker volume into a service
     pause                                 Pauses a service
     promote                               Promotes a linked service to the default config variable for an app
     readme                                Writes a datastore plugin's readme to stdout
@@ -78,6 +79,7 @@ Available commands are:
     trigger-service-list                  Lists the services other dokku plugins can see
     unexpose                              Unexposes a service
     unlink                                Unlinks a service from an app
+    unmount                               Removes one or all mounts from a service
     upgrade                               Upgrades a service to a different image version
     version                               Return the version of the binary
 ```
@@ -213,11 +215,50 @@ dokku-datastore create redis lollipop --restart on-failure:5
 
 A definition still cannot set `restart:` itself. The policy belongs to the service rather than to the datastore it runs.
 
+## Mounted host paths and volumes
+
+`--config-options` is handed to the process a service container runs, not to docker, so a docker flag passed through it reaches the datastore's own command line. A `--volume` given that way broke the container's entrypoint and left the service unable to start, and there was no other way to mount anything into a service. A service may now be given mounts of its own with `mount` and `unmount`, which take what `dokku storage:mount` and `dokku storage:unmount` take for a host path or a docker volume.
+
+```shell
+# a host directory, read only, inside a directory the definition already mounts
+dokku elasticsearch:mount lollipop /srv/hunspell:/usr/share/elasticsearch/config/hunspell:ro
+
+# the same, with flags rather than options
+dokku elasticsearch:mount lollipop /srv/hunspell:/usr/share/elasticsearch/config/hunspell --volume-readonly
+
+# every mount the service has, replaced in one go
+dokku elasticsearch:mount --replace lollipop /srv/hunspell:/opt/hunspell:ro my-volume:/opt/extra
+
+# one mount removed, or all of them
+dokku elasticsearch:unmount lollipop /srv/hunspell:/opt/hunspell
+dokku elasticsearch:unmount --all lollipop
+```
+
+A mount is `<source>:<container-dir>[:<options>]`. The source is an absolute host path or the name of a docker volume, and the container dir is an absolute path. The options are the ones `storage:mount --replace` reads: `ro` or `rw`, docker's own mount options, and `volume-subpath=<path>` and `volume-chown=<option>`. Without `--replace` one mount is given, and `--volume-readonly`, `--volume-options`, `--volume-subpath` and `--volume-chown` may say the same things as flags, though not both ways at once. Mounting the same source at the same directory again rewrites its options rather than being refused.
+
+Some mounts are refused before anything is written, where docker would only find out when the container is made:
+
+- a host path that does not exist, which docker would create empty and owned by root, leaving the service to start on that
+- a directory the definition already mounts something at, since docker refuses to mount two things at one path. A directory inside one of them is fine, which is how a file is added to a directory a datastore reads from
+- a mount option docker's `-v` does not take, such as `noexec`, which `storage:mount` stores as it is given
+
+On a docker-in-docker install the host path is one dockerd resolves rather than one this process can see, so whether it exists is not checked there.
+
+The subpath and the chown are recorded and shown but not applied, which is what `storage:mount` does for an app on the docker-local scheduler. `--phase` and `--process-type` are not taken, since a service is one process in one container, and neither is a storage entry made with `storage:create`.
+
+Mounts may be given at `create`, `clone` and `upgrade` as well, with `--volume`, repeated for each. A `clone` not passed it takes the source's, and `--volume ""` gives it none. `info --mounts` reports every mount with all of its options, space separated. A change reaches a container the next time one is built: `restart` keeps the container it has, so a service already running takes a `stop` and then a `start`.
+
+```shell
+dokku-datastore create elasticsearch lollipop --volume /srv/hunspell:/usr/share/elasticsearch/config/hunspell:ro
+```
+
+The mounts go into the service container only, not into the containers `connect`, `enter`, `export`, `import` and the hooks run in, nor into the ambassador an exposed service runs.
+
 ## Cloned services
 
 A clone was made on the source's image and given its data, but nothing else about the source carried over: every other setting came from the flags passed to `clone`, so a clone made without repeating all of them landed on the defaults rather than on what the source runs with.
 
-A clone now starts from the source's settings - its config options, custom env, memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy and backup keyserver. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
+A clone now starts from the source's settings - its config options, custom env, memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, mounts and backup keyserver. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
 
 ```shell
 # the same settings as lollipop

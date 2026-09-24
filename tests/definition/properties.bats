@@ -168,3 +168,124 @@ skip_unless_log_is_capped() {
   assert_success
   assert_output ""
 }
+
+@test "($DEFINITION) a mount reaches the container it is rebuilt with" {
+  local source target="/opt/dokku-mount"
+  source="$(mount_source properties)"
+
+  run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "$source:$target:ro"
+  assert_success
+  assert_output --partial "mounted at $target"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --mounts
+  assert_success
+  assert_output "$source:$target:ro"
+
+  # nothing reaches the running container: like a restart policy, it is read
+  # when a container is made
+  run mount_of "$(service_container)" "$target"
+  assert_success
+  assert_output ""
+
+  run rebuild_service
+  assert_success
+
+  run mount_of "$(service_container)" "$target"
+  assert_success
+  assert_output "$source:false"
+
+  # the same mount again rewrites its options rather than being refused
+  run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "$source:$target"
+  assert_success
+  assert_output --partial "updated"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --mounts
+  assert_success
+  assert_output "$source:$target"
+
+  # and it goes away the same way it arrived
+  run --separate-stderr "$BIN" unmount "$PLUGIN" "$SERVICE" "$source:$target"
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --mounts
+  assert_success
+  assert_output ""
+
+  run rebuild_service
+  assert_success
+
+  run mount_of "$(service_container)" "$target"
+  assert_success
+  assert_output ""
+}
+
+@test "($DEFINITION) mount --replace swaps every mount and unmount --all removes them" {
+  local first second
+  first="$(mount_source first)"
+  second="$(mount_source second)"
+
+  run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "$first:/opt/first"
+  assert_success
+
+  run --separate-stderr "$BIN" mount --replace "$PLUGIN" "$SERVICE" "$second:/opt/second:ro" "$first:/opt/other"
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --mounts
+  assert_success
+  assert_output "$second:/opt/second:ro $first:/opt/other"
+
+  # an empty replacement is refused rather than read as removing everything
+  run --separate-stderr "$BIN" mount --replace "$PLUGIN" "$SERVICE"
+  assert_failure
+  assert_stderr --partial "unmount --all"
+
+  run --separate-stderr "$BIN" unmount --all "$PLUGIN" "$SERVICE"
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --mounts
+  assert_success
+  assert_output ""
+
+  # nothing left to remove is not an error
+  run --separate-stderr "$BIN" unmount --all "$PLUGIN" "$SERVICE"
+  assert_success
+}
+
+@test "($DEFINITION) a mount docker would refuse or mishandle is refused first" {
+  local source data_target
+  source="$(mount_source refused)"
+
+  # the directory docker would create, empty and owned by root, if asked to
+  # mount one that is not there
+  if [[ "$DOKKU_LIB_HOST_ROOT" == "$DOKKU_LIB_ROOT" ]]; then
+    run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "$source/missing:/opt/missing"
+    assert_failure
+    assert_stderr --partial "does not exist"
+  fi
+
+  run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "$source:opt/relative"
+  assert_failure
+  assert_stderr --partial "must be absolute"
+
+  run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "$source:/opt/noexec:noexec"
+  assert_failure
+  assert_stderr --partial "noexec"
+
+  run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "$source:/opt/twice:ro" --volume-readonly
+  assert_failure
+  assert_stderr --partial -- "--volume-readonly"
+
+  # a directory the definition already mounts is one docker would refuse to
+  # mount a second thing at. Found from the running container, since each
+  # definition keeps its data somewhere else
+  data_target="$(container_inspect "$(service_container)" "{{ range .Mounts }}{{ if eq .Source \"$(service_root)/data\" }}{{ .Destination }}{{ end }}{{ end }}")"
+  if [[ -n "$data_target" ]]; then
+    run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "$source:$data_target"
+    assert_failure
+    assert_stderr --partial "already mounted by the"
+  fi
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --mounts
+  assert_success
+  assert_output ""
+}

@@ -123,6 +123,12 @@ func TestRendererReproducesTheGoldenArgs(t *testing.T) {
 			mutate: func(input *Input) { input.Scope.RestartPolicy = "on-failure:3" },
 		},
 		{
+			name: "mounts",
+			mutate: func(input *Input) {
+				input.Scope.Mounts = []string{"/srv/extra:/data/extra:ro,z", "some-volume:/opt/extra"}
+			},
+		},
+		{
 			name: "everything at once",
 			mutate: func(input *Input) {
 				input.ConfigOptions = []string{"--appendonly", "yes"}
