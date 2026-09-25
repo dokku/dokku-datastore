@@ -27,3 +27,35 @@ func TestPluginTriggerDispatchesThroughTheBinary(t *testing.T) {
 		t.Error("expected the trigger to pass its arguments through untouched")
 	}
 }
+
+// A trigger the binary implements itself dispatches to its own command rather
+// than through the definition.
+func TestPluginBuiltinTriggerDispatchesToItsCommand(t *testing.T) {
+	for _, name := range BuiltinTriggers {
+		contents := PluginBuiltinTrigger(name)
+
+		expected := `dokku-datastore" trigger-` + name + ` "$PLUGIN_COMMAND_PREFIX" "$@"`
+		if !strings.Contains(contents, expected) {
+			t.Errorf("expected %q in the generated %s trigger, got:\n%s", expected, name, contents)
+		}
+
+		if !strings.Contains(contents, "do not edit") {
+			t.Errorf("expected the generated %s trigger to say it is generated", name)
+		}
+
+		if strings.Contains(contents, "shift") {
+			t.Errorf("expected the %s trigger to pass its arguments through untouched", name)
+		}
+	}
+}
+
+func TestCheckTriggerNames(t *testing.T) {
+	if err := CheckTriggerNames([]string{"post-extract"}); err != nil {
+		t.Errorf("expected post-extract to be allowed: %s", err)
+	}
+
+	// both would be written to a file called pre-start
+	if err := CheckTriggerNames([]string{"post-extract", "pre-start"}); err == nil {
+		t.Error("expected a definition trigger named pre-start to be refused")
+	}
+}

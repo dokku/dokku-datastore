@@ -145,3 +145,30 @@ func TestACloneLeavesBothNames(t *testing.T) {
 
 	assertLinkedApps(t, datastore, "lollipop", []string{"cloned-app", "my-app"})
 }
+
+func TestServicesWithLinks(t *testing.T) {
+	datastore := linkedServices(t, map[string][]string{
+		"lollipop":    {"my-app"},
+		"gobstopper":  {"my-app", "other-app"},
+		"everlasting": {},
+	})
+
+	services, err := ServicesWithLinks(t.Context(), datastore)
+	if err != nil {
+		t.Fatalf("failed to list the linked services: %s", err)
+	}
+
+	slices.Sort(services)
+	if expected := []string{"gobstopper", "lollipop"}; !slices.Equal(services, expected) {
+		t.Errorf("expected %v, got %v", expected, services)
+	}
+}
+
+// dokku fires some triggers with no app at all, which leaves nothing to start
+func TestStartLinkedServicesWithoutAnApp(t *testing.T) {
+	datastore := linkedServices(t, map[string][]string{"lollipop": {"my-app"}})
+
+	if err := StartLinkedServices(t.Context(), triggerInput(datastore), ""); err != nil {
+		t.Errorf("expected no error for a trigger naming no app, got %s", err)
+	}
+}

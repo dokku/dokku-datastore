@@ -73,8 +73,10 @@ Available commands are:
     trigger-install                       Prepares the host for a datastore plugin
     trigger-post-app-clone-setup          Copies an app's service links onto its clone
     trigger-post-app-rename-setup         Carries an app's service links across a rename
+    trigger-pre-build                     Starts the services an app is linked to before it is built
     trigger-pre-delete                    Unlinks an app from every service before it is deleted
-    trigger-pre-restore                   Starts the services an app is linked to before it is restored
+    trigger-pre-release-builder           Starts the services an app is linked to before it is released
+    trigger-pre-restore                   Starts every service linked to an app before apps are restored
     trigger-pre-start                     Starts the services an app is linked to before it starts
     trigger-service-list                  Lists the services other dokku plugins can see
     unexpose                              Unexposes a service
@@ -87,6 +89,8 @@ Available commands are:
 ## Definitions a plugin ships
 
 A plugin may carry the definitions for its own datastore, in `datastore/<name>/`, one directory per definition laid out exactly as the embedded tree is. `generate` writes them, and a plugin that ships any of them supplies all of them: the embedded definitions for that datastore are replaced rather than merged, so a service pinned to an older major still has a definition to run. Every definition under one plugin must name the same datastore in its `plugin:` field.
+
+`generate` also writes the file dokku runs for each trigger at the plugin root: the ones this binary implements for every datastore, such as `pre-start` and `pre-build`, and the ones a definition declares for itself, such as solr's `post-extract`. A trigger this binary starts implementing reaches a plugin the next time it is regenerated. `install` and `update` are not written, as a plugin's own files for those do more than dispatch, and a definition may not declare a trigger under the name of one this binary implements.
 
 ```shell
 # writes datastore/postgres-17/ and datastore/postgres-18/
@@ -309,6 +313,25 @@ dokku redis:start lollipop
 dokku redis:unexpose lollipop
 dokku redis:expose lollipop 127.0.0.1:6380
 ```
+
+## Starting linked services before an app
+
+A service an app is linked to is started before the app needs it, rather than the app failing on a container link to something that does not exist. That happens at every point dokku offers a trigger for:
+
+- `ps:start` and `ps:restore` start each app through `pre-start`.
+- A deploy, including `ps:rebuild`, builds through `pre-build` and releases through `pre-release-builder`.
+- `ps:restore` fires `pre-restore` once, before it restores any app, and every service linked to an app is started there, one at a time, so apps restored in parallel find their services already running.
+
+A service with no container is made again on the version it recorded, and its image is fetched if the host does not have it. That covers a host restored from a backup, which has the services' data and records but none of their containers or images:
+
+```shell
+# brings every linked service back before the app it is linked to builds
+dokku ps:rebuild --all
+```
+
+A service that cannot be started stops the app from being started, built or released, and the error names the service and the app. `pre-restore` only warns, so one service that cannot be started does not stop every other app from being restored; the `pre-start` of each app using it is still where that app is stopped.
+
+Dokku has no trigger before it runs the containers of an image it has already built and released, so `ps:restart` of an app with a deployed image, `ps:scale`, and the restart after `config:set` do not start linked services.
 
 ## Linked apps
 

@@ -14,8 +14,8 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
-// TriggerPreRestoreCommand is the command for listing all services of a given datastore type
-type TriggerPreRestoreCommand struct {
+// TriggerPreBuildCommand is the command for starting the services an app is linked to before dokku builds it
+type TriggerPreBuildCommand struct {
 	// Meta is the command meta
 	command.Meta
 	// GlobalFlagCommand is the global flag command
@@ -23,35 +23,47 @@ type TriggerPreRestoreCommand struct {
 }
 
 // Name returns the name of the command
-func (c *TriggerPreRestoreCommand) Name() string {
-	return "trigger-pre-restore"
+func (c *TriggerPreBuildCommand) Name() string {
+	return "trigger-pre-build"
 }
 
 // Synopsis returns the synopsis of the command
-func (c *TriggerPreRestoreCommand) Synopsis() string {
-	return "Starts every service linked to an app before apps are restored"
+func (c *TriggerPreBuildCommand) Synopsis() string {
+	return "Starts the services an app is linked to before it is built"
 }
 
 // Help returns the help text for the command
-func (c *TriggerPreRestoreCommand) Help() string {
+func (c *TriggerPreBuildCommand) Help() string {
 	return command.CommandHelp(c)
 }
 
 // Examples returns the examples for the command
-func (c *TriggerPreRestoreCommand) Examples() map[string]string {
+func (c *TriggerPreBuildCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Starts every redis service that is linked to an app": fmt.Sprintf("%s %s redis", appName, c.Name()),
+		"Starts the redis services my-app is linked to": fmt.Sprintf("%s %s redis herokuish my-app", appName, c.Name()),
 	}
 }
 
 // Arguments returns the arguments for the command
-func (c *TriggerPreRestoreCommand) Arguments() []command.Argument {
+func (c *TriggerPreBuildCommand) Arguments() []command.Argument {
 	args := []command.Argument{}
 	args = append(args, command.Argument{
 		Name:        "datastore-type",
 		Description: "the type of datastore to list",
 		Optional:    false,
+		Type:        command.ArgumentString,
+	})
+	args = append(args, command.Argument{
+		Name:        "builder-type",
+		Description: "the builder dokku is building the app with",
+		Optional:    true,
+		Type:        command.ArgumentString,
+	})
+	args = append(args, command.Argument{
+		Name:        "app-name",
+		Description: "the name of the app the trigger is running for",
+		Optional:    true,
 		Type:        command.ArgumentString,
 	})
 	args = append(args, command.Argument{
@@ -64,24 +76,24 @@ func (c *TriggerPreRestoreCommand) Arguments() []command.Argument {
 }
 
 // AutocompleteArgs returns the autocomplete arguments for the command
-func (c *TriggerPreRestoreCommand) AutocompleteArgs() complete.Predictor {
+func (c *TriggerPreBuildCommand) AutocompleteArgs() complete.Predictor {
 	return complete.PredictSet("redis")
 }
 
 // ParsedArguments parses the arguments for the command
-func (c *TriggerPreRestoreCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
+func (c *TriggerPreBuildCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
 	return internal.ParseArguments(args, c.Arguments())
 }
 
 // FlagSet returns the flag set for the command
-func (c *TriggerPreRestoreCommand) FlagSet() *flag.FlagSet {
+func (c *TriggerPreBuildCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
 	return f
 }
 
 // AutocompleteFlags returns the autocomplete flags for the command
-func (c *TriggerPreRestoreCommand) AutocompleteFlags() complete.Flags {
+func (c *TriggerPreBuildCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
@@ -90,7 +102,7 @@ func (c *TriggerPreRestoreCommand) AutocompleteFlags() complete.Flags {
 }
 
 // Run runs the command
-func (c *TriggerPreRestoreCommand) Run(args []string) int {
+func (c *TriggerPreBuildCommand) Run(args []string) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGHUP,
@@ -148,11 +160,10 @@ func (c *TriggerPreRestoreCommand) Run(args []string) int {
 		return 1
 	}
 
-	// dokku fires pre-restore once, naming no app, before it restores every app
-	if err := internal.StartAllLinkedServices(ctx, internal.TriggerInput{
+	if err := internal.StartLinkedServices(ctx, internal.TriggerInput{
 		Datastore: datastore,
 		Logger:    logger,
-	}); err != nil {
+	}, arguments["app-name"].StringValue()); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}

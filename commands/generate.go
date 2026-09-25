@@ -2,8 +2,10 @@ package commands
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"github.com/dokku/dokku-datastore/internal"
@@ -164,15 +166,25 @@ func (c *GenerateCommand) Run(args []string) int {
 	return 0
 }
 
-// writeTriggers writes one file per dokku trigger the datastore implements.
+// writeTriggers writes one file per dokku trigger the datastore implements:
+// the ones every plugin gets from this binary, and the ones its definitions
+// declare.
 //
 // They go at the plugin root rather than under subcommands, because that is
 // where dokku looks for a trigger: it finds one by the name of a file, with no
 // manifest to consult.
 func (c *GenerateCommand) writeTriggers(datastore *service.Datastore) ([]string, error) {
 	names := datastore.TriggerNames()
-	if len(names) == 0 {
-		return nil, nil
+	if err := internal.CheckTriggerNames(names); err != nil {
+		return nil, err
+	}
+
+	contents := map[string]string{}
+	for _, name := range internal.BuiltinTriggers {
+		contents[name] = internal.PluginBuiltinTrigger(name)
+	}
+	for _, name := range names {
+		contents[name] = internal.PluginTrigger(name)
 	}
 
 	if err := os.MkdirAll(c.pluginDir, 0755); err != nil {
@@ -180,9 +192,9 @@ func (c *GenerateCommand) writeTriggers(datastore *service.Datastore) ([]string,
 	}
 
 	written := []string{}
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(contents)) {
 		path := filepath.Join(c.pluginDir, name)
-		if err := os.WriteFile(path, []byte(internal.PluginTrigger(name)), 0755); err != nil {
+		if err := os.WriteFile(path, []byte(contents[name]), 0755); err != nil {
 			return nil, fmt.Errorf("unable to write %s: %w", path, err)
 		}
 
