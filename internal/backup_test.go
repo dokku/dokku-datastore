@@ -9,73 +9,289 @@ import (
 	"github.com/dokku/dokku-datastore/internal/service"
 )
 
+// withScheduleService points the package at a temporary root and creates a
+// service in it, with properties read and written through the environment
+func withScheduleService(t *testing.T, serviceNames ...string) *service.Datastore {
+	t.Helper()
+
+	withDataRoot(t)
+	t.Setenv("DOKKU_LIB_ROOT", service.DokkuLibRoot)
+	// no plugins to trigger, so regenerating the crontab does nothing
+	t.Setenv("PLUGIN_PATH", "")
+
+	datastore := service.Datastores["redis"]
+	for _, serviceName := range serviceNames {
+		if err := os.MkdirAll(service.Folders(datastore, serviceName).Root, 0755); err != nil {
+			t.Fatalf("failed to create the service root: %s", err)
+		}
+	}
+
+	return datastore
+}
+
+// The schedule is written into the dokku crontab, which is refused as a whole
+// when a line in it is invalid, so anything cron cannot run is turned away
+// before it is recorded. "daily" is what issue 6 was scheduled with: cron
+// skipped it without a word, and the service was never backed up.
+func TestValidateBackupSchedule(t *testing.T) {
+	tests := []struct {
+		schedule string
+		valid    bool
+	}{
+		{schedule: "0 3 * * *", valid: true},
+		{schedule: "*/15 * * * *", valid: true},
+		{schedule: "0 3 * * 1-5", valid: true},
+		{schedule: "@daily", valid: true},
+		{schedule: "@hourly", valid: true},
+		{schedule: "@weekly", valid: true},
+		{schedule: "", valid: false},
+		{schedule: "daily", valid: false},
+		{schedule: "@every 1h", valid: false},
+		{schedule: "0 3 * *", valid: false},
+		{schedule: "0 3 * * * *", valid: false},
+		{schedule: "61 3 * * *", valid: false},
+		{schedule: "0 3 * * *; rm -rf /", valid: false},
+		{schedule: "0 3 * * *\n0 4 * * *", valid: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.schedule, func(t *testing.T) {
+			err := ValidateBackupSchedule(test.schedule)
+			if test.valid && err != nil {
+				t.Errorf("expected %q to be valid, got %s", test.schedule, err)
+			}
+			if !test.valid && err == nil {
+				t.Errorf("expected %q to be refused", test.schedule)
+			}
+		})
+	}
+}
+
+// The bucket is written into a shell command and a semicolon separated line, so
+// anything either reads specially is refused
+func TestValidateBucketName(t *testing.T) {
+	tests := []struct {
+		bucketName string
+		valid      bool
+	}{
+		{bucketName: "my-bucket", valid: true},
+		{bucketName: "my.bucket_2", valid: true},
+		{bucketName: "my-bucket/with/a/prefix", valid: true},
+		{bucketName: "", valid: false},
+		{bucketName: "my bucket", valid: false},
+		{bucketName: "my-bucket;true", valid: false},
+		{bucketName: "my-bucket$(true)", valid: false},
+		{bucketName: "my-bucket`true`", valid: false},
+		{bucketName: "my-bucket&", valid: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.bucketName, func(t *testing.T) {
+			err := ValidateBucketName(test.bucketName)
+			if test.valid && err != nil {
+				t.Errorf("expected %q to be valid, got %s", test.bucketName, err)
+			}
+			if !test.valid && err == nil {
+				t.Errorf("expected %q to be refused", test.bucketName)
+			}
+		})
+	}
+}
+
 func TestCronEntry(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    ScheduleBackupInput
+		schedule BackupSchedule
 		expected string
 	}{
 		{
 			name:     "a plain schedule",
-			input:    ScheduleBackupInput{Schedule: "0 3 * * *", ServiceName: "lollipop", BucketName: "my-bucket"},
-			expected: "0 3 * * * dokku /usr/bin/dokku redis:backup lollipop my-bucket",
+			schedule: BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket"},
+			expected: "0 3 * * *;dokku redis:backup lollipop my-bucket;/var/log/dokku/redis.log",
 		},
 		{
 			name:     "using an iam profile",
-			input:    ScheduleBackupInput{Schedule: "@daily", ServiceName: "lollipop", BucketName: "my-bucket", UseIAM: true},
-			expected: "@daily dokku /usr/bin/dokku redis:backup lollipop my-bucket --use-iam",
+			schedule: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", UseIAM: true},
+			expected: "@daily;dokku redis:backup lollipop my-bucket --use-iam;/var/log/dokku/redis.log",
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if actual := CronEntry("/usr/bin/dokku", "redis", test.input); actual != test.expected {
+			actual := CronEntry("redis", "lollipop", test.schedule)
+			if actual != test.expected {
+				t.Errorf("expected %q, got %q", test.expected, actual)
+			}
+
+			// dokku refuses a line that is not two or three fields
+			if fields := strings.Split(actual, ";"); len(fields) != 3 {
+				t.Errorf("expected three fields, got %d in %q", len(fields), actual)
+			}
+		})
+	}
+}
+
+// What dokku writes into its crontab for a task handed to it with a log file
+func TestCrontabLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		schedule BackupSchedule
+		expected string
+	}{
+		{
+			name:     "a plain schedule",
+			schedule: BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket"},
+			expected: "0 3 * * * dokku redis:backup lollipop my-bucket &>> /var/log/dokku/redis.log",
+		},
+		{
+			name:     "using an iam profile",
+			schedule: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", UseIAM: true},
+			expected: "@daily dokku redis:backup lollipop my-bucket --use-iam &>> /var/log/dokku/redis.log",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if actual := CrontabLine("redis", "lollipop", test.schedule); actual != test.expected {
 				t.Errorf("expected %q, got %q", test.expected, actual)
 			}
 		})
 	}
 }
 
-// The schedule has to survive the round trip through the cron file, since that
-// file is the only record of what a service was scheduled with.
-func TestParseCronEntryReadsBackWhatCronEntryWrote(t *testing.T) {
+// The properties are the only record of what a service was scheduled with, so
+// what is scheduled has to be what is read back, and unscheduling has to leave
+// nothing behind
+func TestScheduleBackupRoundTrip(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+
+	if _, ok := ReadBackupSchedule(datastore, "lollipop"); ok {
+		t.Fatal("expected a new service to have no scheduled backup")
+	}
+
+	if _, err := BackupScheduleCat(datastore, "lollipop"); err == nil {
+		t.Error("expected cat to fail with no scheduled backup")
+	}
+
+	if err := ScheduleBackup(t.Context(), ScheduleBackupInput{
+		BucketName:  "my-bucket",
+		Datastore:   datastore,
+		Schedule:    "0 3 * * *",
+		ServiceName: "lollipop",
+		UseIAM:      true,
+	}); err != nil {
+		t.Fatalf("failed to schedule the backup: %s", err)
+	}
+
+	schedule, ok := ReadBackupSchedule(datastore, "lollipop")
+	if !ok {
+		t.Fatal("expected the backup to be scheduled")
+	}
+	expected := BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket", UseIAM: true}
+	if schedule != expected {
+		t.Errorf("expected %+v, got %+v", expected, schedule)
+	}
+
+	contents, err := BackupScheduleCat(datastore, "lollipop")
+	if err != nil {
+		t.Fatalf("failed to cat the schedule: %s", err)
+	}
+	if contents != "0 3 * * * dokku redis:backup lollipop my-bucket --use-iam &>> /var/log/dokku/redis.log\n" {
+		t.Errorf("unexpected cat output %q", contents)
+	}
+
+	// scheduling again without --use-iam drops it rather than keeping the old
+	// value
+	if err := ScheduleBackup(t.Context(), ScheduleBackupInput{
+		BucketName:  "my-bucket",
+		Datastore:   datastore,
+		Schedule:    "@daily",
+		ServiceName: "lollipop",
+	}); err != nil {
+		t.Fatalf("failed to schedule the backup again: %s", err)
+	}
+	if schedule, _ := ReadBackupSchedule(datastore, "lollipop"); schedule.UseIAM || schedule.Schedule != "@daily" {
+		t.Errorf("expected the new schedule without iam, got %+v", schedule)
+	}
+
+	if err := UnscheduleBackup(t.Context(), UnscheduleBackupInput{Datastore: datastore, ServiceName: "lollipop"}); err != nil {
+		t.Fatalf("failed to unschedule the backup: %s", err)
+	}
+
+	if _, ok := ReadBackupSchedule(datastore, "lollipop"); ok {
+		t.Error("expected the backup to be unscheduled")
+	}
+
+	// and again, which has nothing to do
+	if err := UnscheduleBackup(t.Context(), UnscheduleBackupInput{Datastore: datastore, ServiceName: "lollipop"}); err != nil {
+		t.Errorf("expected unscheduling twice to succeed, got %s", err)
+	}
+}
+
+// A schedule cron cannot run is refused before anything is recorded, so a
+// service already scheduled keeps the schedule it had
+func TestScheduleBackupRefusesAnInvalidSchedule(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+
+	if err := ScheduleBackup(t.Context(), ScheduleBackupInput{
+		BucketName:  "my-bucket",
+		Datastore:   datastore,
+		Schedule:    "0 3 * * *",
+		ServiceName: "lollipop",
+	}); err != nil {
+		t.Fatalf("failed to schedule the backup: %s", err)
+	}
+
+	for _, input := range []ScheduleBackupInput{
+		{BucketName: "my-bucket", Schedule: "daily"},
+		{BucketName: "my bucket", Schedule: "@daily"},
+	} {
+		input.Datastore = datastore
+		input.ServiceName = "lollipop"
+		if err := ScheduleBackup(t.Context(), input); err == nil {
+			t.Errorf("expected %+v to be refused", input)
+		}
+	}
+
+	if schedule, _ := ReadBackupSchedule(datastore, "lollipop"); schedule.Schedule != "0 3 * * *" || schedule.BucketName != "my-bucket" {
+		t.Errorf("expected the earlier schedule to be kept, got %+v", schedule)
+	}
+}
+
+// Earlier versions wrote the schedule to a cron file, which is read once to
+// migrate it. Every shape they wrote has to be read back.
+func TestParseCronEntryReadsLegacyCronFiles(t *testing.T) {
 	tests := []struct {
-		name  string
-		input ScheduleBackupInput
+		name     string
+		entry    string
+		expected BackupSchedule
 	}{
 		{
-			name:  "a plain schedule",
-			input: ScheduleBackupInput{Schedule: "0 3 * * *", ServiceName: "lollipop", BucketName: "my-bucket"},
+			name:     "a plain schedule",
+			entry:    "0 3 * * * dokku /usr/bin/dokku redis:backup lollipop my-bucket",
+			expected: BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket"},
 		},
 		{
-			name:  "a one field schedule",
-			input: ScheduleBackupInput{Schedule: "@daily", ServiceName: "lollipop", BucketName: "my-bucket"},
+			name:     "a one field schedule",
+			entry:    "@daily dokku /usr/bin/dokku redis:backup lollipop my-bucket",
+			expected: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket"},
 		},
 		{
-			name:  "using an iam profile",
-			input: ScheduleBackupInput{Schedule: "0 3 * * *", ServiceName: "lollipop", BucketName: "my-bucket", UseIAM: true},
+			name:     "using an iam profile",
+			entry:    "0 3 * * * dokku /usr/bin/dokku redis:backup lollipop my-bucket --use-iam",
+			expected: BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket", UseIAM: true},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			entry := CronEntry("/usr/bin/dokku", "redis", test.input)
-
-			schedule, ok := ParseCronEntry("redis", entry)
+			schedule, ok := ParseCronEntry("redis", test.entry)
 			if !ok {
-				t.Fatalf("expected %q to parse", entry)
+				t.Fatalf("expected %q to parse", test.entry)
 			}
 
-			if schedule.Schedule != test.input.Schedule {
-				t.Errorf("expected the schedule %q, got %q", test.input.Schedule, schedule.Schedule)
-			}
-
-			if schedule.BucketName != test.input.BucketName {
-				t.Errorf("expected the bucket %q, got %q", test.input.BucketName, schedule.BucketName)
-			}
-
-			if schedule.UseIAM != test.input.UseIAM {
-				t.Errorf("expected use iam to be %v, got %v", test.input.UseIAM, schedule.UseIAM)
+			if schedule != test.expected {
+				t.Errorf("expected %+v, got %+v", test.expected, schedule)
 			}
 		})
 	}

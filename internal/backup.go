@@ -5,17 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
 
-	"github.com/dokku/dokku-datastore/internal/cron"
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
+	cronparser "github.com/robfig/cron/v3"
 )
 
 // backup credential and encryption file names, kept as the bash datastore
@@ -147,32 +147,76 @@ func removeBackupSetting(s *service.Datastore, serviceName string, name string) 
 	return nil
 }
 
-// BackupScheduleCat returns the contents of the backup cron file for a service
-func BackupScheduleCat(s *service.Datastore, serviceName string) (string, error) {
-	cronFile := service.Files(s, serviceName).CronFile
-	if !common.FileExists(cronFile) {
-		return "", fmt.Errorf("There is no scheduled backup for %s.", serviceName) //nolint:staticcheck // matches the bash datastore plugins
+// the properties a scheduled backup is recorded in, named after the info keys
+// that report them
+const (
+	// BackupScheduleProperty is the cron schedule the backup runs on
+	BackupScheduleProperty = "backup-schedule"
+
+	// BackupBucketProperty is the bucket a scheduled backup is shipped to
+	BackupBucketProperty = "backup-bucket"
+
+	// BackupUseIAMProperty is set when a scheduled backup runs against an
+	// instance role rather than against stored credentials
+	BackupUseIAMProperty = "backup-use-iam"
+)
+
+// backupScheduleProperties are every property a scheduled backup writes
+var backupScheduleProperties = []string{BackupScheduleProperty, BackupBucketProperty, BackupUseIAMProperty}
+
+// cronScheduleParser reads a schedule the way the dokku cron plugin does, so a
+// schedule accepted here is one dokku would accept for an app's own task
+var cronScheduleParser = cronparser.NewParser(cronparser.Minute | cronparser.Hour | cronparser.Dom | cronparser.Month | cronparser.Dow | cronparser.Descriptor)
+
+// bucketNamePattern is what a bucket may be made of. The bucket is written into
+// a shell command in the dokku crontab, and into a line the cron-entries trigger
+// separates with semicolons, so anything a shell or that line reads specially
+// is refused rather than escaped.
+var bucketNamePattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
+
+// ValidateBackupSchedule reports whether a schedule is one cron can run.
+//
+// A schedule cron cannot read used to be written anyway, and cron skipped it
+// without a word: a service scheduled with "daily" rather than "@daily" was
+// reported as scheduled and never backed up. It matters more now that the
+// schedule is part of the dokku crontab, which is refused as a whole when any
+// line in it is invalid.
+func ValidateBackupSchedule(schedule string) error {
+	if strings.TrimSpace(schedule) == "" {
+		return errors.New("Please specify a schedule for the backup") //nolint:staticcheck // matches the bash datastore plugins
 	}
 
-	contents, err := os.ReadFile(cronFile)
-	if err != nil {
-		return "", fmt.Errorf("unable to read %s: %w", cronFile, err)
+	if strings.ContainsAny(schedule, ";\n\r") {
+		return fmt.Errorf("invalid backup schedule %q: a schedule cannot contain a semicolon or a newline", schedule)
 	}
 
-	return string(contents), nil
+	// understood by the parser, but not by the cron that runs the crontab
+	if strings.HasPrefix(schedule, "@every") {
+		return fmt.Errorf("invalid backup schedule %q: @every is not supported by cron", schedule)
+	}
+
+	if _, err := cronScheduleParser.Parse(schedule); err != nil {
+		return fmt.Errorf("invalid backup schedule %q: %w", schedule, err)
+	}
+
+	return nil
 }
 
-// CronEntry builds the crontab line that runs a scheduled backup
-func CronEntry(dokkuBin string, commandPrefix string, input ScheduleBackupInput) string {
-	entry := fmt.Sprintf("%s dokku %s %s:backup %s %s", input.Schedule, dokkuBin, commandPrefix, input.ServiceName, input.BucketName)
-	if input.UseIAM {
-		entry = fmt.Sprintf("%s --use-iam", entry)
+// ValidateBucketName reports whether a bucket can be written into the command
+// a scheduled backup runs
+func ValidateBucketName(bucketName string) error {
+	if bucketName == "" {
+		return errors.New("Please specify an aws bucket for the backup") //nolint:staticcheck // matches the bash datastore plugins
 	}
 
-	return entry
+	if !bucketNamePattern.MatchString(bucketName) {
+		return fmt.Errorf("invalid bucket name %q: only letters, numbers, dots, dashes, underscores and slashes are allowed", bucketName)
+	}
+
+	return nil
 }
 
-// BackupSchedule is the scheduled backup a cron entry describes
+// BackupSchedule is the scheduled backup a service is recorded with
 type BackupSchedule struct {
 	// Schedule is the cron schedule the backup runs on
 	Schedule string
@@ -185,8 +229,78 @@ type BackupSchedule struct {
 	UseIAM bool
 }
 
-// ParseCronEntry reads back the schedule a cron entry was written from, and
-// reports whether the line was one CronEntry wrote.
+// Validate reports whether a schedule can be written into the dokku crontab
+func (b BackupSchedule) Validate() error {
+	if err := ValidateBackupSchedule(b.Schedule); err != nil {
+		return err
+	}
+
+	return ValidateBucketName(b.BucketName)
+}
+
+// ReadBackupSchedule reads the scheduled backup a service is recorded with, and
+// reports whether it has one
+func ReadBackupSchedule(s *service.Datastore, serviceName string) (BackupSchedule, bool) {
+	commandPrefix := s.Properties().CommandPrefix
+	schedule := BackupSchedule{
+		Schedule:   common.PropertyGet(commandPrefix, serviceName, BackupScheduleProperty),
+		BucketName: common.PropertyGet(commandPrefix, serviceName, BackupBucketProperty),
+		UseIAM:     common.PropertyGet(commandPrefix, serviceName, BackupUseIAMProperty) == "true",
+	}
+
+	if schedule.Schedule == "" {
+		return BackupSchedule{}, false
+	}
+
+	return schedule, true
+}
+
+// BackupLogFile is where the output of a datastore's scheduled backups goes
+func BackupLogFile(commandPrefix string) string {
+	return fmt.Sprintf("/var/log/dokku/%s.log", commandPrefix)
+}
+
+// backupCommand is the command a scheduled backup runs. It is run from the dokku
+// crontab, whose PATH includes wherever dokku is installed.
+func backupCommand(commandPrefix string, serviceName string, schedule BackupSchedule) string {
+	command := fmt.Sprintf("dokku %s:backup %s %s", commandPrefix, serviceName, schedule.BucketName)
+	if schedule.UseIAM {
+		command = fmt.Sprintf("%s --use-iam", command)
+	}
+
+	return command
+}
+
+// CronEntry builds the line the cron-entries trigger prints for a scheduled
+// backup: the schedule, the command and the log file, separated by semicolons
+func CronEntry(commandPrefix string, serviceName string, schedule BackupSchedule) string {
+	return strings.Join([]string{
+		schedule.Schedule,
+		backupCommand(commandPrefix, serviceName, schedule),
+		BackupLogFile(commandPrefix),
+	}, ";")
+}
+
+// CrontabLine builds the line dokku writes into its crontab for a scheduled
+// backup, the same way it writes any task handed to it by cron-entries
+func CrontabLine(commandPrefix string, serviceName string, schedule BackupSchedule) string {
+	return fmt.Sprintf("%s %s &>> %s", schedule.Schedule, backupCommand(commandPrefix, serviceName, schedule), BackupLogFile(commandPrefix))
+}
+
+// BackupScheduleCat returns the crontab line a service's scheduled backup runs
+// from
+func BackupScheduleCat(s *service.Datastore, serviceName string) (string, error) {
+	schedule, ok := ReadBackupSchedule(s, serviceName)
+	if !ok {
+		return "", fmt.Errorf("There is no scheduled backup for %s.", serviceName) //nolint:staticcheck // matches the bash datastore plugins
+	}
+
+	return CrontabLine(s.Properties().CommandPrefix, serviceName, schedule) + "\n", nil
+}
+
+// ParseCronEntry reads back the schedule a legacy cron file was written with,
+// and reports whether the line was one an earlier version of the plugin wrote.
+// Those files are only read to migrate them onto the cron-entries trigger.
 //
 // The fields are found by locating the backup command rather than by counting
 // from the start of the line, because the schedule is not a fixed width: a
@@ -212,6 +326,49 @@ func ParseCronEntry(commandPrefix string, entry string) (BackupSchedule, bool) {
 	return schedule, true
 }
 
+// writeBackupSchedule records a scheduled backup for a service
+func writeBackupSchedule(s *service.Datastore, serviceName string, schedule BackupSchedule) error {
+	commandPrefix := s.Properties().CommandPrefix
+	if err := common.PropertyWrite(commandPrefix, serviceName, BackupScheduleProperty, schedule.Schedule); err != nil {
+		return fmt.Errorf("unable to record the backup schedule: %w", err)
+	}
+
+	if err := common.PropertyWrite(commandPrefix, serviceName, BackupBucketProperty, schedule.BucketName); err != nil {
+		return fmt.Errorf("unable to record the backup bucket: %w", err)
+	}
+
+	if !schedule.UseIAM {
+		if err := common.PropertyDelete(commandPrefix, serviceName, BackupUseIAMProperty); err != nil {
+			return fmt.Errorf("unable to record the backup credentials: %w", err)
+		}
+
+		return nil
+	}
+
+	if err := common.PropertyWrite(commandPrefix, serviceName, BackupUseIAMProperty, "true"); err != nil {
+		return fmt.Errorf("unable to record the backup credentials: %w", err)
+	}
+
+	return nil
+}
+
+// regenerateCrontab has dokku write its crontab again, which is where the
+// cron-entries trigger is read. Dokku 0.36.0 and later do that on
+// scheduler-cron-write, and earlier versions on cron-write. Each is a trigger
+// nothing acts on in the versions that use the other, so both are fired.
+func regenerateCrontab(ctx context.Context) error {
+	for _, trigger := range []string{"scheduler-cron-write", "cron-write"} {
+		if _, err := execx.PlugnTrigger(ctx, common.PlugnTriggerInput{
+			Trigger:      trigger,
+			StreamStderr: true,
+		}); err != nil {
+			return fmt.Errorf("failed to call the %s trigger: %w", trigger, err)
+		}
+	}
+
+	return nil
+}
+
 // ScheduleBackupInput is the input for the ScheduleBackup function
 type ScheduleBackupInput struct {
 	BucketName  string
@@ -221,34 +378,50 @@ type ScheduleBackupInput struct {
 	UseIAM      bool
 }
 
-// ScheduleBackup writes the cron entry that backs a service up on a schedule
+// ScheduleBackup records a scheduled backup for a service and has dokku write it
+// into its crontab
 func ScheduleBackup(ctx context.Context, input ScheduleBackupInput) error {
+	schedule := BackupSchedule{
+		Schedule:   input.Schedule,
+		BucketName: input.BucketName,
+		UseIAM:     input.UseIAM,
+	}
+	if err := schedule.Validate(); err != nil {
+		return err
+	}
+
+	if err := writeBackupSchedule(input.Datastore, input.ServiceName, schedule); err != nil {
+		return err
+	}
+
+	return regenerateCrontab(ctx)
+}
+
+// UnscheduleBackupInput is the input for the UnscheduleBackup function
+type UnscheduleBackupInput struct {
+	// Datastore is the datastore the service belongs to
+	Datastore *service.Datastore
+
+	// ServiceName is the service to stop backing up
+	ServiceName string
+}
+
+// UnscheduleBackup removes a service's scheduled backup and has dokku write its
+// crontab without it. A service with no scheduled backup is left alone, so that
+// destroying one does not rewrite the crontab for nothing.
+func UnscheduleBackup(ctx context.Context, input UnscheduleBackupInput) error {
+	if _, ok := ReadBackupSchedule(input.Datastore, input.ServiceName); !ok {
+		return nil
+	}
+
 	commandPrefix := input.Datastore.Properties().CommandPrefix
-	// staged inside the service, so that an interrupted schedule cannot leave a
-	// file the service listing mistakes for a service
-	tmpCronFile := StagedCronFile(input.Datastore, input.ServiceName)
-
-	dokkuBin, err := exec.LookPath("dokku")
-	if err != nil {
-		return fmt.Errorf("unable to find the dokku binary: %w", err)
+	for _, property := range backupScheduleProperties {
+		if err := common.PropertyDelete(commandPrefix, input.ServiceName, property); err != nil {
+			return fmt.Errorf("unable to remove the %s property: %w", property, err)
+		}
 	}
 
-	entry := CronEntry(dokkuBin, commandPrefix, input)
-
-	// cron ignores a final line that is not newline terminated
-	if err := common.WriteStringToFile(common.WriteStringToFileInput{
-		Content:   entry + "\n",
-		Filename:  tmpCronFile,
-		GroupName: hostenv.SystemGroup(),
-		Mode:      0644,
-		Username:  hostenv.SystemUser(),
-	}); err != nil {
-		return fmt.Errorf("unable to write %s: %w", tmpCronFile, err)
-	}
-
-	// the cron directory belongs to root, so the staged file is moved into place
-	// by the helper the plugin installs and the dokku group is granted
-	return cron.Install(ctx, commandPrefix, input.ServiceName)
+	return regenerateCrontab(ctx)
 }
 
 // BackupArgsInput is the input for BackupArgs. Every value is already resolved,

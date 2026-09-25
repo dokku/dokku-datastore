@@ -140,6 +140,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"stop": func() (cli.Command, error) {
 			return &commands.StopCommand{Meta: meta}, nil
 		},
+		"trigger-cron-entries": func() (cli.Command, error) {
+			return &commands.TriggerCronEntriesCommand{Meta: meta}, nil
+		},
 		"trigger-help": func() (cli.Command, error) {
 			return &commands.TriggerHelpCommand{Meta: meta, CommandFunc: Commands}, nil
 		},

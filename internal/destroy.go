@@ -77,7 +77,7 @@ func DestroyService(ctx context.Context, input DestroyServiceInput) error {
 		return fmt.Errorf("failed to call service-action pre-delete trigger: %w", err)
 	}
 
-	err = service.RemoveBackupSchedule(ctx, service.RemoveBackupScheduleInput{
+	err = UnscheduleBackup(ctx, UnscheduleBackupInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})
@@ -141,7 +141,7 @@ func DestroyService(ctx context.Context, input DestroyServiceInput) error {
 		StreamStdout: true,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to call service-action pre-delete trigger: %w", err)
+		return fmt.Errorf("failed to call service-action post-delete trigger: %w", err)
 	}
 
 	return nil

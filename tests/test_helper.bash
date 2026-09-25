@@ -118,11 +118,12 @@ EOS
   chmod +x "$BATS_FILE_TMPDIR/bin/dokku"
 
   # checking an app name asks for a plugin path, and with one set the link
-  # triggers are fired through plugn. No plugin is enabled, so there is nothing
-  # for the stand-in to do
+  # triggers are fired through plugn. No plugin is enabled, so the stand-in only
+  # records what it was asked to do, one call per line
   export PLUGIN_PATH="$BATS_FILE_TMPDIR/plugins"
+  export PLUGN_LOG="$BATS_FILE_TMPDIR/plugn.log"
   mkdir -p "$PLUGIN_PATH/enabled"
-  printf '#!/usr/bin/env bash\n' >"$BATS_FILE_TMPDIR/bin/plugn"
+  printf '#!/usr/bin/env bash\necho "$*" >>%q\n' "$PLUGN_LOG" >"$BATS_FILE_TMPDIR/bin/plugn"
   chmod +x "$BATS_FILE_TMPDIR/bin/plugn"
 
   export PATH="$BATS_FILE_TMPDIR/bin:$PATH"

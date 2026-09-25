@@ -7,72 +7,25 @@ import (
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/mitchellh/cli"
 )
 
-func TestSudoersContents(t *testing.T) {
-	datastore := service.Datastores["redis"]
-	contents := SudoersContents(datastore)
-
-	// every line has to be a NOPASSWD grant to the dokku group, and nothing else
-	for _, line := range strings.Split(strings.TrimSpace(contents), "\n") {
-		if !strings.HasPrefix(line, "%dokku ALL=(ALL) NOPASSWD:") {
-			t.Errorf("unexpected sudoers line: %q", line)
-		}
+// Scheduled backups no longer need root, so a datastore that ships no
+// privileged script grants the dokku group nothing at all
+func TestSudoersContentsIsEmptyWithoutAPrivilegedScript(t *testing.T) {
+	redis := service.Datastores["redis"]
+	if contents := SudoersContents(redis); contents != "" {
+		t.Errorf("expected no grants, got:\n%s", contents)
 	}
 
-	// the grant names the datastore's own helper, or one datastore's privileges
-	// would cover another's cron files
-	if !strings.Contains(contents, "NOPASSWD:/usr/local/bin/dokku-redis-cron\n") {
-		t.Errorf("expected the sudoers file to grant the redis cron helper, got:\n%s", contents)
-	}
-
-	// sudo-rs, the default sudo on Ubuntu 25.10 and later, rejects a file with a
-	// wildcard or a regular expression in a command argument, and rejecting one
-	// file means the dokku group gets no privileges at all
-	for _, forbidden := range []string{"*", "^", "$", "["} {
-		if strings.Contains(contents, forbidden) {
-			t.Errorf("a command argument pattern (%q) makes the whole file invalid under sudo-rs:\n%s", forbidden, contents)
-		}
-	}
-
-	// a stray wildcard here would hand out far more than intended
-	if strings.Contains(contents, "ALL=(ALL) NOPASSWD:ALL") {
-		t.Error("the sudoers file must not grant unrestricted access")
+	if len(PrivilegedFiles(redis)) != 0 {
+		t.Error("expected redis to ship no privileged script")
 	}
 }
 
-func TestCronHelperIsOwnedByRoot(t *testing.T) {
-	// the dokku group may run this as root, so being able to rewrite it, or to
-	// replace the directory holding it, would be a way to run anything as root
-	file := CronHelperFile(service.Datastores["redis"])
-
-	if file.Username != "root" || file.GroupName != "root" {
-		t.Errorf("expected root:root, got %s:%s", file.Username, file.GroupName)
-	}
-
-	if file.Mode != 0755 {
-		t.Errorf("expected mode 755, got %o", file.Mode)
-	}
-
-	if file.Filename != "/usr/local/bin/dokku-redis-cron" {
-		t.Errorf("expected /usr/local/bin/dokku-redis-cron, got %s", file.Filename)
-	}
-
-	if !strings.HasPrefix(file.Content, "#!/usr/bin/env bash\n") {
-		t.Error("expected the helper to start with a shebang")
-	}
-
-	// the helper is what constrains the service name now that sudo cannot, so it
-	// has to apply the same rule the binary validates against
-	if !strings.Contains(file.Content, `[[ ! "$service" =~ ^[A-Za-z0-9_-]+$ ]]`) {
-		t.Errorf("expected the helper to validate the service name, got:\n%s", file.Content)
-	}
-
-	// the staged path is derived from the validated service name, and sits
-	// inside the service rather than beside it where listing the services would
-	// report it as a service of its own
-	if !strings.Contains(file.Content, `DATA_ROOT="/var/lib/dokku/services/redis"`) {
-		t.Errorf("expected the helper to name the data root, got:\n%s", file.Content)
+func TestLegacyCronHelperPath(t *testing.T) {
+	if actual := LegacyCronHelperPath(service.Datastores["redis"]); actual != "/usr/local/bin/dokku-redis-cron" {
+		t.Errorf("expected /usr/local/bin/dokku-redis-cron, got %s", actual)
 	}
 }
 
@@ -92,35 +45,9 @@ func TestSudoersFileIsOwnedByRoot(t *testing.T) {
 	}
 }
 
-// The staged path is worked out twice, once in Go to write the file and once in
-// bash to move it, from two separately derived roots. They agree today, and if
-// they ever stop agreeing every backup-schedule fails with "no cron file staged
-// at", so the agreement is pinned by reading the path back out of the generated
-// helper rather than restating it.
-func TestTheHelperStagesWhereTheBinaryWrites(t *testing.T) {
-	datastore := service.Datastores["redis"]
-
-	dataRoot := ""
-	for _, line := range strings.Split(CronHelperFile(datastore).Content, "\n") {
-		if value, found := strings.CutPrefix(line, "DATA_ROOT="); found {
-			dataRoot = strings.Trim(value, `"`)
-			break
-		}
-	}
-
-	if dataRoot == "" {
-		t.Fatal("the helper does not set DATA_ROOT")
-	}
-
-	expected := dataRoot + "/lollipop/.TMP_CRON_FILE"
-	if actual := StagedCronFile(datastore, "lollipop"); actual != expected {
-		t.Errorf("the binary writes %s but the helper moves %s", actual, expected)
-	}
-}
-
 // Graphite is the only datastore that ships a privileged script. Its sudoers
-// file has to grant that script as well as the cron helper, and every line has
-// to keep the shape sudo-rs accepts.
+// file grants that script and nothing else, and every line has to keep the
+// shape sudo-rs accepts.
 func TestSudoersGrantsAPrivilegedScript(t *testing.T) {
 	graphite, ok := service.Datastores["graphite"]
 	if !ok {
@@ -129,8 +56,8 @@ func TestSudoersGrantsAPrivilegedScript(t *testing.T) {
 
 	contents := SudoersContents(graphite)
 	lines := strings.Split(strings.TrimSpace(contents), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("expected the cron helper and one privileged script, got %d lines: %q", len(lines), contents)
+	if len(lines) != 1 {
+		t.Fatalf("expected one privileged script, got %d lines: %q", len(lines), contents)
 	}
 
 	for _, line := range lines {
@@ -147,30 +74,20 @@ func TestSudoersGrantsAPrivilegedScript(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(contents, "NOPASSWD:/usr/local/bin/dokku-graphite-cron\n") {
-		t.Error("expected the cron helper to still be granted")
+	// scheduled backups no longer go through a helper run as root
+	if strings.Contains(contents, "dokku-graphite-cron") {
+		t.Error("expected the cron helper not to be granted")
+	}
+
+	// sudo-rs, the default sudo on Ubuntu 25.10 and later, rejects a file with a
+	// wildcard or a regular expression in a command argument, and a stray
+	// wildcard would hand out far more than intended
+	if strings.Contains(contents, "ALL=(ALL) NOPASSWD:ALL") {
+		t.Error("the sudoers file must not grant unrestricted access")
 	}
 
 	if !strings.Contains(contents, "NOPASSWD:/usr/local/bin/dokku-graphite-nginx\n") {
 		t.Error("expected the nginx helper to be granted")
-	}
-}
-
-// A datastore that ships no privileged script is granted exactly what it was
-// before, so adding the mechanism widened nothing for the other twenty-one.
-func TestSudoersIsUnchangedWithoutAPrivilegedScript(t *testing.T) {
-	redis, ok := service.Datastores["redis"]
-	if !ok {
-		t.Fatal("expected redis to be registered")
-	}
-
-	contents := SudoersContents(redis)
-	if lines := strings.Split(strings.TrimSpace(contents), "\n"); len(lines) != 1 {
-		t.Errorf("expected one grant, got %d: %q", len(lines), contents)
-	}
-
-	if len(PrivilegedFiles(redis)) != 0 {
-		t.Error("expected redis to ship no privileged script")
 	}
 }
 
@@ -204,8 +121,7 @@ func TestPrivilegedFileIsOwnedByRoot(t *testing.T) {
 		t.Error("expected a bash script")
 	}
 
-	// the same validation discipline the cron helper has, since the grant is
-	// the same shape
+	// the grant constrains no argument, so the script has to
 	if !strings.Contains(file.Content, `[[ ! "$service" =~ ^[A-Za-z0-9_-]+$ ]]`) {
 		t.Error("expected the service name to be validated in the script")
 	}
@@ -312,5 +228,124 @@ func TestRestrictServiceSecretsToleratesMissingFiles(t *testing.T) {
 
 	if _, err := os.Stat(service.Folders(datastore, "lollipop").Backup); !os.IsNotExist(err) {
 		t.Errorf("expected no backup folder to be created, got %v", err)
+	}
+}
+
+// withLegacyCronFile points the legacy cron directory at a temporary one and
+// writes a cron file for the service there, the way an earlier version of the
+// plugin did
+func withLegacyCronFile(t *testing.T, datastore *service.Datastore, serviceName string, contents string) string {
+	t.Helper()
+
+	previous := service.LegacyCronDir
+	service.LegacyCronDir = t.TempDir()
+	t.Cleanup(func() {
+		service.LegacyCronDir = previous
+	})
+
+	cronFile := service.LegacyCronFile(datastore, serviceName)
+	if err := os.WriteFile(cronFile, []byte(contents), 0644); err != nil {
+		t.Fatalf("failed to write %s: %s", cronFile, err)
+	}
+
+	return cronFile
+}
+
+// A schedule an earlier version wrote to the cron directory is moved onto the
+// properties the cron-entries trigger reads, so it keeps running from the dokku
+// crontab rather than from a file dokku cannot see
+func TestMigrateLegacyCronFileMovesAValidSchedule(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+	cronFile := withLegacyCronFile(t, datastore, "lollipop", "0 3 * * * dokku /usr/bin/dokku redis:backup lollipop my-bucket --use-iam\n")
+
+	ui := cli.NewMockUi()
+	changed, err := migrateLegacyCronFile(InstallInput{Datastore: datastore, Logger: Ui{Ui: ui}}, "lollipop")
+	if err != nil {
+		t.Fatalf("failed to migrate the cron file: %s", err)
+	}
+	if !changed {
+		t.Error("expected the migration to report a change")
+	}
+
+	if _, err := os.Stat(cronFile); !os.IsNotExist(err) {
+		t.Errorf("expected %s to be removed, got %v", cronFile, err)
+	}
+
+	schedule, ok := ReadBackupSchedule(datastore, "lollipop")
+	expected := BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket", UseIAM: true}
+	if !ok || schedule != expected {
+		t.Errorf("expected %+v, got %+v", expected, schedule)
+	}
+}
+
+// "daily" is what issue 6 was scheduled with. Cron never ran it, and carried
+// into the dokku crontab it would stop every other task from running too, so it
+// is dropped with a warning saying how to schedule it again
+func TestMigrateLegacyCronFileDropsAScheduleCronCannotRun(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+	cronFile := withLegacyCronFile(t, datastore, "lollipop", "daily dokku /usr/bin/dokku redis:backup lollipop my-bucket\n")
+
+	ui := cli.NewMockUi()
+	changed, err := migrateLegacyCronFile(InstallInput{Datastore: datastore, Logger: Ui{Ui: ui}}, "lollipop")
+	if err != nil {
+		t.Fatalf("failed to migrate the cron file: %s", err)
+	}
+	if !changed {
+		t.Error("expected the migration to report a change")
+	}
+
+	if _, err := os.Stat(cronFile); !os.IsNotExist(err) {
+		t.Errorf("expected %s to be removed, got %v", cronFile, err)
+	}
+
+	if _, ok := ReadBackupSchedule(datastore, "lollipop"); ok {
+		t.Error("expected no schedule to be recorded")
+	}
+
+	if warnings := ui.ErrorWriter.String(); !strings.Contains(warnings, "redis:backup-schedule lollipop") {
+		t.Errorf("expected a warning saying how to schedule the backup again, got %q", warnings)
+	}
+}
+
+// A file that is not one the plugin wrote is left where it is, since removing it
+// could stop something the plugin does not know about
+func TestMigrateLegacyCronFileLeavesAnUnreadableFile(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+	cronFile := withLegacyCronFile(t, datastore, "lollipop", "0 3 * * * root /usr/local/bin/something-else\n")
+
+	ui := cli.NewMockUi()
+	changed, err := migrateLegacyCronFile(InstallInput{Datastore: datastore, Logger: Ui{Ui: ui}}, "lollipop")
+	if err != nil {
+		t.Fatalf("failed to migrate the cron file: %s", err)
+	}
+	if changed {
+		t.Error("expected nothing to change")
+	}
+
+	if _, err := os.Stat(cronFile); err != nil {
+		t.Errorf("expected %s to be left in place, got %v", cronFile, err)
+	}
+
+	if _, ok := ReadBackupSchedule(datastore, "lollipop"); ok {
+		t.Error("expected no schedule to be recorded")
+	}
+}
+
+// A service that was never scheduled has nothing to migrate
+func TestMigrateLegacyCronFileWithNoCronFile(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+
+	previous := service.LegacyCronDir
+	service.LegacyCronDir = t.TempDir()
+	t.Cleanup(func() {
+		service.LegacyCronDir = previous
+	})
+
+	changed, err := migrateLegacyCronFile(InstallInput{Datastore: datastore, Logger: Ui{Ui: cli.NewMockUi()}}, "lollipop")
+	if err != nil {
+		t.Fatalf("expected nothing to do, got %s", err)
+	}
+	if changed {
+		t.Error("expected nothing to change")
 	}
 }

@@ -3,6 +3,7 @@ package internal
 import (
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/service"
@@ -170,5 +171,56 @@ func TestStartLinkedServicesWithoutAnApp(t *testing.T) {
 
 	if err := StartLinkedServices(t.Context(), triggerInput(datastore), ""); err != nil {
 		t.Errorf("expected no error for a trigger naming no app, got %s", err)
+	}
+}
+
+// Every scheduled service is handed to dokku, in order, and nothing else. A
+// service whose recorded schedule cron cannot run is left out and reported,
+// since one invalid line makes dokku refuse its whole crontab.
+func TestCronEntriesForTrigger(t *testing.T) {
+	datastore := withScheduleService(t, "banana", "cherry", "grape", "apple")
+
+	for serviceName, schedule := range map[string]BackupSchedule{
+		"apple":  {Schedule: "0 3 * * *", BucketName: "my-bucket"},
+		"cherry": {Schedule: "@daily", BucketName: "other-bucket", UseIAM: true},
+		"grape":  {Schedule: "daily", BucketName: "my-bucket"},
+	} {
+		// written directly, since scheduling refuses what grape is recorded
+		// with, as a hand edit or an earlier version could have left it
+		if err := writeBackupSchedule(datastore, serviceName, schedule); err != nil {
+			t.Fatalf("failed to record the schedule for %s: %s", serviceName, err)
+		}
+	}
+
+	entries, skipped, err := CronEntriesForTrigger(t.Context(), triggerInput(datastore))
+	if err != nil {
+		t.Fatalf("failed to list the cron entries: %s", err)
+	}
+
+	expected := []string{
+		"0 3 * * *;dokku redis:backup apple my-bucket;/var/log/dokku/redis.log",
+		"@daily;dokku redis:backup cherry other-bucket --use-iam;/var/log/dokku/redis.log",
+	}
+	if !slices.Equal(entries, expected) {
+		t.Errorf("expected %q, got %q", expected, entries)
+	}
+
+	if len(skipped) != 1 || !strings.Contains(skipped[0].Error(), "grape") {
+		t.Errorf("expected grape to be reported as skipped, got %v", skipped)
+	}
+}
+
+// A datastore with nothing scheduled prints nothing, rather than a blank line
+// that would make dokku drop every task other plugins hand it
+func TestCronEntriesForTriggerWithNothingScheduled(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+
+	entries, skipped, err := CronEntriesForTrigger(t.Context(), triggerInput(datastore))
+	if err != nil {
+		t.Fatalf("failed to list the cron entries: %s", err)
+	}
+
+	if len(entries) != 0 || len(skipped) != 0 {
+		t.Errorf("expected nothing, got %q and %v", entries, skipped)
 	}
 }

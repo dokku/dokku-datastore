@@ -184,7 +184,7 @@ func (c *BackupUnscheduleCommand) Run(args []string) int {
 		return 1
 	}
 
-	if err := service.RemoveBackupSchedule(ctx, service.RemoveBackupScheduleInput{
+	if err := internal.UnscheduleBackup(ctx, internal.UnscheduleBackupInput{
 		Datastore:   datastore,
 		ServiceName: serviceName,
 	}); err != nil {

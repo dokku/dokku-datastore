@@ -9,14 +9,13 @@ import (
 
 	"github.com/dokku/dokku-datastore/internal"
 	"github.com/dokku/dokku-datastore/internal/service"
-
 	"github.com/josegonzalez/cli-skeleton/command"
 	"github.com/posener/complete"
 	flag "github.com/spf13/pflag"
 )
 
-// BackupScheduleCatCommand is the command for unexposing a service
-type BackupScheduleCatCommand struct {
+// TriggerCronEntriesCommand is the command that hands dokku the scheduled backups of a datastore
+type TriggerCronEntriesCommand struct {
 	// Meta is the command meta
 	command.Meta
 	// GlobalFlagCommand is the global flag command
@@ -24,65 +23,71 @@ type BackupScheduleCatCommand struct {
 }
 
 // Name returns the name of the command
-func (c *BackupScheduleCatCommand) Name() string {
-	return "backup-schedule-cat"
+func (c *TriggerCronEntriesCommand) Name() string {
+	return "trigger-cron-entries"
 }
 
 // Synopsis returns the synopsis of the command
-func (c *BackupScheduleCatCommand) Synopsis() string {
-	return "Prints the crontab line of a service's scheduled backup"
+func (c *TriggerCronEntriesCommand) Synopsis() string {
+	return "Lists the scheduled backups dokku writes into its crontab"
 }
 
 // Help returns the help text for the command
-func (c *BackupScheduleCatCommand) Help() string {
+func (c *TriggerCronEntriesCommand) Help() string {
 	return command.CommandHelp(c)
 }
 
 // Examples returns the examples for the command
-func (c *BackupScheduleCatCommand) Examples() map[string]string {
+func (c *TriggerCronEntriesCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Prints the backup schedule for a redis service named test": fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Lists the scheduled redis backups": fmt.Sprintf("%s %s redis docker-local", appName, c.Name()),
 	}
 }
 
 // Arguments returns the arguments for the command
-func (c *BackupScheduleCatCommand) Arguments() []command.Argument {
+func (c *TriggerCronEntriesCommand) Arguments() []command.Argument {
 	args := []command.Argument{}
 	args = append(args, command.Argument{
 		Name:        "datastore-type",
-		Description: "the type of datastore to show the backup schedule for",
+		Description: "the type of datastore to list scheduled backups for",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
 	args = append(args, command.Argument{
-		Name:        "service-name",
-		Description: "the name of the service to show the backup schedule for",
-		Optional:    false,
+		Name:        "scheduler",
+		Description: "the scheduler dokku is writing cron tasks for, which does not change the output",
+		Optional:    true,
 		Type:        command.ArgumentString,
+	})
+	args = append(args, command.Argument{
+		Name:        "additional-arguments",
+		Description: "arguments dokku passes that this trigger does not use",
+		Optional:    true,
+		Type:        command.ArgumentList,
 	})
 	return args
 }
 
 // AutocompleteArgs returns the autocomplete arguments for the command
-func (c *BackupScheduleCatCommand) AutocompleteArgs() complete.Predictor {
+func (c *TriggerCronEntriesCommand) AutocompleteArgs() complete.Predictor {
 	return complete.PredictSet("redis")
 }
 
 // ParsedArguments parses the arguments for the command
-func (c *BackupScheduleCatCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
+func (c *TriggerCronEntriesCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
 	return internal.ParseArguments(args, c.Arguments())
 }
 
 // FlagSet returns the flag set for the command
-func (c *BackupScheduleCatCommand) FlagSet() *flag.FlagSet {
+func (c *TriggerCronEntriesCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
 	return f
 }
 
 // AutocompleteFlags returns the autocomplete flags for the command
-func (c *BackupScheduleCatCommand) AutocompleteFlags() complete.Flags {
+func (c *TriggerCronEntriesCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
@@ -91,7 +96,7 @@ func (c *BackupScheduleCatCommand) AutocompleteFlags() complete.Flags {
 }
 
 // Run runs the command
-func (c *BackupScheduleCatCommand) Run(args []string) int {
+func (c *TriggerCronEntriesCommand) Run(args []string) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGHUP,
@@ -149,47 +154,23 @@ func (c *BackupScheduleCatCommand) Run(args []string) int {
 		return 1
 	}
 
-	if code, unimplemented := requireImplemented(datastore, "backup-schedule-cat"); unimplemented {
-		return code
-	}
-
-	serviceName := arguments["service-name"].StringValue()
-	if serviceName == "" {
-		logger.Error(internal.ErrorInput{
-			Message: command.CommandErrorText(c),
-			Error:   service.ErrMissingServiceName,
-		})
-		return 1
-	}
-
-	if err := service.ValidateServiceName(serviceName); err != nil {
-		logger.Error(internal.ErrorInput{
-			Error: err,
-		})
-		return 1
-	}
-
-	// a service runs the definition it was created with, which for a datastore
-	// split by major version is not always the newest one
-	datastore, unresolved := datastore.ForService(serviceName)
-	if unresolved != nil {
-		logger.Error(internal.ErrorInput{Error: unresolved})
-		return 1
-	}
-
-	if !service.Exists(ctx, datastore, serviceName) {
-		logger.Error(internal.ErrorInput{
-			Error: fmt.Errorf("service %s does not exist", serviceName),
-		})
-		return 1
-	}
-
-	contents, err := internal.BackupScheduleCat(datastore, serviceName)
+	entries, skipped, err := internal.CronEntriesForTrigger(ctx, internal.TriggerInput{
+		Datastore: datastore,
+		Logger:    logger,
+	})
 	if err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}
 
-	fmt.Print(contents)
+	// to stderr, since dokku reads every line of stdout as a cron task
+	for _, err := range skipped {
+		logger.Warn(internal.WarnInput{Warning: err.Error()})
+	}
+
+	for _, entry := range entries {
+		fmt.Println(entry)
+	}
+
 	return 0
 }

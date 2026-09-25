@@ -118,7 +118,9 @@ func (c *BackupScheduleCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *BackupScheduleCommand) Documentation() string {
 	return `schedule a backup
-> 'schedule' is a crontab expression, eg. "0 3 * * *" for each day at 3am
+> 'schedule' is a crontab expression, eg. "0 3 * * *" for each day at 3am, or a descriptor such as "@daily". A schedule cron cannot run is refused.
+> the backup is added to the dokku crontab through the cron-entries plugin trigger, so it is listed by "dokku cron:list --global" and its output is appended to /var/log/dokku/{{.CommandPrefix}}.log
+> NOTE: dokku only writes a crontab when the global scheduler or at least one app uses the docker-local scheduler, so a scheduled backup does not run on a host that only uses k3s or null
 dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket
 schedule a backup and authenticate via iam
 dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket --use-iam`
@@ -132,7 +134,7 @@ func (c *BackupScheduleCommand) Group() string {
 // Description returns the one line description of the command, in the idiom of the
 // plugin rather than of the binary
 func (c *BackupScheduleCatCommand) Description() string {
-	return `cat the contents of the configured backup cronfile for the service`
+	return `cat the crontab line of the scheduled backup for the service`
 }
 
 // Usage returns the argument sketch rendered after the command name
@@ -142,7 +144,7 @@ func (c *BackupScheduleCatCommand) Usage() string {
 
 // Documentation returns the long form documentation for the command
 func (c *BackupScheduleCatCommand) Documentation() string {
-	return `cat the contents of the configured backup cronfile for the service
+	return `cat the crontab line of the scheduled backup for the service
 dokku {{.CommandPrefix}}:backup-schedule-cat lollipop`
 }
 
@@ -211,7 +213,7 @@ func (c *BackupUnscheduleCommand) Usage() string {
 
 // Documentation returns the long form documentation for the command
 func (c *BackupUnscheduleCommand) Documentation() string {
-	return `remove the scheduled backup from cron
+	return `remove the scheduled backup from the dokku crontab
 dokku {{.CommandPrefix}}:backup-unschedule lollipop`
 }
 

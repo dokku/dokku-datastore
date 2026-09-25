@@ -133,7 +133,7 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info["backup-encrypted"] = strconv.FormatBool(common.FileExists(filepath.Join(serviceFolders.BackupEncryption, encryptionKeyFile)))
 	info["backup-public-key-id"] = common.ReadFirstLine(filepath.Join(serviceFolders.BackupEncryption, publicKeyIDFile))
 
-	schedule, _ := ParseCronEntry(input.Datastore.Properties().CommandPrefix, common.ReadFirstLine(serviceFiles.CronFile))
+	schedule, _ := ReadBackupSchedule(input.Datastore, input.ServiceName)
 	info["backup-schedule"] = schedule.Schedule
 	info["backup-bucket"] = schedule.BucketName
 	info["backup-use-iam"] = strconv.FormatBool(schedule.UseIAM)

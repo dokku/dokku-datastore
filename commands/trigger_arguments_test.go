@@ -70,6 +70,17 @@ func TestTriggerCommandsAcceptExtraArguments(t *testing.T) {
 			args:      []string{"redis", "old-app", "new-app", "something-else"},
 		},
 		{
+			// dokku sends the scheduler, and nothing when listing global tasks
+			name:      "trigger-cron-entries",
+			arguments: (&TriggerCronEntriesCommand{}).Arguments(),
+			args:      []string{"redis", "docker-local", "something-else"},
+		},
+		{
+			name:      "trigger-cron-entries with no scheduler",
+			arguments: (&TriggerCronEntriesCommand{}).Arguments(),
+			args:      []string{"redis"},
+		},
+		{
 			name:      "trigger-service-list",
 			arguments: (&TriggerServiceListCommand{}).Arguments(),
 			args:      []string{"redis", "redis", "something-else"},

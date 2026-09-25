@@ -218,3 +218,35 @@ func ServiceListForTrigger(ctx context.Context, input TriggerInput, serviceType 
 
 	return names, nil
 }
+
+// CronEntriesForTrigger returns the lines the cron-entries trigger prints, one
+// for each service with a scheduled backup, in the order the services are
+// listed. Alongside them are the services left out because what they were
+// scheduled with cannot be run: the dokku crontab is refused as a whole when a
+// line in it is invalid, so one service's schedule must not stop every other
+// task on the host.
+func CronEntriesForTrigger(ctx context.Context, input TriggerInput) ([]string, []error, error) {
+	services, err := ListServices(ctx, ListServicesInput{Datastore: input.Datastore})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list services: %w", err)
+	}
+
+	commandPrefix := input.Datastore.Properties().CommandPrefix
+	entries := []string{}
+	skipped := []error{}
+	for _, serviceName := range services {
+		schedule, ok := ReadBackupSchedule(input.Datastore, serviceName)
+		if !ok {
+			continue
+		}
+
+		if err := schedule.Validate(); err != nil {
+			skipped = append(skipped, fmt.Errorf("skipping the scheduled backup for %s: %w", serviceName, err))
+			continue
+		}
+
+		entries = append(entries, CronEntry(commandPrefix, serviceName, schedule))
+	}
+
+	return entries, skipped, nil
+}
