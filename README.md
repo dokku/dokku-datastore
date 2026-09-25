@@ -40,7 +40,7 @@ Available commands are:
     backup-auth                           Stores the credentials backups are shipped with
     backup-deauth                         Removes the stored backup credentials for a service
     backup-schedule                       Schedules a recurring backup of a service to an s3 bucket
-    backup-schedule-cat                   Prints the backup cron file for a service
+    backup-schedule-cat                   Prints the crontab line of a service's scheduled backup
     backup-set-encryption                 Encrypts future backups of a service with a passphrase
     backup-set-public-key-encryption      Encrypts future backups of a service with a gpg public key
     backup-unschedule                     Removes the backup schedule for a service
@@ -69,6 +69,7 @@ Available commands are:
     set                                   Sets or clears a property for a service
     start                                 Starts a service
     stop                                  Stops a service and removes the container
+    trigger-cron-entries                  Lists the scheduled backups dokku writes into its crontab
     trigger-help                          Prints the help a dokku plugin's commands script is asked for
     trigger-install                       Prepares the host for a datastore plugin
     trigger-post-app-clone-setup          Copies an app's service links onto its clone
@@ -90,7 +91,7 @@ Available commands are:
 
 A plugin may carry the definitions for its own datastore, in `datastore/<name>/`, one directory per definition laid out exactly as the embedded tree is. `generate` writes them, and a plugin that ships any of them supplies all of them: the embedded definitions for that datastore are replaced rather than merged, so a service pinned to an older major still has a definition to run. Every definition under one plugin must name the same datastore in its `plugin:` field.
 
-`generate` also writes the file dokku runs for each trigger at the plugin root: the ones this binary implements for every datastore, such as `pre-start` and `pre-build`, and the ones a definition declares for itself, such as solr's `post-extract`. A trigger this binary starts implementing reaches a plugin the next time it is regenerated. `install` and `update` are not written, as a plugin's own files for those do more than dispatch, and a definition may not declare a trigger under the name of one this binary implements.
+`generate` also writes the file dokku runs for each trigger at the plugin root: the ones this binary implements for every datastore, such as `pre-start`, `pre-build` and `cron-entries`, and the ones a definition declares for itself, such as solr's `post-extract`. A trigger this binary starts implementing reaches a plugin the next time it is regenerated. `install` and `update` are not written, as a plugin's own files for those do more than dispatch, and a definition may not declare a trigger under the name of one this binary implements.
 
 ```shell
 # writes datastore/postgres-17/ and datastore/postgres-18/

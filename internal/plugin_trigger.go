@@ -11,6 +11,7 @@ import (
 // install and update are not among them: a plugin's own files for those do
 // more than dispatch, so they stay the plugin's to write.
 var BuiltinTriggers = []string{
+	"cron-entries",
 	"post-app-clone-setup",
 	"post-app-rename-setup",
 	"pre-build",

@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/backend"
-	"github.com/dokku/dokku-datastore/internal/cron"
 
 	"github.com/dokku/dokku/plugins/common"
 )
@@ -239,9 +238,6 @@ type ServiceFiles struct {
 	// ConfigOptions is the config options file for the service
 	ConfigOptions string
 
-	// CronFile is the cron file for the service
-	CronFile string
-
 	// DatabaseName is the database name file for the service
 	DatabaseName string
 
@@ -286,12 +282,22 @@ type ServiceFiles struct {
 	Compose string
 }
 
+// LegacyCronDir is where earlier versions of the plugin wrote the cron file a
+// scheduled backup ran from. A variable so that tests can point it elsewhere.
+var LegacyCronDir = "/etc/cron.d"
+
+// LegacyCronFile is the cron file an earlier version of the plugin wrote for a
+// scheduled backup. Scheduled backups are now handed to dokku through the
+// cron-entries trigger, so this is only read to migrate a service off it.
+func LegacyCronFile(s *Datastore, serviceName string) string {
+	return filepath.Join(LegacyCronDir, fmt.Sprintf("dokku-%s-%s", s.Properties().CommandPrefix, serviceName))
+}
+
 // Files returns the files for a service
 func Files(s *Datastore, serviceName string) ServiceFiles {
 	folders := Folders(s, serviceName)
 	return ServiceFiles{
 		ConfigOptions: filepath.Join(folders.Root, "CONFIG_OPTIONS"),
-		CronFile:      fmt.Sprintf("/etc/cron.d/dokku-%s-%s", s.Properties().CommandPrefix, serviceName),
 		DatabaseName:  filepath.Join(folders.Root, "DATABASE_NAME"),
 		Env:           filepath.Join(folders.Root, "ENV"),
 		ID:            filepath.Join(folders.Root, "ID"),
@@ -545,27 +551,6 @@ func PostCreateNetwork(s *Datastore, serviceName string) string {
 // PostStartNetwork gets the post start network for a service
 func PostStartNetwork(s *Datastore, serviceName string) string {
 	return common.PropertyGet(s.Properties().CommandPrefix, serviceName, "post-start-network")
-}
-
-// RemoveBackupScheduleInput is the input for the RemoveBackupSchedule function
-type RemoveBackupScheduleInput struct {
-	// Datastore is the service to remove the backup schedule for
-	Datastore *Datastore
-
-	// ServiceName is the name of the service to remove the backup schedule for
-	ServiceName string
-}
-
-// RemoveBackupSchedule removes the backup schedule for a service
-func RemoveBackupSchedule(ctx context.Context, input RemoveBackupScheduleInput) error {
-	serviceFiles := Files(input.Datastore, input.ServiceName)
-	if !common.FileExists(serviceFiles.CronFile) {
-		return nil
-	}
-
-	// the cron directory belongs to root, so the removal goes through the helper
-	// the plugin installs and the dokku group is granted
-	return cron.Remove(ctx, input.Datastore.Properties().CommandPrefix, input.ServiceName)
 }
 
 // RemoveContainer removes a container

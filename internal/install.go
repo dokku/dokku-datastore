@@ -6,33 +6,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
-	"github.com/dokku/dokku-datastore/internal/cron"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 )
 
-// StagedCronFile is where a cron entry is written before the helper moves it
-// into the root owned cron directory. It lives inside the service rather than
-// beside it: the directory holding the services is enumerated to list them, so
-// a staged file there is reported as a service of its own, which is what an
-// interrupted schedule used to leave behind.
-func StagedCronFile(s *service.Datastore, serviceName string) string {
-	return filepath.Join(service.Folders(s, serviceName).Root, ".TMP_CRON_FILE")
-}
-
-// SudoersContents returns the sudoers file a datastore plugin installs: the
-// cron helper every datastore has, and a line for each privileged script its
-// definition ships.
+// SudoersContents returns the sudoers file a datastore plugin installs: a line
+// for each privileged script its definition ships, and nothing when it ships
+// none.
 //
 // Every line names one script and constrains no argument, which is what keeps
 // the file valid under sudo-rs. A rule matching arguments would be rejected
 // outright and leave the dokku group with no privileges at all.
 func SudoersContents(s *service.Datastore) string {
-	contents := cron.SudoersContents(s.Properties().CommandPrefix)
+	contents := ""
 	for _, file := range PrivilegedFiles(s) {
 		contents += fmt.Sprintf("%%dokku ALL=(ALL) NOPASSWD:%s\n", file.Filename)
 	}
@@ -40,18 +31,31 @@ func SudoersContents(s *service.Datastore) string {
 	return contents
 }
 
-// SudoersFile describes the sudoers file a datastore plugin installs.
+// SudoersFile describes the sudoers file a datastore plugin installs. It has to
+// belong to root: sudo refuses a file writable by anyone else, and the dokku
+// user must not be able to rewrite the privileges it is being granted.
 func SudoersFile(s *service.Datastore) common.WriteStringToFileInput {
-	file := cron.SudoersFile(s.Properties().CommandPrefix)
-	file.Content = SudoersContents(s)
-
-	return file
+	return common.WriteStringToFileInput{
+		Content:   SudoersContents(s),
+		Filename:  filepath.Join("/etc/sudoers.d", fmt.Sprintf("dokku-%s", s.Properties().CommandPrefix)),
+		GroupName: "root",
+		Mode:      0440,
+		Username:  "root",
+	}
 }
 
-// PrivilegedPath is where a definition's privileged script is installed. It is
-// the same root owned directory the cron helper goes in, and for the same
-// reason: being able to replace the script, or the directory holding it, would
-// be a way to choose what the dokku group runs as root.
+// LegacyCronHelperPath is where earlier versions of the plugin installed the
+// helper that moved a scheduled backup's cron file into place as root.
+// Scheduled backups are now handed to dokku through the cron-entries trigger,
+// so the helper is removed on install.
+func LegacyCronHelperPath(s *service.Datastore) string {
+	return PrivilegedPath(s.Properties().CommandPrefix, "cron")
+}
+
+// PrivilegedPath is where a definition's privileged script is installed. It has
+// to be a directory root owns: being able to replace the script, or the
+// directory holding it, would be a way to choose what the dokku group runs as
+// root.
 func PrivilegedPath(plugin string, name string) string {
 	return filepath.Join("/usr/local/bin", fmt.Sprintf("dokku-%s-%s", plugin, name))
 }
@@ -92,11 +96,6 @@ func PrivilegedFiles(s *service.Datastore) []common.WriteStringToFileInput {
 	}
 
 	return files
-}
-
-// CronHelperFile describes the helper script the sudoers file grants.
-func CronHelperFile(s *service.Datastore) common.WriteStringToFileInput {
-	return cron.HelperFile(s.Properties().CommandPrefix, filepath.Join(service.PluginDataRoot, s.Properties().DataDirectory))
 }
 
 // InstallInput is the input for the Install function
@@ -159,30 +158,87 @@ func Install(ctx context.Context, input InstallInput) error {
 		return err
 	}
 
-	helperFile := CronHelperFile(input.Datastore)
-	if err := os.MkdirAll(filepath.Dir(helperFile.Filename), 0755); err != nil {
-		return fmt.Errorf("unable to create %s: %w", filepath.Dir(helperFile.Filename), err)
+	privilegedFiles := PrivilegedFiles(input.Datastore)
+	if len(privilegedFiles) > 0 {
+		if err := os.MkdirAll(filepath.Dir(privilegedFiles[0].Filename), 0755); err != nil {
+			return fmt.Errorf("unable to create %s: %w", filepath.Dir(privilegedFiles[0].Filename), err)
+		}
 	}
 
-	// the helper goes in first, so the sudoers rule never names a script that is
+	// the scripts go in first, so the sudoers rule never names a script that is
 	// not there yet
-	if err := common.WriteStringToFile(helperFile); err != nil {
-		return fmt.Errorf("unable to write %s: %w", helperFile.Filename, err)
-	}
-
-	// and so does anything the definition ships, for the same reason
-	for _, file := range PrivilegedFiles(input.Datastore) {
+	for _, file := range privilegedFiles {
 		if err := common.WriteStringToFile(file); err != nil {
 			return fmt.Errorf("unable to write %s: %w", file.Filename, err)
 		}
 	}
 
+	// a datastore that ships no privileged script grants nothing, so it has no
+	// sudoers file. One written by an earlier version granted the cron helper
 	sudoersFile := SudoersFile(input.Datastore)
-	if err := common.WriteStringToFile(sudoersFile); err != nil {
-		return fmt.Errorf("unable to write %s: %w", sudoersFile.Filename, err)
+	if len(privilegedFiles) > 0 {
+		if err := common.WriteStringToFile(sudoersFile); err != nil {
+			return fmt.Errorf("unable to write %s: %w", sudoersFile.Filename, err)
+		}
+	} else if err := removeIfExists(sudoersFile.Filename); err != nil {
+		return err
+	}
+
+	// and the helper goes last, once no sudoers rule names it. A definition
+	// shipping a privileged script of the same name has just written it there
+	legacyCronHelper := LegacyCronHelperPath(input.Datastore)
+	if !slices.ContainsFunc(privilegedFiles, func(file common.WriteStringToFileInput) bool {
+		return file.Filename == legacyCronHelper
+	}) {
+		if err := removeIfExists(legacyCronHelper); err != nil {
+			return err
+		}
 	}
 
 	return migrateServices(ctx, input)
+}
+
+// removeIfExists removes a file, and does nothing when it is already gone
+func removeIfExists(filename string) error {
+	if err := os.Remove(filename); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("unable to remove %s: %w", filename, err)
+	}
+
+	return nil
+}
+
+// migrateLegacyCronFile moves a scheduled backup an earlier version of the
+// plugin wrote to the cron directory onto the properties the cron-entries
+// trigger reads, and reports whether anything changed.
+//
+// A schedule cron cannot run is dropped rather than moved. It never ran where it
+// was, and carried into the dokku crontab it would stop every other task in it
+// from running too, since the crontab is refused as a whole.
+func migrateLegacyCronFile(input InstallInput, serviceName string) (bool, error) {
+	cronFile := service.LegacyCronFile(input.Datastore, serviceName)
+	if !common.FileExists(cronFile) {
+		return false, nil
+	}
+
+	commandPrefix := input.Datastore.Properties().CommandPrefix
+	schedule, ok := ParseCronEntry(commandPrefix, common.ReadFirstLine(cronFile))
+	if !ok {
+		input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Unable to read the scheduled backup for %s from %s, leaving it in place", serviceName, cronFile)})
+		return false, nil
+	}
+
+	if err := schedule.Validate(); err != nil {
+		input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Removing the scheduled backup for %s, which cron could not run: %s", serviceName, err)})
+		input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Schedule it again with: dokku %s:backup-schedule %s <schedule> <bucket-name>", commandPrefix, serviceName)})
+	} else if err := writeBackupSchedule(input.Datastore, serviceName, schedule); err != nil {
+		return false, err
+	}
+
+	if err := os.Remove(cronFile); err != nil {
+		return false, fmt.Errorf("unable to remove %s: %w", cronFile, err)
+	}
+
+	return true, nil
 }
 
 // migrateServices brings services created by older versions of the plugin up to
@@ -204,8 +260,21 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 	}
 
 	properties := input.Datastore.Properties()
+	crontabChanged := false
 	for _, serviceName := range services {
 		serviceFiles := service.Files(input.Datastore, serviceName)
+
+		// the cron helper staged a cron file inside the service before moving
+		// it into place, and an interrupted schedule left it there
+		if err := removeIfExists(filepath.Join(service.Folders(input.Datastore, serviceName).Root, ".TMP_CRON_FILE")); err != nil {
+			return err
+		}
+
+		changed, err := migrateLegacyCronFile(input, serviceName)
+		if err != nil {
+			return err
+		}
+		crontabChanged = crontabChanged || changed
 
 		// older services recorded the image only on the container, so recover it
 		// onto disk where everything else now looks for it. Gated on what the
@@ -255,6 +324,10 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 		if err := restrictServiceSecrets(pinned, serviceName); err != nil {
 			return err
 		}
+	}
+
+	if crontabChanged {
+		return regenerateCrontab(ctx)
 	}
 
 	return nil

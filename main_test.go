@@ -148,7 +148,7 @@ func TestPluginCommandsCoverEveryDocumentedSubcommand(t *testing.T) {
 		}
 	}
 
-	for _, name := range []string{"readme", "version", "trigger-help", "trigger-install", "trigger-service-list"} {
+	for _, name := range []string{"readme", "version", "trigger-cron-entries", "trigger-help", "trigger-install", "trigger-service-list"} {
 		if names[name] {
 			t.Errorf("the %s command is not a plugin subcommand and should not be documented", name)
 		}
