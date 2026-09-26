@@ -1,8 +1,12 @@
 package internal
 
 import (
+	"archive/tar"
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -329,8 +333,7 @@ func TestBackupArgsCarriesTheKeyserverOnlyWhenSet(t *testing.T) {
 		SecretAccessKey: "secret",
 		BucketName:      "bucket",
 		BackupName:      "redis-lollipop",
-		BackupDir:       "/tmp/dump",
-		Image:           "dokku/s3backup:0.18.0",
+		Image:           "dokku/s3backup:0.19.0",
 	}
 
 	withKeyserver := base
@@ -361,8 +364,7 @@ func TestBackupArgsPassesTheSettingsItIsGiven(t *testing.T) {
 		SecretAccessKey: "secret",
 		BucketName:      "bucket",
 		BackupName:      "redis-lollipop",
-		BackupDir:       "/tmp/dump",
-		Image:           "dokku/s3backup:0.18.0",
+		Image:           "dokku/s3backup:0.19.0",
 		Settings: map[string]string{
 			"ENCRYPT_WITH_PUBLIC_KEY_ID": "DEADBEEF",
 			"ENDPOINT_URL":               "http://10.0.0.3:9000",
@@ -375,7 +377,7 @@ func TestBackupArgsPassesTheSettingsItIsGiven(t *testing.T) {
 		"-e AWS_SECRET_ACCESS_KEY",
 		"-e BUCKET_NAME",
 		"-e BACKUP_NAME",
-		"-v /tmp/dump:/backup",
+		"-e BACKUP_SOURCE",
 		"-e ENCRYPT_WITH_PUBLIC_KEY_ID",
 		"-e ENDPOINT_URL",
 	} {
@@ -397,7 +399,7 @@ func TestBackupArgsPassesTheSettingsItIsGiven(t *testing.T) {
 		}
 	}
 
-	if args[len(args)-1] != "dokku/s3backup:0.18.0" {
+	if args[len(args)-1] != "dokku/s3backup:0.19.0" {
 		t.Errorf("expected the image last, got %s", args[len(args)-1])
 	}
 }
@@ -408,8 +410,7 @@ func TestBackupArgsOmitsCredentialsForAnInstanceRole(t *testing.T) {
 	args, env := BackupArgs(BackupArgsInput{
 		BucketName: "bucket",
 		BackupName: "redis-lollipop",
-		BackupDir:  "/tmp/dump",
-		Image:      "dokku/s3backup:0.18.0",
+		Image:      "dokku/s3backup:0.19.0",
 	})
 
 	if joined := strings.Join(args, " "); strings.Contains(joined, "AWS_ACCESS_KEY_ID") || strings.Contains(joined, "AWS_SECRET_ACCESS_KEY") {
@@ -432,8 +433,7 @@ func TestBackupArgsKeepsValuesOutOfTheArgv(t *testing.T) {
 		SecretAccessKey: "wJalrXUtnFEMI",
 		BucketName:      "bucket",
 		BackupName:      "redis-lollipop",
-		BackupDir:       "/tmp/dump",
-		Image:           "dokku/s3backup:0.18.0",
+		Image:           "dokku/s3backup:0.19.0",
 		Keyserver:       "http://10.0.0.2:11371",
 		Settings: map[string]string{
 			"ENCRYPTION_KEY": "hunter2",
@@ -448,7 +448,7 @@ func TestBackupArgsKeepsValuesOutOfTheArgv(t *testing.T) {
 		}
 	}
 
-	if len(env) != 6 {
+	if len(env) != 7 {
 		t.Errorf("expected every variable to be in the environment, got %v", env)
 	}
 }
@@ -460,8 +460,7 @@ func TestBackupArgsIsStable(t *testing.T) {
 	input := BackupArgsInput{
 		BucketName: "bucket",
 		BackupName: "redis-lollipop",
-		BackupDir:  "/tmp/dump",
-		Image:      "dokku/s3backup:0.18.0",
+		Image:      "dokku/s3backup:0.19.0",
 		Settings: map[string]string{
 			"AWS_DEFAULT_REGION":         "us-east-1",
 			"AWS_SIGNATURE_VERSION":      "s3v4",
@@ -478,6 +477,95 @@ func TestBackupArgsIsStable(t *testing.T) {
 		if again := strings.Join(args, " "); again != first {
 			t.Fatalf("expected the same command every time:\n%s\n%s", first, again)
 		}
+	}
+}
+
+// The dump used to be mounted into the backup container from a temporary
+// directory. On a dokku installed in docker, dockerd could not see that
+// directory and mounted an empty one in its place, which was shipped as an
+// empty backup that reported success. Issue 18 is that backup.
+func TestBackupArgsMountsNothing(t *testing.T) {
+	args, env := BackupArgs(BackupArgsInput{
+		AccessKeyID:     "key",
+		SecretAccessKey: "secret",
+		BucketName:      "bucket",
+		BackupName:      "redis-lollipop",
+		Image:           "dokku/s3backup:0.19.0",
+	})
+
+	for _, arg := range args {
+		if arg == "-v" || arg == "--volume" || arg == "--mount" || strings.HasPrefix(arg, "--volume=") || strings.HasPrefix(arg, "--mount=") {
+			t.Errorf("expected nothing to be mounted, got %s", strings.Join(args, " "))
+		}
+	}
+
+	if !slices.Contains(args, "-i") {
+		t.Errorf("expected stdin to be kept open for the dump, got %s", strings.Join(args, " "))
+	}
+
+	if env["BACKUP_SOURCE"] != "stdin" {
+		t.Errorf("expected the image to read the dump from stdin, got %q", env["BACKUP_SOURCE"])
+	}
+}
+
+// The archive is laid out as the image laid out a mounted /backup, so that a
+// backup made before the dump was streamed is restored the same way as one
+// made after.
+func TestBackupArchiveLayout(t *testing.T) {
+	exportFile := filepath.Join(t.TempDir(), "export")
+	contents := []byte("a dump, which may be binary\x00\xff")
+	if err := os.WriteFile(exportFile, contents, 0600); err != nil {
+		t.Fatalf("failed to write the export: %s", err)
+	}
+
+	var buffer bytes.Buffer
+	if err := backupArchive(&buffer, exportFile); err != nil {
+		t.Fatalf("failed to archive the export: %s", err)
+	}
+
+	reader := tar.NewReader(&buffer)
+	directory, err := reader.Next()
+	if err != nil {
+		t.Fatalf("failed to read the first entry: %s", err)
+	}
+	if directory.Name != "backup/" || directory.Typeflag != tar.TypeDir {
+		t.Errorf("expected the backup directory first, got %q (%c)", directory.Name, directory.Typeflag)
+	}
+
+	export, err := reader.Next()
+	if err != nil {
+		t.Fatalf("failed to read the second entry: %s", err)
+	}
+	if export.Name != "backup/export" || export.Typeflag != tar.TypeReg {
+		t.Errorf("expected the export second, got %q (%c)", export.Name, export.Typeflag)
+	}
+	if export.Mode != 0600 {
+		t.Errorf("expected the export to be private, got %o", export.Mode)
+	}
+
+	actual, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("failed to read the export back: %s", err)
+	}
+	if !bytes.Equal(actual, contents) {
+		t.Errorf("expected the export to be archived as it is, got %q", actual)
+	}
+
+	if _, err := reader.Next(); err != io.EOF {
+		t.Errorf("expected nothing after the export, got %v", err)
+	}
+}
+
+// A missing export is an error rather than an empty archive, which is what
+// the image would otherwise be handed
+func TestBackupArchiveRefusesAMissingExport(t *testing.T) {
+	var buffer bytes.Buffer
+	if err := backupArchive(&buffer, filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("expected a missing export to be an error")
+	}
+
+	if buffer.Len() != 0 {
+		t.Errorf("expected nothing to be written, got %d bytes", buffer.Len())
 	}
 }
 
