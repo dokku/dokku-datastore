@@ -273,6 +273,12 @@ dokku postgres:import lollipop --file /var/lib/dokku/data/storage/data.dump
 ssh dokku@dokku.me postgres:import lollipop < data.dump
 ```
 
+## Backups when dokku runs in a container
+
+`backup` exported a service into a temporary directory and mounted it into the container that ships it to s3. The mount is resolved by dockerd, and when dokku is installed in docker that directory is inside the dokku container, where dockerd cannot see it. Docker mounted an empty directory in its place, and an archive holding nothing but an empty `backup` directory was uploaded and reported as a success.
+
+The dump is now streamed into that container over stdin, so nothing is mounted and a backup ships the same dump wherever dokku runs. The uploaded archive is laid out as before, with the dump at `backup/export`, so a backup is restored the same way whichever version made it.
+
 ## Cloned services
 
 A clone was made on the source's image and given its data, but nothing else about the source carried over: every other setting came from the flags passed to `clone`, so a clone made without repeating all of them landed on the defaults rather than on what the source runs with.

@@ -1,14 +1,17 @@
 package internal
 
 import (
+	"archive/tar"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/execx"
@@ -38,6 +41,81 @@ const (
 // The image defaults to keyserver.ubuntu.com when it is not told otherwise, so
 // it is passed only when a service has one.
 const keyserverEnv = "KEYSERVER"
+
+// backupSourceEnv tells the backup image where to read the backup from, and
+// backupSourceStdin has it read a tar stream on stdin
+const (
+	backupSourceEnv   = "BACKUP_SOURCE"
+	backupSourceStdin = "stdin"
+)
+
+// expectedSizeEnv is how large the backup image expects the upload to be,
+// which it sizes the parts of a multipart upload by
+const expectedSizeEnv = "S3_EXPECTED_SIZE"
+
+// backupUploadSize overestimates the upload of an export of the given size.
+// The archive adds a header for the directory and the export, pads the export
+// to a whole block and ends with two empty blocks; gzip and gpg then add a
+// little more on data that does not compress, which the margin covers the same
+// way the backup image covers it when it estimates a mounted directory.
+func backupUploadSize(exportSize int64) int64 {
+	const block = 512
+	archiveSize := 2*block + (exportSize+block-1)/block*block + 2*block
+	return archiveSize + archiveSize/10 + 1048576
+}
+
+// the entries of the archive a backup ships, laid out as the image laid them
+// out when it archived a directory mounted at /backup, so that a backup made
+// either way is restored the same way
+const (
+	backupArchiveDir    = "backup/"
+	backupArchiveExport = "backup/export"
+)
+
+// backupArchive writes the tar stream the backup image reads from stdin: the
+// backup directory and the export inside it
+func backupArchive(w io.Writer, exportFile string) error {
+	handle, err := os.Open(exportFile)
+	if err != nil {
+		return fmt.Errorf("unable to open %s: %w", exportFile, err)
+	}
+	defer handle.Close()
+
+	stat, err := handle.Stat()
+	if err != nil {
+		return fmt.Errorf("unable to read %s: %w", exportFile, err)
+	}
+
+	archive := tar.NewWriter(w)
+	if err := archive.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeDir,
+		Name:     backupArchiveDir,
+		Mode:     0700,
+		ModTime:  stat.ModTime(),
+	}); err != nil {
+		return fmt.Errorf("unable to archive the backup: %w", err)
+	}
+
+	if err := archive.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg,
+		Name:     backupArchiveExport,
+		Mode:     0600,
+		Size:     stat.Size(),
+		ModTime:  stat.ModTime(),
+	}); err != nil {
+		return fmt.Errorf("unable to archive the backup: %w", err)
+	}
+
+	if _, err := io.Copy(archive, handle); err != nil {
+		return fmt.Errorf("unable to archive the backup: %w", err)
+	}
+
+	if err := archive.Close(); err != nil {
+		return fmt.Errorf("unable to archive the backup: %w", err)
+	}
+
+	return nil
+}
 
 // BackupFolderMode is the mode of the folders holding a service's backup
 // credentials and encryption settings. Nothing but the dokku user and group
@@ -439,8 +517,10 @@ type BackupArgsInput struct {
 	// image appends
 	BackupName string
 
-	// BackupDir is the host directory holding the dump, mounted at /backup
-	BackupDir string
+	// ExpectedSize is an overestimate of the upload in bytes, passed only when
+	// known. A stream on stdin is otherwise uploaded in parts sized for one no
+	// larger than about 78 GiB, and a larger dump fails to upload.
+	ExpectedSize int64
 
 	// Settings are the values read from the backup settings files, keyed by the
 	// environment variable each file is named after
@@ -457,12 +537,17 @@ type BackupArgsInput struct {
 // BackupArgs builds the argv for the container that ships a dump to s3, and the
 // environment docker has to be run with for it.
 //
+// The dump is handed over on stdin rather than mounted. A mounted directory is
+// resolved by dockerd, which on a dokku installed in docker is a different
+// filesystem than the one this process wrote the dump to: docker mounted an
+// empty directory in its place, and an empty archive was shipped as a success.
+//
 // The argv names each variable without a value, which docker fills in from its
 // own environment. The values include the credentials and the encryption
 // passphrase, and an argv is readable by every user on the host, where the
 // environment of a process is readable only by its owner.
 func BackupArgs(input BackupArgsInput) ([]string, map[string]string) {
-	args := []string{"container", "run", "--rm"}
+	args := []string{"container", "run", "--rm", "-i"}
 	env := map[string]string{}
 
 	setenv := func(name string, value string) {
@@ -480,7 +565,10 @@ func BackupArgs(input BackupArgsInput) ([]string, map[string]string) {
 
 	setenv("BUCKET_NAME", input.BucketName)
 	setenv("BACKUP_NAME", input.BackupName)
-	args = append(args, "-v", fmt.Sprintf("%s:/backup", input.BackupDir))
+	setenv(backupSourceEnv, backupSourceStdin)
+	if input.ExpectedSize > 0 {
+		setenv(expectedSizeEnv, strconv.FormatInt(input.ExpectedSize, 10))
+	}
 
 	// sorted, because a map would otherwise emit a different command each run
 	names := make([]string, 0, len(input.Settings))
@@ -558,17 +646,15 @@ func Backup(ctx context.Context, input BackupInput) error {
 		return err
 	}
 
-	backupDir, err := os.MkdirTemp("", "dokku-datastore-backup")
+	// a file rather than a pipe into the backup container, because the archive
+	// names the size of the export ahead of it. It is only ever read by this
+	// process, so it can live wherever this process keeps temporary files.
+	handle, err := os.CreateTemp("", "dokku-datastore-backup-")
 	if err != nil {
-		return fmt.Errorf("unable to create a temporary directory: %w", err)
+		return fmt.Errorf("unable to create a temporary file: %w", err)
 	}
-	defer os.RemoveAll(backupDir)
-
-	exportFile := filepath.Join(backupDir, "export")
-	handle, err := os.Create(exportFile)
-	if err != nil {
-		return fmt.Errorf("unable to create %s: %w", exportFile, err)
-	}
+	exportFile := handle.Name()
+	defer os.Remove(exportFile)
 
 	if err := input.Datastore.ExportService(ctx, service.ExportServiceInput{
 		Datastore:   input.Datastore,
@@ -583,7 +669,11 @@ func Backup(ctx context.Context, input BackupInput) error {
 		return fmt.Errorf("unable to close %s: %w", exportFile, err)
 	}
 
-	arguments.BackupDir = backupDir
+	stat, err := os.Stat(exportFile)
+	if err != nil {
+		return fmt.Errorf("unable to read %s: %w", exportFile, err)
+	}
+	arguments.ExpectedSize = backupUploadSize(stat.Size())
 
 	for folder, names := range map[string][]string{
 		serviceFolders.Backup:           {defaultRegionFile, signatureVersionFile, endpointURLFile},
@@ -597,16 +687,39 @@ func Backup(ctx context.Context, input BackupInput) error {
 		}
 	}
 
+	reader, writer := io.Pipe()
+	archived := make(chan error, 1)
+	go func() {
+		err := backupArchive(writer, exportFile)
+		writer.CloseWithError(err)
+		archived <- err
+	}()
+
 	args, env := BackupArgs(arguments)
-	if _, err := execx.Run(ctx, common.ExecCommandInput{
+	_, runErr := execx.Run(ctx, common.ExecCommandInput{
 		Command:      common.DockerBin(),
 		Args:         args,
 		Env:          env,
+		Stdin:        reader,
 		StreamStderr: true,
 		StreamStdout: true,
-	}); err != nil {
-		return fmt.Errorf("unable to run the backup: %w", err)
+	})
+
+	// closed so that an archive the container stopped reading early does not
+	// hold the writer open forever
+	reader.Close()
+
+	// the archive failing is why the container failed, when it did, since the
+	// image refuses a stream that ends early. A pipe closed under the archive
+	// is the other way around: the container stopped reading first.
+	archiveErr := <-archived
+	if runErr != nil {
+		if archiveErr != nil && !errors.Is(archiveErr, io.ErrClosedPipe) {
+			return archiveErr
+		}
+
+		return fmt.Errorf("unable to run the backup: %w", runErr)
 	}
 
-	return nil
+	return archiveErr
 }
