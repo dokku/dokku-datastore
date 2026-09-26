@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"io"
 	"net/netip"
@@ -104,6 +103,9 @@ type EnterServiceContainerInput struct {
 
 	// ServiceName is the name of the service to enter
 	ServiceName string
+
+	// Command is what to run in the container, a bash prompt when empty
+	Command []string
 }
 
 // EnterServiceContainer enters a service container
@@ -125,12 +127,20 @@ func EnterServiceContainer(ctx context.Context, input EnterServiceContainerInput
 		return fmt.Errorf("%s container %s is not running", input.Datastore.Properties().CommandPrefix, input.ServiceName)
 	}
 
-	_, err := execx.Run(ctx, common.ExecCommandInput{
-		Command:      common.DockerBin(),
-		Args:         []string{"container", "exec", "-it", containerID, "/bin/bash"},
-		Stdin:        os.Stdin,
-		StdoutWriter: os.Stdout,
-		StderrWriter: os.Stderr,
+	argv := input.Command
+	if len(argv) == 0 {
+		argv = []string{"/bin/bash"}
+	}
+
+	// a terminal is only asked for when there is one, as a command run from
+	// cron has none and docker refuses to allocate one for it
+	err := backend.Exec(ctx, backend.ExecInput{
+		Container: containerID,
+		Argv:      argv,
+		TTY:       backend.HasTerminal(os.Stdin),
+		Stdin:     os.Stdin,
+		Stdout:    os.Stdout,
+		Stderr:    os.Stderr,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to exec container: %w", err)

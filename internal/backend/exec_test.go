@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -86,5 +87,32 @@ func TestExecArgsPutsTheCommandLast(t *testing.T) {
 func TestExecRejectsAnEmptyCommand(t *testing.T) {
 	if err := Exec(t.Context(), ExecInput{Container: "dokku.redis.l"}); err == nil {
 		t.Error("expected running nothing to be an error rather than a docker invocation")
+	}
+}
+
+func TestHasTerminalIsNotFooledByACharacterDevice(t *testing.T) {
+	// /dev/null is a character device, and it is the stdin cron runs a command
+	// with. Asking docker for a terminal there makes the exec fail outright
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("unable to open %s: %v", os.DevNull, err)
+	}
+	defer devNull.Close()
+
+	if HasTerminal(devNull) {
+		t.Errorf("expected %s not to be a terminal", os.DevNull)
+	}
+}
+
+func TestHasTerminalIsFalseForAPipe(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("unable to create a pipe: %v", err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+
+	if HasTerminal(reader) {
+		t.Error("expected a pipe not to be a terminal")
 	}
 }

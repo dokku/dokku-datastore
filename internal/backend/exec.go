@@ -10,6 +10,7 @@ import (
 	"github.com/dokku/dokku-datastore/internal/execx"
 
 	"github.com/dokku/dokku/plugins/common"
+	"golang.org/x/term"
 )
 
 // ExecInput is the input for Exec.
@@ -87,12 +88,8 @@ func Exec(ctx context.Context, input ExecInput) error {
 }
 
 // HasTerminal reports whether a file is a terminal, which is what decides
-// whether docker can be asked for one.
+// whether docker can be asked for one. Being a character device is not enough:
+// /dev/null is one, and it is what cron hands a command as its stdin.
 func HasTerminal(file *os.File) bool {
-	stat, err := file.Stat()
-	if err != nil {
-		return false
-	}
-
-	return stat.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(file.Fd()))
 }

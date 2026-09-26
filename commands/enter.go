@@ -30,7 +30,7 @@ func (c *EnterCommand) Name() string {
 
 // Synopsis returns the synopsis of the command
 func (c *EnterCommand) Synopsis() string {
-	return "Enters a service"
+	return "Enters a service or runs a command in it"
 }
 
 // Help returns the help text for the command
@@ -42,7 +42,8 @@ func (c *EnterCommand) Help() string {
 func (c *EnterCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Enters a redis service named test": fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Enters a redis service named test":            fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Runs a command in a redis service named test": fmt.Sprintf("%s %s redis test redis-cli --version", appName, c.Name()),
 	}
 }
 
@@ -61,6 +62,12 @@ func (c *EnterCommand) Arguments() []command.Argument {
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
+	args = append(args, command.Argument{
+		Name:        "command",
+		Description: "the command to run in the service container, a bash prompt when omitted",
+		Optional:    true,
+		Type:        command.ArgumentList,
+	})
 	return args
 }
 
@@ -78,7 +85,23 @@ func (c *EnterCommand) ParsedArguments(args []string) (map[string]command.Argume
 func (c *EnterCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+
+	// flags are only read before the datastore type: everything after the
+	// service name belongs to the command run in the container
+	f.SetInterspersed(false)
 	return f
+}
+
+// containerCommand is the command to run in the service container. A caller
+// may fence it off with a leading --, which flag parsing keeps once it stops
+// at the first argument, so that is dropped rather than run.
+func containerCommand(arguments map[string]command.Argument) []string {
+	containerCommand := arguments["command"].ListValue()
+	if len(containerCommand) > 0 && containerCommand[0] == "--" {
+		return containerCommand[1:]
+	}
+
+	return containerCommand
 }
 
 // AutocompleteFlags returns the autocomplete flags for the command
@@ -183,6 +206,7 @@ func (c *EnterCommand) Run(args []string) int {
 	err = internal.EnterService(ctx, internal.EnterServiceInput{
 		Datastore:   datastore,
 		ServiceName: serviceName,
+		Command:     containerCommand(arguments),
 	})
 	if err != nil {
 		logger.Error(internal.ErrorInput{
