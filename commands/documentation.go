@@ -310,7 +310,10 @@ func (c *ConnectCommand) Usage() string {
 func (c *ConnectCommand) Documentation() string {
 	return `connect to the service via the {{.CommandPrefix}} connection tool
 > NOTE: disconnecting from ssh while running this command may leave zombie processes due to moby/moby#9098
-dokku {{.CommandPrefix}}:connect lollipop`
+dokku {{.CommandPrefix}}:connect lollipop
+the connection tool only shows a prompt when it is given a terminal, which ssh allocates when run with -t.
+without a terminal, statements are read from stdin instead.
+dokku {{.CommandPrefix}}:connect lollipop < statements.txt`
 }
 
 // Group is the readme usage section the command is documented under
