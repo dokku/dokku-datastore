@@ -18,7 +18,7 @@ const (
 	AmbassadorImage = "dokku/ambassador:0.8.2"
 
 	// S3BackupImage ships a dump to an s3 bucket
-	S3BackupImage = "dokku/s3backup:0.19.0"
+	S3BackupImage = "dokku/s3backup:0.19.1"
 
 	// BusyboxImage is the neutral image used to touch a service's files as root
 	BusyboxImage = "busybox:1.37.0-uclibc"
