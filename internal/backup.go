@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/execx"
@@ -47,6 +48,21 @@ const (
 	backupSourceEnv   = "BACKUP_SOURCE"
 	backupSourceStdin = "stdin"
 )
+
+// expectedSizeEnv is how large the backup image expects the upload to be,
+// which it sizes the parts of a multipart upload by
+const expectedSizeEnv = "S3_EXPECTED_SIZE"
+
+// backupUploadSize overestimates the upload of an export of the given size.
+// The archive adds a header for the directory and the export, pads the export
+// to a whole block and ends with two empty blocks; gzip and gpg then add a
+// little more on data that does not compress, which the margin covers the same
+// way the backup image covers it when it estimates a mounted directory.
+func backupUploadSize(exportSize int64) int64 {
+	const block = 512
+	archiveSize := 2*block + (exportSize+block-1)/block*block + 2*block
+	return archiveSize + archiveSize/10 + 1048576
+}
 
 // the entries of the archive a backup ships, laid out as the image laid them
 // out when it archived a directory mounted at /backup, so that a backup made
@@ -501,6 +517,11 @@ type BackupArgsInput struct {
 	// image appends
 	BackupName string
 
+	// ExpectedSize is an overestimate of the upload in bytes, passed only when
+	// known. A stream on stdin is otherwise uploaded in parts sized for one no
+	// larger than about 78 GiB, and a larger dump fails to upload.
+	ExpectedSize int64
+
 	// Settings are the values read from the backup settings files, keyed by the
 	// environment variable each file is named after
 	Settings map[string]string
@@ -545,6 +566,9 @@ func BackupArgs(input BackupArgsInput) ([]string, map[string]string) {
 	setenv("BUCKET_NAME", input.BucketName)
 	setenv("BACKUP_NAME", input.BackupName)
 	setenv(backupSourceEnv, backupSourceStdin)
+	if input.ExpectedSize > 0 {
+		setenv(expectedSizeEnv, strconv.FormatInt(input.ExpectedSize, 10))
+	}
 
 	// sorted, because a map would otherwise emit a different command each run
 	names := make([]string, 0, len(input.Settings))
@@ -644,6 +668,12 @@ func Backup(ctx context.Context, input BackupInput) error {
 	if err := handle.Close(); err != nil {
 		return fmt.Errorf("unable to close %s: %w", exportFile, err)
 	}
+
+	stat, err := os.Stat(exportFile)
+	if err != nil {
+		return fmt.Errorf("unable to read %s: %w", exportFile, err)
+	}
+	arguments.ExpectedSize = backupUploadSize(stat.Size())
 
 	for folder, names := range map[string][]string{
 		serviceFolders.Backup:           {defaultRegionFile, signatureVersionFile, endpointURLFile},

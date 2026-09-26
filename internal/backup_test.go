@@ -333,7 +333,7 @@ func TestBackupArgsCarriesTheKeyserverOnlyWhenSet(t *testing.T) {
 		SecretAccessKey: "secret",
 		BucketName:      "bucket",
 		BackupName:      "redis-lollipop",
-		Image:           "dokku/s3backup:0.19.0",
+		Image:           "dokku/s3backup:0.19.1",
 	}
 
 	withKeyserver := base
@@ -364,7 +364,7 @@ func TestBackupArgsPassesTheSettingsItIsGiven(t *testing.T) {
 		SecretAccessKey: "secret",
 		BucketName:      "bucket",
 		BackupName:      "redis-lollipop",
-		Image:           "dokku/s3backup:0.19.0",
+		Image:           "dokku/s3backup:0.19.1",
 		Settings: map[string]string{
 			"ENCRYPT_WITH_PUBLIC_KEY_ID": "DEADBEEF",
 			"ENDPOINT_URL":               "http://10.0.0.3:9000",
@@ -399,7 +399,7 @@ func TestBackupArgsPassesTheSettingsItIsGiven(t *testing.T) {
 		}
 	}
 
-	if args[len(args)-1] != "dokku/s3backup:0.19.0" {
+	if args[len(args)-1] != "dokku/s3backup:0.19.1" {
 		t.Errorf("expected the image last, got %s", args[len(args)-1])
 	}
 }
@@ -410,7 +410,7 @@ func TestBackupArgsOmitsCredentialsForAnInstanceRole(t *testing.T) {
 	args, env := BackupArgs(BackupArgsInput{
 		BucketName: "bucket",
 		BackupName: "redis-lollipop",
-		Image:      "dokku/s3backup:0.19.0",
+		Image:      "dokku/s3backup:0.19.1",
 	})
 
 	if joined := strings.Join(args, " "); strings.Contains(joined, "AWS_ACCESS_KEY_ID") || strings.Contains(joined, "AWS_SECRET_ACCESS_KEY") {
@@ -433,7 +433,7 @@ func TestBackupArgsKeepsValuesOutOfTheArgv(t *testing.T) {
 		SecretAccessKey: "wJalrXUtnFEMI",
 		BucketName:      "bucket",
 		BackupName:      "redis-lollipop",
-		Image:           "dokku/s3backup:0.19.0",
+		Image:           "dokku/s3backup:0.19.1",
 		Keyserver:       "http://10.0.0.2:11371",
 		Settings: map[string]string{
 			"ENCRYPTION_KEY": "hunter2",
@@ -460,7 +460,7 @@ func TestBackupArgsIsStable(t *testing.T) {
 	input := BackupArgsInput{
 		BucketName: "bucket",
 		BackupName: "redis-lollipop",
-		Image:      "dokku/s3backup:0.19.0",
+		Image:      "dokku/s3backup:0.19.1",
 		Settings: map[string]string{
 			"AWS_DEFAULT_REGION":         "us-east-1",
 			"AWS_SIGNATURE_VERSION":      "s3v4",
@@ -490,7 +490,7 @@ func TestBackupArgsMountsNothing(t *testing.T) {
 		SecretAccessKey: "secret",
 		BucketName:      "bucket",
 		BackupName:      "redis-lollipop",
-		Image:           "dokku/s3backup:0.19.0",
+		Image:           "dokku/s3backup:0.19.1",
 	})
 
 	for _, arg := range args {
@@ -553,6 +553,58 @@ func TestBackupArchiveLayout(t *testing.T) {
 
 	if _, err := reader.Next(); err != io.EOF {
 		t.Errorf("expected nothing after the export, got %v", err)
+	}
+}
+
+// The image sizes the parts of its upload by the size it is told to expect,
+// and a stream on stdin has no size it can find out for itself. Without one, a
+// dump larger than about 78 GiB runs out of parts and fails to upload.
+func TestBackupArgsCarriesTheExpectedSizeOnlyWhenKnown(t *testing.T) {
+	base := BackupArgsInput{
+		BucketName: "bucket",
+		BackupName: "redis-lollipop",
+		Image:      "dokku/s3backup:0.19.1",
+	}
+
+	withSize := base
+	withSize.ExpectedSize = 107374182400
+
+	args, env := BackupArgs(withSize)
+	if joined := strings.Join(args, " "); !strings.Contains(joined, "-e S3_EXPECTED_SIZE") {
+		t.Errorf("expected the size to be passed, got %s", joined)
+	}
+	if env["S3_EXPECTED_SIZE"] != "107374182400" {
+		t.Errorf("expected the size in the environment, got %q", env["S3_EXPECTED_SIZE"])
+	}
+
+	args, env = BackupArgs(base)
+	if joined := strings.Join(args, " "); strings.Contains(joined, "S3_EXPECTED_SIZE") {
+		t.Errorf("expected no size when none is known, got %s", joined)
+	}
+	if _, ok := env["S3_EXPECTED_SIZE"]; ok {
+		t.Errorf("expected no size in the environment when none is known")
+	}
+}
+
+// An underestimate is what makes a large upload fail, so the estimate has to
+// cover the archive the export is actually shipped as, whatever its size
+func TestBackupUploadSizeCoversTheArchive(t *testing.T) {
+	for _, size := range []int{0, 1, 511, 512, 513, 1048576, 1048577} {
+		exportFile := filepath.Join(t.TempDir(), "export")
+		if err := os.WriteFile(exportFile, bytes.Repeat([]byte{0xff}, size), 0600); err != nil {
+			t.Fatalf("failed to write the export: %s", err)
+		}
+
+		var buffer bytes.Buffer
+		if err := backupArchive(&buffer, exportFile); err != nil {
+			t.Fatalf("failed to archive the export: %s", err)
+		}
+
+		archiveSize := int64(buffer.Len())
+		expected := backupUploadSize(int64(size))
+		if expected < archiveSize+archiveSize/10 {
+			t.Errorf("expected the estimate for %d bytes to cover the %d byte archive with room to spare, got %d", size, archiveSize, expected)
+		}
 	}
 }
 
