@@ -56,8 +56,7 @@ setup_file() {
     -e AWS_SECRET_ACCESS_KEY="$S3_SECRET_ACCESS_KEY" \
     "$S3_IMAGE" server -s3 -dir=/data >/dev/null
 
-  local attempt
-  for attempt in $(seq 1 60); do
+  for _ in $(seq 1 60); do
     if aws_cli s3 mb "s3://$S3_BUCKET" >/dev/null 2>/dev/null; then
       break
     fi
