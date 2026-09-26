@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func redisScope() definition.Scope {
 	}
 }
 
-func redisDefinition(t *testing.T) definition.Definition {
+func definitionFor(t *testing.T, name string) definition.Definition {
 	t.Helper()
 
 	loaded, err := registry.Load(registry.LoadInput{})
@@ -43,12 +44,18 @@ func redisDefinition(t *testing.T) definition.Definition {
 		t.Fatalf("unable to load the registry: %s", err)
 	}
 
-	redis, ok := loaded.Definition("redis")
+	loadedDefinition, ok := loaded.Definition(name)
 	if !ok {
-		t.Fatal("expected an embedded redis definition")
+		t.Fatalf("expected an embedded %s definition", name)
 	}
 
-	return redis
+	return loadedDefinition
+}
+
+func redisDefinition(t *testing.T) definition.Definition {
+	t.Helper()
+
+	return definitionFor(t, "redis")
 }
 
 func redisInput(t *testing.T, name string) RunInput {
@@ -71,6 +78,63 @@ func TestResolveRedisConnect(t *testing.T) {
 	expected := "container exec --env=LANG=C.UTF-8 --env=LC_ALL=C.UTF-8 --env=REDISCLI_AUTH=hunter2 -i dokku.redis.lollipop redis-cli --no-auth-warning"
 	if actual := strings.Join(backend.ExecArgs(resolved), " "); actual != expected {
 		t.Errorf("expected:\n%s\ngot:\n%s", expected, actual)
+	}
+}
+
+// Over ssh without -t there is no terminal, and the mysql and mariadb clients
+// then hold every result until they exit, so a session answers nothing until it
+// ends. connect asks them to flush each result instead.
+func TestResolveMysqlConnectFlushesEachResult(t *testing.T) {
+	for _, name := range []string{"mysql", "mariadb"} {
+		t.Run(name, func(t *testing.T) {
+			scope := redisScope()
+			scope.ContainerName = "dokku." + name + ".lollipop"
+			scope.Plugin = name
+
+			resolved, err := Resolve(RunInput{
+				Definition: definitionFor(t, name),
+				Scope:      scope,
+				Name:       "connect",
+				Names:      backend.Names{Container: scope.ContainerName},
+			})
+			if err != nil {
+				t.Fatalf("unable to resolve connect: %s", err)
+			}
+
+			if !slices.Contains(resolved.Argv, "--unbuffered") {
+				t.Errorf("expected --unbuffered in %v", resolved.Argv)
+			}
+
+			args := backend.ExecArgs(resolved)
+			if slices.Contains(args, "-t") {
+				t.Errorf("expected no terminal to be asked for: %v", args)
+			}
+		})
+	}
+}
+
+// The client logs in as admin when no user is named, whose password is the
+// root password, so connect handed the service's password to the wrong account
+// and was always refused.
+func TestResolveOmnisciConnectUsesTheDsnAccount(t *testing.T) {
+	scope := redisScope()
+	scope.ContainerName = "dokku.omnisci.lollipop"
+	scope.Plugin = "omnisci"
+
+	resolved, err := Resolve(RunInput{
+		Definition: definitionFor(t, "omnisci"),
+		Scope:      scope,
+		Name:       "connect",
+		Names:      backend.Names{Container: scope.ContainerName},
+	})
+	if err != nil {
+		t.Fatalf("unable to resolve connect: %s", err)
+	}
+
+	for _, expected := range []string{"--user=omnisci", "--db=lollipop"} {
+		if !slices.Contains(resolved.Argv, expected) {
+			t.Errorf("expected %s in %v", expected, resolved.Argv)
+		}
 	}
 }
 

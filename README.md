@@ -273,6 +273,20 @@ dokku postgres:import lollipop --file /var/lib/dokku/data/storage/data.dump
 ssh dokku@dokku.me postgres:import lollipop < data.dump
 ```
 
+## Connecting without a terminal
+
+`ssh dokku@dokku.me mysql:connect lollipop` gives `connect` no terminal, since ssh only allocates one when asked with `-t`. Without one, the client shows no prompt and reads statements from stdin, and `mysql` also held every result until it exited. A statement typed into such a session ran, but nothing came back until the session ended, which looked like a blank screen that stopped responding.
+
+`mysql` and `mariadb` are now told to print each result as it runs, so a session without a terminal answers every statement as it is sent, and statements piped in behave as they did. The other clients already did this, except `clickhouse client`, which reads all of stdin before it runs anything and has no option that changes that. For a prompt, ask ssh for a terminal.
+
+```shell
+# an interactive session, with a prompt
+ssh -t dokku@dokku.me mysql:connect lollipop
+
+# statements piped in, each result printed as it runs
+echo 'SHOW TABLES;' | ssh dokku@dokku.me mysql:connect lollipop
+```
+
 ## Backups when dokku runs in a container
 
 `backup` exported a service into a temporary directory and mounted it into the container that ships it to s3. The mount is resolved by dockerd, and when dokku is installed in docker that directory is inside the dokku container, where dockerd cannot see it. Docker mounted an empty directory in its place, and an archive holding nothing but an empty `backup` directory was uploaded and reported as a success.
