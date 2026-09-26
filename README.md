@@ -50,7 +50,7 @@ Available commands are:
     connect                               Connects to a service with its native client
     create                                Creates a new datastore service
     destroy                               Destroys a datastore service
-    enter                                 Enters a service
+    enter                                 Enters a service or runs a command in it
     exists                                Checks if a service exists
     export                                Exports a service's data to stdout
     expose                                Exposes a service

@@ -397,7 +397,7 @@ func (c *EnterCommand) Usage() string {
 
 // Documentation returns the long form documentation for the command
 func (c *EnterCommand) Documentation() string {
-	return `a bash prompt can be opened against a running service.
+	return `a shell can be opened against a running service.
 filesystem changes will not be saved to disk.
 > NOTE: disconnecting from ssh while running this command may leave zombie processes due to moby/moby#9098
 dokku {{.CommandPrefix}}:enter lollipop
