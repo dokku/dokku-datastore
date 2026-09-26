@@ -113,6 +113,31 @@ func TestResolveMysqlConnectFlushesEachResult(t *testing.T) {
 	}
 }
 
+// The client logs in as admin when no user is named, whose password is the
+// root password, so connect handed the service's password to the wrong account
+// and was always refused.
+func TestResolveOmnisciConnectUsesTheDsnAccount(t *testing.T) {
+	scope := redisScope()
+	scope.ContainerName = "dokku.omnisci.lollipop"
+	scope.Plugin = "omnisci"
+
+	resolved, err := Resolve(RunInput{
+		Definition: definitionFor(t, "omnisci"),
+		Scope:      scope,
+		Name:       "connect",
+		Names:      backend.Names{Container: scope.ContainerName},
+	})
+	if err != nil {
+		t.Fatalf("unable to resolve connect: %s", err)
+	}
+
+	for _, expected := range []string{"--user=omnisci", "--db=lollipop"} {
+		if !slices.Contains(resolved.Argv, expected) {
+			t.Errorf("expected %s in %v", expected, resolved.Argv)
+		}
+	}
+}
+
 // The Go implementation passes the password as `-a <password>`, where any user
 // on the host can read it out of the process table. The definition passes it in
 // the environment instead, and that difference is the point rather than an
