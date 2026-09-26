@@ -104,8 +104,33 @@ type EnterServiceContainerInput struct {
 	// ServiceName is the name of the service to enter
 	ServiceName string
 
-	// Command is what to run in the container, a bash prompt when empty
+	// Command is what to run in the container, a shell when empty
 	Command []string
+}
+
+// enterShells are the shells enter opens when given no command, in order of
+// preference. bash comes first because it is what the bash plugins opened.
+var enterShells = []string{"/bin/bash", "/bin/sh"}
+
+// findShell returns the first of enterShells a container has. Each is asked to
+// run nothing before one is opened, rather than falling back once opening one
+// fails: an interactive shell exits with the status of the last command run in
+// it, so a missing bash cannot be told apart from a session whose last command
+// was not found.
+func findShell(ctx context.Context, containerID string) (string, bool) {
+	for _, shell := range enterShells {
+		err := backend.Exec(ctx, backend.ExecInput{
+			Container: containerID,
+			Argv:      []string{shell, "-c", "true"},
+			Stdout:    io.Discard,
+			Stderr:    io.Discard,
+		})
+		if err == nil {
+			return shell, true
+		}
+	}
+
+	return "", false
 }
 
 // EnterServiceContainer enters a service container
@@ -129,7 +154,12 @@ func EnterServiceContainer(ctx context.Context, input EnterServiceContainerInput
 
 	argv := input.Command
 	if len(argv) == 0 {
-		argv = []string{"/bin/bash"}
+		shell, ok := findShell(ctx, containerID)
+		if !ok {
+			return fmt.Errorf("the %s image has no shell, so enter needs a command to run", input.Datastore.Title())
+		}
+
+		argv = []string{shell}
 	}
 
 	// a terminal is only asked for when there is one, as a command run from

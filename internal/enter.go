@@ -14,7 +14,7 @@ type EnterServiceInput struct {
 	// ServiceName is the name of the service to enter
 	ServiceName string
 
-	// Command is what to run in the service container, a bash prompt when empty
+	// Command is what to run in the service container, a shell when empty
 	Command []string
 }
 

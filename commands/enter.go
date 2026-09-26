@@ -64,7 +64,7 @@ func (c *EnterCommand) Arguments() []command.Argument {
 	})
 	args = append(args, command.Argument{
 		Name:        "command",
-		Description: "the command to run in the service container, a bash prompt when omitted",
+		Description: "the command to run in the service container, a shell when omitted",
 		Optional:    true,
 		Type:        command.ArgumentList,
 	})
