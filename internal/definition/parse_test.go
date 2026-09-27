@@ -204,6 +204,18 @@ func TestParseRejects(t *testing.T) {
 			expected: `command "connect" cannot take extra arguments`,
 		},
 		{
+			// exec'd into the running service, so there is no container
+			// started for it whose entrypoint could be replaced
+			name:     "an entrypoint on a command run in the service",
+			compose:  validCompose + "\n  commands:\n    connect:\n      entrypoint: \"\"\n      exec: [thing]\n",
+			expected: `command "connect" cannot replace the entrypoint`,
+		},
+		{
+			name:     "an entrypoint on a command run on the host",
+			compose:  validCompose + "\n  custom_commands:\n    thing-expose:\n      description: expose thing\n      mode: host\n      entrypoint: \"\"\n      exec: [thing-expose]\n",
+			expected: `command "thing-expose" cannot replace the entrypoint`,
+		},
+		{
 			name:     "a protocol that is neither tcp nor udp",
 			compose:  strings.Replace(validCompose, "        target: 1234", "        target: 1234\n        protocol: sctp", 1),
 			expected: "neither tcp nor udp",
@@ -245,6 +257,25 @@ func TestParseReadsReservedNames(t *testing.T) {
 	expected := []string{"thing", "thing_schema"}
 	if strings.Join(parsed.Dokku.ReservedNames, ",") != strings.Join(expected, ",") {
 		t.Errorf("expected %v, got %v", expected, parsed.Dokku.ReservedNames)
+	}
+}
+
+// A command started in a container of its own may clear the image's
+// entrypoint, which is kept as declared rather than defaulted.
+func TestParseKeepsTheEntrypointOfAContainerCommand(t *testing.T) {
+	for _, mode := range []string{ModeSidecar, ModeOffline} {
+		t.Run(mode, func(t *testing.T) {
+			compose := validCompose + "\n  commands:\n    export:\n      mode: " + mode + "\n      entrypoint: \"\"\n      exec: [dump]\n"
+			parsed, err := parseCompose(t, compose)
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			entrypoint := parsed.Dokku.Commands["export"].Entrypoint
+			if entrypoint == nil || *entrypoint != "" {
+				t.Errorf("expected an empty entrypoint, got %v", entrypoint)
+			}
+		})
 	}
 }
 

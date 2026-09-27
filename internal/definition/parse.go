@@ -317,6 +317,20 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		}
 	}
 
+	// an entrypoint belongs to a container started for the command. One exec'd
+	// into the running service, or run on the host, has none to replace, so the
+	// setting would do nothing. Hooks are left out: they always run in a
+	// container of their own.
+	for name, command := range allCommands(definition) {
+		if command.Entrypoint == nil || strings.HasPrefix(name, "hooks.") {
+			continue
+		}
+
+		if command.Mode != ModeSidecar && command.Mode != ModeOffline {
+			return fail("command %q cannot replace the entrypoint; only sidecar and offline commands run in a container of their own", name)
+		}
+	}
+
 	return nil
 }
 

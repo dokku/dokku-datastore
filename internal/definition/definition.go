@@ -324,7 +324,9 @@ type Command struct {
 
 	// Entrypoint replaces the image's own. A step that runs a plain command in
 	// an image whose entrypoint starts the datastore has to clear it, or the
-	// datastore starts instead of the command.
+	// datastore starts instead of the command. It applies to hooks and to
+	// sidecar and offline commands, the ones started in a container of their
+	// own, and is refused anywhere else.
 	Entrypoint *string `yaml:"entrypoint"`
 
 	// Stdin is true when the command consumes standard input, as import does.

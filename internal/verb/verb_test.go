@@ -481,6 +481,67 @@ func commandInput(command definition.Command, scope definition.Scope) RunInput {
 	}
 }
 
+// fakeDocker stands in for the docker binary, recording each invocation as a
+// line of its arguments, and returns the file those lines are written to.
+func fakeDocker(t *testing.T) string {
+	t.Helper()
+
+	root := t.TempDir()
+	calls := filepath.Join(root, "calls")
+	script := filepath.Join(root, "docker")
+	body := "#!/usr/bin/env bash\necho \"$*\" >>\"" + calls + "\"\n"
+	if err := os.WriteFile(script, []byte(body), 0755); err != nil {
+		t.Fatalf("unable to write the fake docker: %s", err)
+	}
+
+	t.Setenv("DOCKER_BIN", script)
+	return calls
+}
+
+// A command run in a container of its own may need the image's entrypoint
+// cleared, as an image whose entrypoint starts the datastore would otherwise
+// start it rather than run the command. Hooks always honored the setting;
+// sidecar and offline commands dropped it without a word.
+func TestRunPassesTheEntrypointToItsContainer(t *testing.T) {
+	for _, mode := range []string{definition.ModeSidecar, definition.ModeOffline} {
+		t.Run(mode, func(t *testing.T) {
+			calls := fakeDocker(t)
+
+			entrypoint := ""
+			input := commandInput(definition.Command{
+				Exec:       []string{"dump"},
+				Mode:       mode,
+				Entrypoint: &entrypoint,
+			}, definition.Scope{})
+			input.Image = "example:1.0"
+
+			if err := Run(t.Context(), input); err != nil {
+				t.Fatalf("expected the command to run, got %s", err)
+			}
+
+			recorded, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatalf("unable to read the recorded calls: %s", err)
+			}
+
+			var run string
+			for _, line := range strings.Split(string(recorded), "\n") {
+				if strings.HasPrefix(line, "container run ") {
+					run = line
+				}
+			}
+
+			if run == "" {
+				t.Fatalf("expected a container run, got:\n%s", recorded)
+			}
+
+			if !strings.Contains(run, "--entrypoint= ") {
+				t.Errorf("expected the entrypoint cleared, got %q", run)
+			}
+		})
+	}
+}
+
 func TestRunOfflineNeedsTheServiceImage(t *testing.T) {
 	// without it there is nothing to run the command in, and finding that out
 	// after stopping the service would leave the datastore down for nothing
