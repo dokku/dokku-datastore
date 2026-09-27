@@ -137,6 +137,30 @@ func TestCreateServiceRefusesAnUnusableRestartPolicy(t *testing.T) {
 	}
 }
 
+// A wait timeout is checked the same way, since a service written down with one
+// the probe cannot use would fail every start after it.
+func TestCreateServiceRefusesAnUnusableWaitTimeout(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withDataRoot(t)
+
+	err := CreateService(t.Context(), CreateServiceInput{
+		Datastore:   datastore,
+		ServiceName: "lollipop",
+		WaitTimeout: "forever",
+	})
+	if err == nil {
+		t.Fatal("expected a malformed wait timeout to be refused, got no error")
+	}
+
+	if !strings.Contains(err.Error(), `invalid wait-timeout value "forever"`) {
+		t.Errorf("expected the error to name the value, got %q", err)
+	}
+
+	if root := service.Folders(datastore, "lollipop").Root; common.DirectoryExists(root) {
+		t.Errorf("a refused create left %s behind", root)
+	}
+}
+
 // And a password with no secret to go to: redis has no root password, so
 // --root-password would be dropped and the operator left believing it was set.
 func TestCreateServiceRefusesAPasswordWithNowhereToGo(t *testing.T) {

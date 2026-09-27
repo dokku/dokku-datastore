@@ -47,6 +47,8 @@ type CloneCommand struct {
 	logOpt []string
 	// restart is the docker restart policy to use for the service container
 	restart string
+	// waitTimeout is how long, in seconds, the service is waited on to become ready
+	waitTimeout string
 	// volume are the host paths and docker volumes to mount into the service
 	// container
 	volume []string
@@ -125,6 +127,7 @@ func (c *CloneCommand) FlagSet() *flag.FlagSet {
 	f.StringVar(&c.logDriver, "log-driver", "", "the docker logging driver to run the service container with (default: the daemon's own)")
 	f.StringSliceVar(&c.logOpt, "log-opt", []string{}, "a comma-separated list of key=value docker log options for the service container")
 	f.StringVar(&c.restart, "restart", "", "the docker restart policy to run the service container with (default: always)")
+	f.StringVar(&c.waitTimeout, "wait-timeout", "", "seconds to wait for the service to become ready (default: the datastore's own)")
 	// an array rather than a slice, since a slice flag splits on the comma a
 	// mount's own option list is separated by
 	f.StringArrayVar(&c.volume, "volume", []string{}, "a host path or docker volume to mount into the service container, as <source>:<container-dir>[:<options>], repeatable")
@@ -149,6 +152,7 @@ func (c *CloneCommand) AutocompleteFlags() complete.Flags {
 			"--log-driver":          complete.PredictAnything,
 			"--log-opt":             complete.PredictAnything,
 			"--restart":             complete.PredictSet("no", "always", "unless-stopped", "on-failure"),
+			"--wait-timeout":        complete.PredictAnything,
 			"--volume":              complete.PredictAnything,
 		},
 	)
@@ -296,6 +300,7 @@ func (c *CloneCommand) Run(args []string) int {
 		PostCreateNetworks: changedSlice(flags, "post-create-network", c.postCreateNetwork),
 		PostStartNetworks:  changedSlice(flags, "post-start-network", c.postStartNetwork),
 		RestartPolicy:      changedString(flags, "restart", c.restart),
+		WaitTimeout:        changedString(flags, "wait-timeout", c.waitTimeout),
 		ShmSize:            changedString(flags, "shm-size", c.shmSize),
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})

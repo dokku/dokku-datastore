@@ -169,6 +169,42 @@ skip_unless_log_is_capped() {
   assert_output ""
 }
 
+@test "($DEFINITION) a wait timeout reaches the readiness probe" {
+  run "$BIN" set "$PLUGIN" "$SERVICE" wait-timeout 90
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --wait-timeout
+  assert_success
+  assert_output "90"
+
+  # read when the probe runs rather than when a container is made, so a restart
+  # is enough for it to take
+  run "$BIN" restart "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_output --partial "to be ready (timeout: 90s)"
+
+  # and back to what every other check expects of this service
+  run "$BIN" set "$PLUGIN" "$SERVICE" wait-timeout
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --wait-timeout
+  assert_success
+  assert_output ""
+}
+
+@test "($DEFINITION) a wait timeout the probe cannot use is refused first" {
+  local value
+  for value in abc 0; do
+    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" wait-timeout "$value"
+    assert_failure
+    assert_stderr --partial "wait-timeout"
+  done
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --wait-timeout
+  assert_success
+  assert_output ""
+}
+
 @test "($DEFINITION) a mount reaches the container it is rebuilt with" {
   local source target="/opt/dokku-mount"
   source="$(mount_source properties)"

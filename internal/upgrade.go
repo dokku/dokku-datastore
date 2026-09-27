@@ -50,6 +50,10 @@ type UpgradeServiceInput struct {
 	// with
 	RestartPolicy *string
 
+	// WaitTimeout is how long, in seconds, the service is waited on to become
+	// ready
+	WaitTimeout *string
+
 	// Mounts are the host paths and docker volumes mounted into the service
 	// container
 	Mounts *[]service.Mount
@@ -86,6 +90,7 @@ func (i UpgradeServiceInput) changesSettings() bool {
 		i.LogDriver != nil ||
 		i.LogOptions != nil ||
 		i.RestartPolicy != nil ||
+		i.WaitTimeout != nil ||
 		i.Mounts != nil
 }
 
@@ -144,6 +149,11 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	}
 	if input.RestartPolicy != nil {
 		if err := service.ValidateRestartPolicy(*input.RestartPolicy); err != nil {
+			return err
+		}
+	}
+	if input.WaitTimeout != nil {
+		if err := service.ValidateWaitTimeout(*input.WaitTimeout); err != nil {
 			return err
 		}
 	}
@@ -355,6 +365,10 @@ func applyUpgradeSettings(input UpgradeServiceInput) error {
 	}
 	if input.RestartPolicy != nil {
 		properties[service.RestartPolicyProperty] = input.RestartPolicy
+	}
+	if input.WaitTimeout != nil {
+		trimmed := strings.TrimSpace(*input.WaitTimeout)
+		properties[service.WaitTimeoutProperty] = &trimmed
 	}
 
 	if input.Mounts != nil {

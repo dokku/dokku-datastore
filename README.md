@@ -220,6 +220,28 @@ dokku-datastore create redis lollipop --restart on-failure:5
 
 A definition still cannot set `restart:` itself. The policy belongs to the service rather than to the datastore it runs.
 
+## Readiness wait timeout
+
+A service is waited on with the `dokku/wait` probe until it answers on its port, after `create`, `clone`, `start`, `restart`, `upgrade` and `expose` and before an app's deploy starts it. The probe gave up after its own default of 30 seconds unless the definition said otherwise, and only elasticsearch did, at 60. On a slow host, or with an image that does more on its first boot, `create` failed with `ERROR: unable to connect` before the datastore was up, and nothing could raise the limit.
+
+A service may now name a timeout of its own, in seconds, through the `wait-timeout` property.
+
+```shell
+# wait up to two minutes for the service to answer
+dokku redis:set lollipop wait-timeout 120
+
+# and back to the host's or the datastore's default
+dokku redis:set lollipop wait-timeout
+```
+
+It is settable at `create`, `clone` and `upgrade` as well, with `--wait-timeout`, and `create` itself is waited on for that long. A `clone` not passed it takes the source's. A host that is slow for every service of a datastore sets `<VARIABLE>_WAIT_TIMEOUT` instead, `REDIS_WAIT_TIMEOUT` for redis.
+
+```shell
+dokku-datastore create postgres lollipop --wait-timeout 120
+```
+
+The service's own setting is used first, then the environment variable, then the definition's `x-dokku.wait_timeout`, and otherwise the probe's default. The value must be a whole number of seconds greater than zero, and anything else is refused, including a malformed environment variable. `info` reports what the service set, empty when nothing was. Unlike the container settings above, a change takes effect the next time the service is waited on, with no rebuild. The wait header names the timeout when one is in effect.
+
 ## Container memory limit
 
 A service's memory limit, in megabytes, is settable at `create`, `clone` and `upgrade` with `--memory`, and `0` means no limit. An `upgrade` not passed it keeps the limit the service has, and a `clone` not passed it takes the source's. `info --memory` reports it.

@@ -15,7 +15,7 @@ setup_file() {
   # out: a max-size is refused by a daemon that logs any way but json-file or
   # local, and the unit tests already cover copying them
   "$BIN" create "$PLUGIN" "$SERVICE" --image-version "$IMAGE_VERSION" \
-    --memory 512 --shm-size 128m --restart unless-stopped --custom-env FOO=bar \
+    --memory 512 --shm-size 128m --restart unless-stopped --custom-env FOO=bar --wait-timeout 120 \
     --volume "$(mount_source clone):$MOUNT_TARGET:ro"
   "$BIN" set "$PLUGIN" "$SERVICE" backup-keyserver keys.example.com
 }
@@ -50,7 +50,7 @@ clone_or_skip() {
   clone_or_skip "$COPY"
 
   local key expected
-  for key in memory shm-size custom-env restart-policy mounts backup-keyserver; do
+  for key in memory shm-size custom-env restart-policy wait-timeout mounts backup-keyserver; do
     run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" "--$key"
     assert_success
     expected="$output"
@@ -72,11 +72,18 @@ clone_or_skip() {
 @test "($DEFINITION) a flag passed to clone overrides that one setting" {
   local flags
   mapfile -t flags < <(password_flags "clonedpassword1234" "clonedrootpassword1234")
-  clone_or_skip "$OVERRIDE" --restart no --custom-env "" --volume "" "${flags[@]}"
+  clone_or_skip "$OVERRIDE" --restart no --wait-timeout 150 --custom-env "" --volume "" "${flags[@]}"
+
+  # the clone is waited on for as long as it was told to be, not the source's
+  assert_output --partial "to be ready (timeout: 150s)"
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$OVERRIDE" --restart-policy
   assert_success
   assert_output "no"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$OVERRIDE" --wait-timeout
+  assert_success
+  assert_output "150"
 
   # given empty, which clears what the source has rather than keeping it
   run --separate-stderr "$BIN" info "$PLUGIN" "$OVERRIDE" --custom-env

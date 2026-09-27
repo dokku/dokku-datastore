@@ -63,6 +63,10 @@ type CloneServiceInput struct {
 	// RestartPolicy is the docker restart policy the new container is run with
 	RestartPolicy *string
 
+	// WaitTimeout is how long, in seconds, the new service is waited on to
+	// become ready
+	WaitTimeout *string
+
 	// Mounts are the host paths and docker volumes mounted into the new
 	// container
 	Mounts *[]service.Mount
@@ -95,6 +99,7 @@ type serviceSettings struct {
 	PostStartNetworks  []string
 	RestartPolicy      string
 	ShmSize            string
+	WaitTimeout        string
 }
 
 // readServiceSettings reads the settings a service was created or set with.
@@ -134,6 +139,7 @@ func readServiceSettings(datastore *service.Datastore, serviceName string) (serv
 		PostStartNetworks:  splitList(service.PostStartNetwork(datastore, serviceName)),
 		RestartPolicy:      service.ServiceRestartPolicy(datastore, serviceName),
 		ShmSize:            common.ReadFirstLine(serviceFiles.ShmSize),
+		WaitTimeout:        service.ServiceWaitTimeout(datastore, serviceName),
 	}, nil
 }
 
@@ -153,6 +159,7 @@ func (s serviceSettings) withOverrides(input CloneServiceInput) serviceSettings 
 		{value: &s.LogDriver, override: input.LogDriver},
 		{value: &s.RestartPolicy, override: input.RestartPolicy},
 		{value: &s.ShmSize, override: input.ShmSize},
+		{value: &s.WaitTimeout, override: input.WaitTimeout},
 	}
 	for _, setting := range values {
 		if setting.override != nil {
@@ -246,6 +253,7 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 		RootPassword:       input.RootPassword,
 		ServiceName:        input.NewServiceName,
 		ShmSize:            settings.ShmSize,
+		WaitTimeout:        settings.WaitTimeout,
 		Logger:             input.Logger,
 	}); err != nil {
 		return err

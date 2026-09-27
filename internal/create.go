@@ -69,6 +69,10 @@ type CreateServiceInput struct {
 	// empty for the default
 	RestartPolicy string
 
+	// WaitTimeout is how long, in seconds, the service is waited on to become
+	// ready, empty for the default
+	WaitTimeout string
+
 	// Mounts are the host paths and docker volumes to mount into the service
 	// container beyond the definition's own
 	Mounts []service.Mount
@@ -139,6 +143,10 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	}
 
 	if err := service.ValidateRestartPolicy(input.RestartPolicy); err != nil {
+		return err
+	}
+
+	if err := service.ValidateWaitTimeout(input.WaitTimeout); err != nil {
 		return err
 	}
 
@@ -258,6 +266,7 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		PostCreateNetworks: input.PostCreateNetworks,
 		PostStartNetworks:  input.PostStartNetworks,
 		RestartPolicy:      input.RestartPolicy,
+		WaitTimeout:        input.WaitTimeout,
 		Mounts:             input.Mounts,
 		ServiceName:        input.ServiceName,
 		ShmSize:            input.ShmSize,

@@ -18,6 +18,7 @@ func TestUpgradeChangesSettings(t *testing.T) {
 	driver := "json-file"
 	options := []string{"max-size=20m"}
 	policy := "unless-stopped"
+	timeout := "120"
 	memory := 512
 
 	tests := []struct {
@@ -36,6 +37,7 @@ func TestUpgradeChangesSettings(t *testing.T) {
 		{name: "log driver", input: UpgradeServiceInput{LogDriver: &driver}, expected: true},
 		{name: "log options", input: UpgradeServiceInput{LogOptions: &options}, expected: true},
 		{name: "restart policy", input: UpgradeServiceInput{RestartPolicy: &policy}, expected: true},
+		{name: "wait timeout", input: UpgradeServiceInput{WaitTimeout: &timeout}, expected: true},
 	}
 
 	for _, test := range tests {
@@ -205,6 +207,27 @@ func TestUpgradeRefusesAnUnusableRestartPolicy(t *testing.T) {
 	}
 
 	if !strings.Contains(err.Error(), `invalid restart-policy value "sometimes"`) {
+		t.Errorf("expected the error to name the value, got %q", err)
+	}
+}
+
+// And a wait timeout, which would otherwise be written down and then fail the
+// wait the upgrade ends with, and every start after it.
+func TestUpgradeRefusesAnUnusableWaitTimeout(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withDataRoot(t)
+
+	timeout := "0"
+	err := UpgradeService(t.Context(), UpgradeServiceInput{
+		Datastore:   datastore,
+		ServiceName: "lollipop",
+		WaitTimeout: &timeout,
+	})
+	if err == nil {
+		t.Fatal("expected a malformed wait timeout to be refused, got no error")
+	}
+
+	if !strings.Contains(err.Error(), `invalid wait-timeout value "0"`) {
 		t.Errorf("expected the error to name the value, got %q", err)
 	}
 }

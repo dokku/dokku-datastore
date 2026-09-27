@@ -18,7 +18,7 @@ func TestSetPropertyRejectsUnknownKeys(t *testing.T) {
 		t.Fatal("expected an error for an unknown key, got none")
 	}
 
-	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, log-driver, log-opt, restart-policy"
+	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, log-driver, log-opt, restart-policy, wait-timeout"
 	if err.Error() != expected {
 		t.Errorf("expected %q, got %q", expected, err)
 	}
@@ -27,8 +27,9 @@ func TestSetPropertyRejectsUnknownKeys(t *testing.T) {
 func TestSettableProperties(t *testing.T) {
 	// the three the bash datastore plugins accept, the keyserver the backup image
 	// is told to fetch a public key from, which has nowhere else to be set, and
-	// the two that bound a container's log, and the policy docker restarts it by
-	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "log-driver", "log-opt", "restart-policy"}
+	// the two that bound a container's log, the policy docker restarts it by, and
+	// how long it is waited on to become ready
+	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "log-driver", "log-opt", "restart-policy", "wait-timeout"}
 	if strings.Join(SettableProperties, ",") != strings.Join(expected, ",") {
 		t.Errorf("expected %v, got %v", expected, SettableProperties)
 	}
@@ -96,6 +97,19 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 			key:      service.RestartPolicyProperty,
 			value:    "on-failure:abc",
 			expected: `invalid restart-policy value "on-failure:abc"`,
+		},
+		{
+			name:     "a wait timeout that is not a number",
+			key:      service.WaitTimeoutProperty,
+			value:    "forever",
+			expected: `invalid wait-timeout value "forever"`,
+		},
+		{
+			// clearing the setting is done by giving no value, not a zero
+			name:     "a wait timeout of zero",
+			key:      service.WaitTimeoutProperty,
+			value:    "0",
+			expected: `invalid wait-timeout value "0"`,
 		},
 	}
 

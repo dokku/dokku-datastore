@@ -37,6 +37,18 @@ func TestWaitArgs(t *testing.T) {
 			},
 			expected: "container run --rm --link=dokku.redis.lollipop:dokku-redis-lollipop --network=custom-network " + hostenv.WaitImage + " -c dokku-redis-lollipop:6379",
 		},
+		{
+			// a timeout is handed to the probe after what it connects to, and
+			// none at all leaves the probe's own default in place
+			name: "a service waited on for longer than the default",
+			input: WaitArgsInput{
+				ContainerName: "dokku.redis.lollipop",
+				NetworkAlias:  "dokku-redis-lollipop",
+				Port:          6379,
+				Timeout:       90,
+			},
+			expected: "container run --rm --link=dokku.redis.lollipop:dokku-redis-lollipop " + hostenv.WaitImage + " -c dokku-redis-lollipop:6379 -t 90",
+		},
 	}
 
 	for _, test := range tests {
@@ -45,6 +57,18 @@ func TestWaitArgs(t *testing.T) {
 				t.Errorf("expected:\n%s\ngot:\n%s", test.expected, actual)
 			}
 		})
+	}
+}
+
+// The timeout is said when there is one, so an operator who raised it can see
+// that it took.
+func TestWaitHeader(t *testing.T) {
+	if header := WaitHeader("lollipop", 90); header != "Waiting for lollipop container to be ready (timeout: 90s)" {
+		t.Errorf("unexpected header %q", header)
+	}
+
+	if header := WaitHeader("lollipop", 0); header != "Waiting for lollipop container to be ready" {
+		t.Errorf("unexpected header %q", header)
 	}
 }
 
