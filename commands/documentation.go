@@ -287,7 +287,8 @@ mounts and backup keyserver. A flag passed to clone overrides that one setting, 
 flag passed empty clears it
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --restart no --custom-env ""
 the password, exposed ports, links and backup credentials, schedule and encryption
-are not copied.`
+are not copied. The clone's passwords are generated unless they are given.
+dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --password <password>`
 }
 
 // Group is the readme usage section the command is documented under
@@ -355,7 +356,10 @@ the container is restarted by docker whenever it stops, which a service may chan
 dokku {{.CommandPrefix}}:create lollipop --restart unless-stopped
 the config options are handed to the process the container runs, not to docker, so
 a host path or docker volume is mounted with --volume, which may be repeated.
-dokku {{.CommandPrefix}}:create lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro`
+dokku {{.CommandPrefix}}:create lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro
+the service passwords are generated unless they are given. A datastore without a
+root password refuses --root-password rather than dropping it.
+dokku {{.CommandPrefix}}:create lollipop --password <password> --root-password <root-password>`
 }
 
 // Group is the readme usage section the command is documented under

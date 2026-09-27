@@ -38,6 +38,10 @@ type CloneServiceInput struct {
 	// Password overrides the generated service password
 	Password string
 
+	// RootPassword overrides the generated root password, for a datastore that
+	// has one
+	RootPassword string
+
 	// ServiceName is the name of the service to copy from
 	ServiceName string
 
@@ -73,8 +77,8 @@ type CloneServiceInput struct {
 // serviceSettings are the settings a service runs with that belong to the
 // service itself, and so are what a clone of it starts from.
 //
-// What is left out is left out on purpose. The password is generated for each
-// service, the database name comes from the service name, an exposed port
+// What is left out is left out on purpose. The passwords are generated for each
+// service unless the clone is given its own, the database name comes from the service name, an exposed port
 // would clash with the source's on the host, links belong to the apps, and the
 // backup credentials, schedule and encryption are secrets whose copy would
 // ship a second set of backups to the same bucket.
@@ -239,6 +243,7 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 		PostCreateNetworks: settings.PostCreateNetworks,
 		PostStartNetworks:  settings.PostStartNetworks,
 		RestartPolicy:      settings.RestartPolicy,
+		RootPassword:       input.RootPassword,
 		ServiceName:        input.NewServiceName,
 		ShmSize:            settings.ShmSize,
 		Logger:             input.Logger,

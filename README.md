@@ -293,6 +293,16 @@ echo 'SHOW TABLES;' | ssh dokku@dokku.me mysql:connect lollipop
 
 The dump is now streamed into that container over stdin, so nothing is mounted and a backup ships the same dump wherever dokku runs. The uploaded archive is laid out as before, with the dump at `backup/export`, so a backup is restored the same way whichever version made it.
 
+## Service passwords
+
+The passwords a definition declares under `secrets` are generated when a service is created, unless `--password` or `--root-password` gives one. Each flag sets the secret whose `env` is `SERVICE_PASSWORD` or `SERVICE_ROOT_PASSWORD`, and that environment variable is read when the flag is not given.
+
+```shell
+dokku-datastore create mysql lollipop --password <password> --root-password <root-password>
+```
+
+A datastore with no secret for a flag refuses it before anything is created, rather than starting on a generated password nobody was told about. Postgres and redis, for instance, have no root password, and memcached has no password at all.
+
 ## Cloned services
 
 A clone was made on the source's image and given its data, but nothing else about the source carried over: every other setting came from the flags passed to `clone`, so a clone made without repeating all of them landed on the defaults rather than on what the source runs with.
@@ -309,7 +319,7 @@ dokku-datastore clone redis lollipop lollipop-3 --restart no --custom-env ""
 
 The `<VARIABLE>_CONFIG_OPTIONS` and `<VARIABLE>_CUSTOM_ENV` environment variables are not read by `clone`. They fill in a new service, and the source already says what its clone should have. The networks are copied as well, since a container joins a network under its own service name and a clone next to its source does not clash with it.
 
-The password, the exposed ports, the app links and the backup credentials, schedule and encryption are not copied. The password is generated for each service, an exposed port would clash with the source's on the host, links belong to the apps, and a copied backup schedule would ship a second set of backups to the source's bucket.
+The password, the exposed ports, the app links and the backup credentials, schedule and encryption are not copied. The password is generated for each service unless `--password` or `--root-password` gives one, an exposed port would clash with the source's on the host, links belong to the apps, and a copied backup schedule would ship a second set of backups to the source's bucket.
 
 ## Exposed services
 

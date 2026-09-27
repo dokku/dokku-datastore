@@ -136,3 +136,28 @@ func TestCreateServiceRefusesAnUnusableRestartPolicy(t *testing.T) {
 		t.Errorf("a refused create left %s behind", root)
 	}
 }
+
+// And a password with no secret to go to: redis has no root password, so
+// --root-password would be dropped and the operator left believing it was set.
+func TestCreateServiceRefusesAPasswordWithNowhereToGo(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withDataRoot(t)
+
+	err := CreateService(t.Context(), CreateServiceInput{
+		Datastore:    datastore,
+		ServiceName:  "lollipop",
+		Password:     "given",
+		RootPassword: "given-root",
+	})
+	if err == nil {
+		t.Fatal("expected a root password for redis to be refused, got no error")
+	}
+
+	if !strings.Contains(err.Error(), "--root-password") {
+		t.Errorf("expected the error to name the flag, got %q", err)
+	}
+
+	if root := service.Folders(datastore, "lollipop").Root; common.DirectoryExists(root) {
+		t.Errorf("a refused create left %s behind", root)
+	}
+}

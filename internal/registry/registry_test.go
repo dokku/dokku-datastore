@@ -942,7 +942,7 @@ func TestOmnisciGeneratesItsRootPassword(t *testing.T) {
 		t.Error("expected a generated length rather than a fixed value")
 	}
 
-	// the flag the cli has always accepted and then dropped
+	// what --root-password is handed down as
 	if root.Env != "SERVICE_ROOT_PASSWORD" {
 		t.Errorf("expected --root-password to be wired up, got %q", root.Env)
 	}

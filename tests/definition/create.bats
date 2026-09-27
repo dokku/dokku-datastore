@@ -9,9 +9,17 @@
 
 load ../test_helper
 
+GIVEN_PASSWORD="givenpassword1234"
+GIVEN_ROOT_PASSWORD="givenrootpassword1234"
+
 setup_file() {
   datastore_setup_file
-  create_service "$SERVICE"
+
+  # given rather than generated, so that everything below also runs against a
+  # service whose passwords came from the flags
+  local flags
+  mapfile -t flags < <(password_flags "$GIVEN_PASSWORD" "$GIVEN_ROOT_PASSWORD")
+  "$BIN" create "$PLUGIN" "$SERVICE" --image-version "$IMAGE_VERSION" "${flags[@]}"
 }
 
 teardown_file() {
@@ -50,6 +58,63 @@ teardown_file() {
   assert_failure
   assert_stderr --partial "does not exist"
   [[ ! -d "$(service_root "$SERVICE-nomount")" ]] || fail "a refused create left $(service_root "$SERVICE-nomount") behind"
+}
+
+@test "($DEFINITION) a create with a root password the definition has no secret for is refused" {
+  declares_secret SERVICE_ROOT_PASSWORD && skip "$DEFINITION has a root password"
+
+  # the flag would otherwise be dropped and the service started on a password
+  # nobody was told. Refused before the pull, so this costs the daemon nothing
+  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-noroot" --image-version "$IMAGE_VERSION" --root-password "$GIVEN_ROOT_PASSWORD"
+  assert_failure
+  assert_stderr --partial -- "--root-password"
+  [[ ! -d "$(service_root "$SERVICE-noroot")" ]] || fail "a refused create left $(service_root "$SERVICE-noroot") behind"
+}
+
+@test "($DEFINITION) a create with a password the definition has no secret for is refused" {
+  declares_secret SERVICE_PASSWORD && skip "$DEFINITION has a password"
+
+  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-nopassword" --image-version "$IMAGE_VERSION" --password "$GIVEN_PASSWORD"
+  assert_failure
+  assert_stderr --partial -- "--password"
+  [[ ! -d "$(service_root "$SERVICE-nopassword")" ]] || fail "a refused create left $(service_root "$SERVICE-nopassword") behind"
+}
+
+@test "($DEFINITION) the passwords given at create are the ones the service has" {
+  declares_secret SERVICE_PASSWORD || skip "$DEFINITION has no password"
+
+  run cat "$(service_root)/PASSWORD"
+  assert_success
+  assert_output "$GIVEN_PASSWORD"
+
+  if declares_secret SERVICE_ROOT_PASSWORD; then
+    run cat "$(service_root)/ROOTPASSWORD"
+    assert_success
+    assert_output "$GIVEN_ROOT_PASSWORD"
+  fi
+
+  # graphite's connection string carries no password, so there is nothing to
+  # find in it there
+  if awk '/^  dsn:/ { found = 1 } found && /^  [a-z_]+:/ && !/^  dsn:/ { exit } found' "$DEFINITION_ROOT/docker-compose.yml" | grep -q 'Secret.password'; then
+    run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --dsn
+    assert_success
+    assert_output --partial "$GIVEN_PASSWORD"
+  fi
+}
+
+@test "($DEFINITION) the datastore accepts the passwords given at create" {
+  # the probe logs in with the credentials on disk, so a round trip through it
+  # proves the datastore was started with the given passwords rather than only
+  # that they were written down
+  local probe="$REPO_ROOT/tests/probes/$DEFINITION.sh"
+  [[ -x "$probe" ]] || skip "$DEFINITION has no probe"
+
+  run "$probe" write "$SERVICE"
+  assert_success
+
+  run --separate-stderr "$probe" read "$SERVICE"
+  assert_success
+  assert_output "known"
 }
 
 @test "($DEFINITION) the service is running and reports a connection string" {

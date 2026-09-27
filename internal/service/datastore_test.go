@@ -333,3 +333,137 @@ func TestVerbAction(t *testing.T) {
 		})
 	}
 }
+
+// The secrets are what --password and --root-password override, so a value
+// given to create has to be the one written, the environment is only a fallback,
+// and a secret already on disk is never replaced.
+func TestWriteSecrets(t *testing.T) {
+	mysql, ok := Datastores["mysql"]
+	if !ok {
+		t.Fatal("expected mysql to be registered")
+	}
+
+	tests := []struct {
+		name         string
+		overrides    map[string]string
+		env          map[string]string
+		existing     map[string]string
+		expected     map[string]string
+		generatedLen map[string]int
+	}{
+		{
+			name:      "overrides are written",
+			overrides: map[string]string{PasswordEnv: "given", RootPasswordEnv: "given-root"},
+			expected:  map[string]string{"PASSWORD": "given", "ROOTPASSWORD": "given-root"},
+		},
+		{
+			name:      "an override wins over the environment",
+			overrides: map[string]string{PasswordEnv: "given"},
+			env:       map[string]string{PasswordEnv: "from-env", RootPasswordEnv: "root-from-env"},
+			expected:  map[string]string{"PASSWORD": "given", "ROOTPASSWORD": "root-from-env"},
+		},
+		{
+			name:         "a secret with neither is generated",
+			overrides:    map[string]string{RootPasswordEnv: "given-root"},
+			expected:     map[string]string{"ROOTPASSWORD": "given-root"},
+			generatedLen: map[string]int{"PASSWORD": 16},
+		},
+		{
+			name:         "an empty override is generated",
+			overrides:    map[string]string{PasswordEnv: ""},
+			generatedLen: map[string]int{"PASSWORD": 16, "ROOTPASSWORD": 16},
+		},
+		{
+			name:      "a secret already on disk is kept",
+			overrides: map[string]string{PasswordEnv: "given", RootPasswordEnv: "given-root"},
+			existing:  map[string]string{"PASSWORD": "kept"},
+			expected:  map[string]string{"PASSWORD": "kept", "ROOTPASSWORD": "given-root"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(PasswordEnv, "")
+			t.Setenv(RootPasswordEnv, "")
+			for key, value := range test.env {
+				t.Setenv(key, value)
+			}
+
+			serviceRoot := withServiceRoot(t, mysql, "lollipop")
+			for file, value := range test.existing {
+				if err := os.WriteFile(filepath.Join(serviceRoot, file), []byte(value), 0600); err != nil {
+					t.Fatalf("unable to write %s: %s", file, err)
+				}
+			}
+
+			if err := mysql.writeSecrets("lollipop", test.overrides); err != nil {
+				t.Fatalf("unable to write the secrets: %s", err)
+			}
+
+			for file, expected := range test.expected {
+				contents, err := os.ReadFile(filepath.Join(serviceRoot, file))
+				if err != nil {
+					t.Fatalf("unable to read %s: %s", file, err)
+				}
+
+				if strings.TrimSpace(string(contents)) != expected {
+					t.Errorf("expected %s to hold %q, got %q", file, expected, contents)
+				}
+			}
+
+			for file, length := range test.generatedLen {
+				contents, err := os.ReadFile(filepath.Join(serviceRoot, file))
+				if err != nil {
+					t.Fatalf("unable to read %s: %s", file, err)
+				}
+
+				if len(strings.TrimSpace(string(contents))) != length {
+					t.Errorf("expected a generated %s of %d characters, got %q", file, length, contents)
+				}
+			}
+		})
+	}
+}
+
+// A password given for a secret the definition does not have would be dropped,
+// so it is refused instead, naming the flag it came from.
+func TestCheckSecretOverrides(t *testing.T) {
+	tests := []struct {
+		name      string
+		datastore string
+		overrides map[string]string
+		expected  string
+	}{
+		{name: "mysql takes both", datastore: "mysql", overrides: map[string]string{PasswordEnv: "a", RootPasswordEnv: "b"}},
+		{name: "redis takes a password", datastore: "redis", overrides: map[string]string{PasswordEnv: "a"}},
+		{name: "nothing given", datastore: "memcached", overrides: map[string]string{}},
+		{name: "empty values are not given", datastore: "memcached", overrides: map[string]string{PasswordEnv: "", RootPasswordEnv: ""}},
+		{name: "redis has no root password", datastore: "redis", overrides: map[string]string{PasswordEnv: "a", RootPasswordEnv: "b"}, expected: "--root-password"},
+		{name: "memcached has no password", datastore: "memcached", overrides: map[string]string{PasswordEnv: "a"}, expected: "--password"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			datastore, ok := Datastores[test.datastore]
+			if !ok {
+				t.Fatalf("expected %s to be registered", test.datastore)
+			}
+
+			err := CheckSecretOverrides(datastore.Definition, test.overrides)
+			if test.expected == "" {
+				if err != nil {
+					t.Errorf("expected no error, got %s", err)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("expected an error naming %s", test.expected)
+			}
+
+			if !strings.Contains(err.Error(), test.expected) || !strings.Contains(err.Error(), test.datastore) {
+				t.Errorf("expected an error naming %s and %s, got %s", test.expected, test.datastore, err)
+			}
+		})
+	}
+}

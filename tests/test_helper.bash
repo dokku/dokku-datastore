@@ -134,6 +134,24 @@ create_service() {
   "$BIN" create "$PLUGIN" "$1" --image-version "$IMAGE_VERSION"
 }
 
+# whether this definition declares a secret that the environment variable,
+# and so the flag handed down under it, sets
+declares_secret() {
+  grep -Eq "^[[:space:]]+env: $1\$" "$DEFINITION_ROOT/docker-compose.yml"
+}
+
+# the password flags this definition takes, each given the value named for it,
+# since a flag for a secret the definition does not have is refused
+password_flags() {
+  if declares_secret SERVICE_PASSWORD; then
+    printf '%s\n' --password "$1"
+  fi
+
+  if declares_secret SERVICE_ROOT_PASSWORD; then
+    printf '%s\n' --root-password "$2"
+  fi
+}
+
 service_root() {
   echo "$DOKKU_LIB_ROOT/services/$DATA_DIR/${1:-$SERVICE}"
 }

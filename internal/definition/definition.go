@@ -281,8 +281,10 @@ type Secret struct {
 	// and 64; a definition records what its datastore actually uses.
 	Length int `yaml:"length"`
 
-	// Env is an environment variable that overrides generation, which is what
-	// finally wires up --password and --root-password.
+	// Env is an environment variable that overrides generation. --password and
+	// --root-password are handed down under SERVICE_PASSWORD and
+	// SERVICE_ROOT_PASSWORD, and are refused for a definition with no secret
+	// naming them.
 	Env string `yaml:"env"`
 }
 
