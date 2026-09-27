@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1302,6 +1303,46 @@ func ValidateServiceName(serviceName string) error {
 	return nil
 }
 
+// ErrReservedServiceName is returned when a new service would be given a
+// database the datastore keeps for itself
+var ErrReservedServiceName = errors.New("service name is reserved")
+
+// reservedServiceNameError names the refused service and every name the
+// datastore reserves, so that someone refused one can pick another
+type reservedServiceNameError struct {
+	serviceName string
+	title       string
+	reserved    []string
+}
+
+func (e reservedServiceNameError) Error() string {
+	return fmt.Sprintf("service name %s is reserved by %s for a database of its own. Reserved names are: %s", e.serviceName, e.title, strings.Join(e.reserved, ", "))
+}
+
+func (e reservedServiceNameError) Is(target error) bool {
+	return target == ErrReservedServiceName
+}
+
+// CheckReservedServiceName refuses a name whose database would be one the
+// datastore keeps for itself. The database is named after the service with its
+// special characters replaced, so both are checked, and without regard to case,
+// since some datastores do not tell the two apart. Only a new service is checked:
+// one that already has such a name keeps working.
+func CheckReservedServiceName(d definition.Definition, serviceName string) error {
+	databaseName := SanitizeDatabaseName(serviceName)
+	for _, reserved := range d.Dokku.ReservedNames {
+		if !strings.EqualFold(reserved, serviceName) && !strings.EqualFold(reserved, databaseName) {
+			continue
+		}
+
+		names := append([]string{}, d.Dokku.ReservedNames...)
+		sort.Strings(names)
+		return reservedServiceNameError{serviceName: serviceName, title: d.Dokku.Title, reserved: names}
+	}
+
+	return nil
+}
+
 // validateTaggedImageExists checks if the image exists
 func validateTaggedImageExists(taggedImage string) error {
 	if common.VerifyImage(taggedImage) {
@@ -1319,13 +1360,17 @@ type WriteDatabaseNameInput struct {
 	ServiceName string
 }
 
+// SanitizeDatabaseName is the database name a new service is given. Some
+// datastores refuse special characters in a database name, so they are
+// normalised out the way the bash plugins' write_database_name did
+func SanitizeDatabaseName(serviceName string) string {
+	sanitizedDatabaseName := strings.ReplaceAll(serviceName, ".", "_")
+	return strings.ReplaceAll(sanitizedDatabaseName, "-", "_")
+}
+
 // WriteDatabaseName writes the database name to the service
 func WriteDatabaseName(input WriteDatabaseNameInput) error {
-	// some datastores refuse special characters in a database name, so they are
-	// normalised out the way the bash plugins' write_database_name did
-	sanitizedDatabaseName := strings.ReplaceAll(input.ServiceName, ".", "_")
-	sanitizedDatabaseName = strings.ReplaceAll(sanitizedDatabaseName, "-", "_")
-	return writeDatabaseNameFile(input.Datastore, input.ServiceName, sanitizedDatabaseName)
+	return writeDatabaseNameFile(input.Datastore, input.ServiceName, SanitizeDatabaseName(input.ServiceName))
 }
 
 // DatabaseName reads the database name a service recorded. A service with no

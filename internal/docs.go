@@ -67,6 +67,10 @@ type DocumentationData struct {
 	// refuses them is never documented as taking them
 	ExportArgs bool
 	ImportArgs bool
+
+	// ReservedNames are the service names create and clone refuse, because the
+	// database a service is named after would be one the datastore keeps
+	ReservedNames []string
 }
 
 // DocumentationDataInput is the input for the NewDocumentationData function
@@ -107,6 +111,7 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		Title:          input.Datastore.Title(),
 		ExportArgs:     input.Datastore.AcceptsExtraArgs("export"),
 		ImportArgs:     input.Datastore.AcceptsExtraArgs("import"),
+		ReservedNames:  input.Datastore.Definition.Dokku.ReservedNames,
 	}
 }
 

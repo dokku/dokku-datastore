@@ -259,6 +259,12 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		}
 	}
 
+	for _, name := range definition.Dokku.ReservedNames {
+		if strings.TrimSpace(name) == "" {
+			return fail("x-dokku.reserved_names has an empty entry, which would reserve nothing")
+		}
+	}
+
 	for name := range definition.Dokku.Commands {
 		// the base spec is fixed: a datastore's own commands are declared apart
 		// from it, so that what the tool implements cannot be extended by a

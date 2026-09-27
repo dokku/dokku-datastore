@@ -109,3 +109,7 @@ x-dokku:
       exec: ["pg_restore", "-h", "localhost", "-cO", "--if-exists", "-d", "{{ .Database }}", "-U", "postgres", "-w"]
       env:
         PGPASSWORD: "{{ .Secret.password }}"
+
+  # the templates every new database is copied from. postgres is left out: it
+  # is only the default database, and a service named after it works
+  reserved_names: [template0, template1]

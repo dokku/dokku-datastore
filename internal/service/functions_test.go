@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/dokku/docker-port-forward/portforward"
+	"github.com/dokku/dokku-datastore/internal/definition"
 )
 
 func TestValidateServiceName(t *testing.T) {
@@ -81,6 +82,72 @@ func TestInvalidServiceNameMessageNamesEveryValidCharacter(t *testing.T) {
 
 	if err := ValidateServiceName("service-with_both"); err != nil {
 		t.Errorf("expected a name using the dash and the underscore to be valid, got %q", err)
+	}
+}
+
+func TestSanitizeDatabaseName(t *testing.T) {
+	tests := map[string]string{
+		"lollipop":           "lollipop",
+		"information-schema": "information_schema",
+		"d.erp":              "d_erp",
+		"already_fine":       "already_fine",
+	}
+
+	for serviceName, expected := range tests {
+		if actual := SanitizeDatabaseName(serviceName); actual != expected {
+			t.Errorf("expected %s to be given %q, got %q", serviceName, expected, actual)
+		}
+	}
+}
+
+func TestCheckReservedServiceName(t *testing.T) {
+	reserving := definition.Definition{Dokku: definition.Dokku{
+		Title:         "MySQL",
+		ReservedNames: []string{"sys", "mysql", "information_schema"},
+	}}
+
+	tests := []struct {
+		name        string
+		definition  definition.Definition
+		serviceName string
+		reserved    bool
+	}{
+		{name: "a reserved name", definition: reserving, serviceName: "mysql", reserved: true},
+		{name: "a reserved name in another case", definition: reserving, serviceName: "MySQL", reserved: true},
+		{name: "a name whose database is reserved", definition: reserving, serviceName: "information-schema", reserved: true},
+		{name: "a name that only starts with a reserved one", definition: reserving, serviceName: "mysql-app"},
+		{name: "a name nothing reserves", definition: reserving, serviceName: "lollipop"},
+		{name: "a datastore reserving nothing", definition: definition.Definition{}, serviceName: "mysql"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := CheckReservedServiceName(test.definition, test.serviceName)
+			if !test.reserved {
+				if err != nil {
+					t.Fatalf("expected no error, got %q", err)
+				}
+				return
+			}
+
+			if !errors.Is(err, ErrReservedServiceName) {
+				t.Fatalf("expected %q, got %v", ErrReservedServiceName, err)
+			}
+		})
+	}
+}
+
+// The message is what someone with a refused name reads to pick another, so it
+// names the name, the datastore, and every name it reserves in a stable order.
+func TestReservedServiceNameMessage(t *testing.T) {
+	err := CheckReservedServiceName(definition.Definition{Dokku: definition.Dokku{
+		Title:         "MySQL",
+		ReservedNames: []string{"sys", "mysql", "information_schema"},
+	}}, "mysql")
+
+	expected := "service name mysql is reserved by MySQL for a database of its own. Reserved names are: information_schema, mysql, sys"
+	if err == nil || err.Error() != expected {
+		t.Errorf("expected %q, got %v", expected, err)
 	}
 }
 

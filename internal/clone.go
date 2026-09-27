@@ -229,6 +229,12 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 	sourceImage := recorded.Tagged()
 	image, imageVersion := recorded.Image, recorded.ImageVersion
 
+	// create refuses it too, but checked here as well so that a refused clone is
+	// never announced as though it had started
+	if err := service.CheckReservedServiceName(input.Datastore.ForImageVersion(imageVersion).Definition, input.NewServiceName); err != nil {
+		return err
+	}
+
 	// the same way for the rest of what the source runs with: a clone made
 	// without repeating every flag would otherwise land on the defaults
 	sourceSettings, err := readServiceSettings(input.Datastore, input.ServiceName)

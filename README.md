@@ -396,6 +396,20 @@ printf '%s' "$PASSPHRASE" | sha256sum
 
 The dump is now streamed into that container over stdin, so nothing is mounted and a backup ships the same dump wherever dokku runs. The uploaded archive is laid out as before, with the dump at `backup/export`, so a backup is restored the same way whichever version made it.
 
+## Reserved service names
+
+A service's database is named after the service, with hyphens replaced by underscores, so a service named after a database the datastore keeps for itself would hand its app that database. `create mysql mysql` made a service whose app was given MySQL's own `mysql` database. A definition lists the names its datastore keeps in `x-dokku.reserved_names`, and `create` and `clone` refuse a name that is one of them, or whose database would be, in any case.
+
+```shell
+# refused, and lists every name mysql reserves
+dokku-datastore create mysql mysql
+
+# refused too, since its database would be information_schema
+dokku-datastore create mysql information-schema
+```
+
+Only the databases a datastore uses for itself are reserved. A default database that works as a service's own, such as postgres' `postgres` or clickhouse's `default`, is not. A service that already has a reserved name is left as it is, and every command but `create` and `clone` works on it as before.
+
 ## Service passwords
 
 The passwords a definition declares under `secrets` are generated when a service is created, unless `--password` or `--root-password` gives one. Each flag sets the secret whose `env` is `SERVICE_PASSWORD` or `SERVICE_ROOT_PASSWORD`, and that environment variable is read when the flag is not given.
