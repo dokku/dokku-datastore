@@ -14,6 +14,7 @@ import (
 type composeFile struct {
 	Services map[string]composeService `yaml:"services"`
 	Networks map[string]composeNetwork `yaml:"networks,omitempty"`
+	Volumes  map[string]composeNetwork `yaml:"volumes,omitempty"`
 }
 
 // composeService is the service as dokku runs it, rather than as the definition
@@ -42,8 +43,11 @@ type composeService struct {
 	// so a custom env containing a dollar sign would mean two different things.
 	Environment map[string]string `yaml:"environment,omitempty"`
 
-	Volumes []string `yaml:"volumes,omitempty"`
-	ShmSize string   `yaml:"shm_size,omitempty"`
+	// Volumes are the short syntax strings the docker path passes to -v,
+	// followed by a composeVolume for each mount only --mount can express.
+	// Compose takes the two syntaxes mixed in one list.
+	Volumes []any  `yaml:"volumes,omitempty"`
+	ShmSize string `yaml:"shm_size,omitempty"`
 
 	Logging *composeLogging `yaml:"logging,omitempty"`
 
@@ -56,14 +60,55 @@ type composeService struct {
 	Deploy *composeDeploy `yaml:"deploy,omitempty"`
 }
 
+// composeVolume is compose's long volume syntax, for a docker volume mounted
+// from a subpath within it.
+type composeVolume struct {
+	Type     string              `yaml:"type"`
+	Source   string              `yaml:"source"`
+	Target   string              `yaml:"target"`
+	ReadOnly bool                `yaml:"read_only,omitempty"`
+	Volume   composeVolumeOption `yaml:"volume"`
+}
+
+type composeVolumeOption struct {
+	NoCopy  bool   `yaml:"nocopy,omitempty"`
+	Subpath string `yaml:"subpath"`
+}
+
+// composeVolumes is the volumes list for a service: what the docker path passes
+// to -v, then what it passes to --mount.
+func composeVolumes(arguments ContainerArgsInput) []any {
+	volumes := make([]any, 0, len(arguments.Volumes)+len(arguments.VolumeMounts))
+	for _, volume := range arguments.Volumes {
+		volumes = append(volumes, volume)
+	}
+
+	for _, mount := range arguments.VolumeMounts {
+		volumes = append(volumes, composeVolume{
+			Type:     "volume",
+			Source:   mount.Source,
+			Target:   mount.Target,
+			ReadOnly: mount.Readonly,
+			Volume:   composeVolumeOption{NoCopy: mount.NoCopy, Subpath: mount.Subpath},
+		})
+	}
+
+	if len(volumes) == 0 {
+		return nil
+	}
+
+	return volumes
+}
+
 // composeServiceNet is a service's attachment to one network.
 type composeServiceNet struct {
 	Aliases []string `yaml:"aliases,omitempty"`
 }
 
-// composeNetwork declares a network the service joins. It is always external:
-// dokku's networks are made by dokku, and compose must attach to one rather
-// than create it.
+// composeNetwork declares a network the service joins, or a docker volume it
+// mounts. It is always external: dokku's networks are made by dokku, and a
+// volume is made before the container is, so compose must attach to one rather
+// than create it under a name of its own.
 type composeNetwork struct {
 	External bool   `yaml:"external"`
 	Name     string `yaml:"name"`
@@ -110,7 +155,7 @@ func Compose(input Input) ([]byte, error) {
 			"dokku.service": arguments.CommandPrefix,
 		},
 		Environment: environment(input.Environment, arguments.Env),
-		Volumes:     arguments.Volumes,
+		Volumes:     composeVolumes(arguments),
 		ShmSize:     arguments.ShmSize,
 	}
 
@@ -137,6 +182,15 @@ func Compose(input Input) ([]byte, error) {
 		file.Networks = map[string]composeNetwork{
 			arguments.InitialNetwork: {External: true, Name: arguments.InitialNetwork},
 		}
+	}
+
+	// compose refuses a service that mounts a docker volume the file does not
+	// declare, where docker's -v creates one of that name
+	for _, name := range NamedVolumes(arguments) {
+		if file.Volumes == nil {
+			file.Volumes = map[string]composeNetwork{}
+		}
+		file.Volumes[name] = composeNetwork{External: true, Name: name}
 	}
 
 	file.Services = map[string]composeService{input.Definition.Dokku.Plugin: service}

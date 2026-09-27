@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/dokku/dokku-datastore/internal/definition"
 )
 
 func TestParseMountSpec(t *testing.T) {
@@ -123,6 +125,10 @@ func TestValidateMount(t *testing.T) {
 		{name: "an absolute subpath", mount: Mount{Source: "/srv/a", ContainerPath: "/opt/a", Subpath: "/etc"}, expected: "must be relative"},
 		{name: "a subpath that leaves the source", mount: Mount{Source: "/srv/a", ContainerPath: "/opt/a", Subpath: "one/../../etc"}, expected: "must not leave the mount source"},
 		{name: "an unknown chown", mount: Mount{Source: "/srv/a", ContainerPath: "/opt/a", Chown: "nobody"}, expected: "Unsupported chown permissions"},
+		{name: "a volume subpath with nocopy", mount: Mount{Source: "data", ContainerPath: "/opt/a", Subpath: "one", VolumeOptions: "nocopy"}},
+		{name: "a host path subpath with z", mount: Mount{Source: "/srv/a", ContainerPath: "/opt/a", Subpath: "one", VolumeOptions: "z"}},
+		{name: "a volume subpath with z", mount: Mount{Source: "data", ContainerPath: "/opt/a", Subpath: "one", VolumeOptions: "z"}, expected: "only takes nocopy"},
+		{name: "a volume subpath with propagation", mount: Mount{Source: "data", ContainerPath: "/opt/a", Subpath: "one", VolumeOptions: "rslave"}, expected: "only takes nocopy"},
 	}
 
 	for _, test := range tests {
@@ -146,8 +152,8 @@ func TestValidateMount(t *testing.T) {
 	}
 }
 
-// docker is handed the options it understands and nothing else, the way dokku's
-// storage plugin renders a docker-local mount, while the spec shows every field
+// docker is handed the host path with its subpath joined on, and the options it
+// understands, while the spec shows every field
 func TestMountVolumeAndSpec(t *testing.T) {
 	mount := Mount{
 		Source:        "/srv/a",
@@ -158,8 +164,8 @@ func TestMountVolumeAndSpec(t *testing.T) {
 		Chown:         "herokuish",
 	}
 
-	if volume := mount.Volume(); volume != "/srv/a:/opt/a:ro,z" {
-		t.Errorf("expected the volume /srv/a:/opt/a:ro,z, got %s", volume)
+	if volume := mount.Volume(); volume != "/srv/a/uploads:/opt/a:ro,z" {
+		t.Errorf("expected the volume /srv/a/uploads:/opt/a:ro,z, got %s", volume)
 	}
 
 	spec := mount.Spec()
@@ -179,6 +185,28 @@ func TestMountVolumeAndSpec(t *testing.T) {
 	plain := Mount{Source: "data", ContainerPath: "/opt/data"}
 	if plain.Volume() != "data:/opt/data" || plain.Spec() != "data:/opt/data" {
 		t.Errorf("expected a mount with no options to have none, got %s and %s", plain.Volume(), plain.Spec())
+	}
+}
+
+// A docker volume mounted from a subpath is one -v cannot say, so it is left out
+// of the -v arguments and handed over as a --mount instead.
+func TestVolumeMounts(t *testing.T) {
+	mounts := []Mount{
+		{Source: "/srv/a", ContainerPath: "/opt/a", Subpath: "uploads"},
+		{Source: "data", ContainerPath: "/opt/data"},
+		{Source: "data", ContainerPath: "/opt/sub", Subpath: "one/two", Readonly: true, VolumeOptions: "nocopy"},
+	}
+
+	expectedVolumes := []string{"/srv/a/uploads:/opt/a", "data:/opt/data"}
+	if volumes := MountVolumes(mounts); !reflect.DeepEqual(volumes, expectedVolumes) {
+		t.Errorf("expected %v, got %v", expectedVolumes, volumes)
+	}
+
+	expectedMounts := []definition.VolumeMount{
+		{Source: "data", Target: "/opt/sub", Subpath: "one/two", Readonly: true, NoCopy: true},
+	}
+	if volumeMounts := VolumeMounts(mounts); !reflect.DeepEqual(volumeMounts, expectedMounts) {
+		t.Errorf("expected %+v, got %+v", expectedMounts, volumeMounts)
 	}
 }
 
@@ -237,6 +265,16 @@ func TestCheckMounts(t *testing.T) {
 		{
 			name:     "a host path that does not exist",
 			mounts:   []Mount{{Source: missing, ContainerPath: "/opt/a"}},
+			expected: "Host path " + missing + " does not exist",
+		},
+		{
+			name:   "an existing subpath",
+			mounts: []Mount{{Source: filepath.Dir(source), ContainerPath: "/opt/a", Subpath: filepath.Base(source)}},
+		},
+		{
+			// the subpath is what docker is handed, so it is what has to exist
+			name:     "a subpath that does not exist",
+			mounts:   []Mount{{Source: source, ContainerPath: "/opt/a", Subpath: "missing"}},
 			expected: "Host path " + missing + " does not exist",
 		},
 		{

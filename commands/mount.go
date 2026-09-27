@@ -99,8 +99,8 @@ func (c *MountCommand) FlagSet() *flag.FlagSet {
 	f.BoolVar(&c.replace, "replace", false, "replace the service's entire set of mounts with the ones given")
 	f.BoolVar(&c.volumeReadonly, "volume-readonly", false, "mount the volume read only; not valid with --replace")
 	f.StringVar(&c.volumeOptions, "volume-options", "", "comma-separated docker mount options, such as z or nocopy; not valid with --replace")
-	f.StringVar(&c.volumeSubpath, "volume-subpath", "", "a subpath within the source, recorded but not applied; not valid with --replace")
-	f.StringVar(&c.volumeChown, "volume-chown", "", "a chown option, recorded but not applied; not valid with --replace")
+	f.StringVar(&c.volumeSubpath, "volume-subpath", "", "a subpath within the source to mount rather than the source itself; not valid with --replace")
+	f.StringVar(&c.volumeChown, "volume-chown", "", "who to hand the mounted directory to, for a host path inside the service's directory; not valid with --replace")
 	return f
 }
 
@@ -166,7 +166,7 @@ func (c *MountCommand) Run(args []string) int {
 		return 1
 	}
 
-	message, err := internal.MountService(internal.MountServiceInput{
+	message, err := internal.MountService(ctx, internal.MountServiceInput{
 		Chown:         c.volumeChown,
 		Datastore:     datastore,
 		Readonly:      c.volumeReadonly,

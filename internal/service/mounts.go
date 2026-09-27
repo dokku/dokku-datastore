@@ -65,13 +65,41 @@ type Mount struct {
 	// VolumeOptions are the other docker mount options, comma separated
 	VolumeOptions string `json:"volume_options,omitempty"`
 
-	// Subpath is recorded and reported but not applied, the way dokku's
-	// storage plugin treats it for a docker-local app
+	// Subpath is the directory within the source that is mounted rather than
+	// the source itself. A host path has it joined on; a docker volume is
+	// mounted through --mount, which is the only way docker can say it.
 	Subpath string `json:"subpath,omitempty"`
 
-	// Chown is recorded and reported but not applied, the way dokku's storage
-	// plugin treats it for a docker-local app
+	// Chown is who the mounted directory is handed to before the container is
+	// made, as a name dokku's storage plugin understands or a uid. It is only
+	// taken for a host path inside the service's own directory.
 	Chown string `json:"volume_chown,omitempty"`
+}
+
+// IsHostPath reports whether the mount's source is a host path rather than the
+// name of a docker volume.
+func (m Mount) IsHostPath() bool {
+	return strings.HasPrefix(m.Source, "/")
+}
+
+// NeedsMountFlag reports whether the mount can only be given to docker through
+// --mount: a docker volume mounted from a subpath within it.
+func (m Mount) NeedsMountFlag() bool {
+	return !m.IsHostPath() && m.Subpath != ""
+}
+
+// HostSource is the host path that is mounted, with the subpath joined on. It is
+// empty for a docker volume.
+func (m Mount) HostSource() string {
+	if !m.IsHostPath() {
+		return ""
+	}
+
+	if m.Subpath == "" {
+		return m.Source
+	}
+
+	return path.Join(m.Source, m.Subpath)
 }
 
 // MountFields says which of a mount's settings a spec named, so that one also
@@ -83,8 +111,9 @@ type MountFields struct {
 	Chown         bool
 }
 
-// Volume is the docker -v argument for a mount. The subpath and chown are left
-// out, which is what dokku's storage plugin does for a docker-local app.
+// Volume is the docker -v argument for a mount. A host path's subpath is
+// joined onto it; a docker volume with one is not a -v argument at all, and is
+// passed as a VolumeMount instead. The chown is not docker's to apply.
 func (m Mount) Volume() string {
 	options := []string{}
 	if m.Readonly {
@@ -94,7 +123,12 @@ func (m Mount) Volume() string {
 		options = append(options, m.VolumeOptions)
 	}
 
-	volume := m.Source + ":" + m.ContainerPath
+	source := m.Source
+	if m.IsHostPath() {
+		source = m.HostSource()
+	}
+
+	volume := source + ":" + m.ContainerPath
 	if len(options) > 0 {
 		volume += ":" + strings.Join(options, ",")
 	}
@@ -244,6 +278,12 @@ func ValidateMount(m Mount) error {
 	}
 
 	if m.Subpath != "" {
+		// --mount takes nocopy and nothing else of what -v does: relabelling
+		// and propagation belong to bind mounts, and a volume is not one
+		if m.NeedsMountFlag() && m.VolumeOptions != "" && m.VolumeOptions != "nocopy" {
+			return fmt.Errorf("Volume options %q cannot be used on a docker volume mounted from a subpath, which only takes nocopy", m.VolumeOptions) //nolint:staticcheck // matches dokku's storage plugin
+		}
+
 		if strings.HasPrefix(m.Subpath, "/") {
 			return fmt.Errorf("Volume subpath %q must be relative", m.Subpath) //nolint:staticcheck // matches dokku's storage plugin
 		}
@@ -381,13 +421,14 @@ func CheckMounts(d definition.Definition, mounts []Mount) error {
 	return nil
 }
 
-// checkMountSource reports whether a mount's host path exists.
+// checkMountSource reports whether a mount's host path exists, with its subpath
+// joined on, since that is the path docker is handed.
 //
 // A docker volume is not checked, since docker creates one that does not exist
 // and that is what naming one is for. Nor is a host path on a docker-in-docker
 // install, where the path dockerd resolves is not one this process can see.
 func checkMountSource(mount Mount) error {
-	if !strings.HasPrefix(mount.Source, "/") {
+	if !mount.IsHostPath() {
 		return nil
 	}
 
@@ -395,12 +436,13 @@ func checkMountSource(mount Mount) error {
 		return nil
 	}
 
-	if _, err := os.Stat(mount.Source); err != nil {
+	source := mount.HostSource()
+	if _, err := os.Stat(source); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("Host path %s does not exist", mount.Source) //nolint:staticcheck // matches dokku's storage plugin
+			return fmt.Errorf("Host path %s does not exist", source) //nolint:staticcheck // matches dokku's storage plugin
 		}
 
-		return fmt.Errorf("unable to check host path %s: %w", mount.Source, err)
+		return fmt.Errorf("unable to check host path %s: %w", source, err)
 	}
 
 	return nil
@@ -445,10 +487,35 @@ func WriteMounts(s *Datastore, serviceName string, mounts []Mount) error {
 	return nil
 }
 
+// VolumeMounts are the mounts in a set that only docker's --mount can express,
+// in order. MountVolumes leaves these out.
+func VolumeMounts(mounts []Mount) []definition.VolumeMount {
+	volumeMounts := []definition.VolumeMount{}
+	for _, mount := range mounts {
+		if !mount.NeedsMountFlag() {
+			continue
+		}
+
+		volumeMounts = append(volumeMounts, definition.VolumeMount{
+			Source:   mount.Source,
+			Target:   mount.ContainerPath,
+			Subpath:  mount.Subpath,
+			Readonly: mount.Readonly,
+			NoCopy:   mount.VolumeOptions == "nocopy",
+		})
+	}
+
+	return volumeMounts
+}
+
 // MountVolumes are the docker -v arguments for a set of mounts, in order
 func MountVolumes(mounts []Mount) []string {
 	volumes := make([]string, 0, len(mounts))
 	for _, mount := range mounts {
+		if mount.NeedsMountFlag() {
+			continue
+		}
+
 		volumes = append(volumes, mount.Volume())
 	}
 

@@ -257,7 +257,20 @@ Some mounts are refused before anything is written, where docker would only find
 
 On a docker-in-docker install the host path is one dockerd resolves rather than one this process can see, so whether it exists is not checked there.
 
-The subpath and the chown are recorded and shown but not applied, which is what `storage:mount` does for an app on the docker-local scheduler. `--phase` and `--process-type` are not taken, since a service is one process in one container, and neither is a storage entry made with `storage:create`.
+A subpath mounts a directory within the source rather than the source itself. For a host path it is joined onto the source, which is then the path that has to exist. A docker volume can only be mounted from a subpath through docker's `--mount`, or compose's long volume syntax, which needs Docker Engine 26.0 (api 1.45) or newer: an older daemon is refused before anything is written, and so is any mount option but `nocopy`, since the others belong to bind mounts. Docker requires the subpath to already exist inside the volume.
+
+```shell
+dokku elasticsearch:mount lollipop my-volume:/opt/extra:volume-subpath=uploads
+```
+
+A chown hands the mounted directory, and everything in it, to a user before the container is made, each time one is: `herokuish` (32767), `heroku` (1000), `paketo` (2000), `root` (0) or a uid, and `false` for none, as `storage:mount` names them. It runs as root in a throwaway busybox container, so the dokku user needs no grant. It is only taken for a host path inside the service's own directory, since anything else belongs to somebody other than the service, so it is refused for a docker volume and for a path anywhere else.
+
+```shell
+mkdir /var/lib/dokku/services/elasticsearch/lollipop/extra
+dokku elasticsearch:mount lollipop /var/lib/dokku/services/elasticsearch/lollipop/extra:/opt/extra:volume-chown=1000
+```
+
+Unlike `storage:mount` on the docker-local scheduler, which records both and applies neither, a service applies them. `--phase` and `--process-type` are not taken, since a service is one process in one container, and neither is a storage entry made with `storage:create`.
 
 Mounts may be given at `create`, `clone` and `upgrade` as well, with `--volume`, repeated for each. A `clone` not passed it takes the source's, and `--volume ""` gives it none. `info --mounts` reports every mount with all of its options, space separated. A change reaches a container the next time one is built: `restart` keeps the container it has, so a service already running takes a `stop` and then a `start`.
 

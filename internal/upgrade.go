@@ -200,7 +200,7 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	// mounts the service already has are checked too, since a host path removed
 	// since it was mounted would otherwise only be found once there is no
 	// container left to go back to
-	if err := checkUpgradeMounts(input, taggedImage); err != nil {
+	if err := checkUpgradeMounts(ctx, input, taggedImage); err != nil {
 		return err
 	}
 
@@ -375,7 +375,7 @@ func applyUpgradeSettings(input UpgradeServiceInput) error {
 // checkUpgradeMounts reports whether the mounts a service will have after an
 // upgrade can be given to the container it is upgraded to: the ones the upgrade
 // was asked for, and otherwise the ones the service already has.
-func checkUpgradeMounts(input UpgradeServiceInput, taggedImage string) error {
+func checkUpgradeMounts(ctx context.Context, input UpgradeServiceInput, taggedImage string) error {
 	var mounts []service.Mount
 	if input.Mounts != nil {
 		mounts = *input.Mounts
@@ -390,6 +390,9 @@ func checkUpgradeMounts(input UpgradeServiceInput, taggedImage string) error {
 	_, imageVersion, _ := definition.CutImage(taggedImage)
 	target := input.Datastore.ForImageVersion(imageVersion)
 	if err := service.CheckMounts(target.Definition, mounts); err != nil {
+		return fmt.Errorf("unable to upgrade %s: %w", input.ServiceName, err)
+	}
+	if err := service.CheckMountsOnHost(ctx, service.Folders(target, input.ServiceName).HostRoot, mounts); err != nil {
 		return fmt.Errorf("unable to upgrade %s: %w", input.ServiceName, err)
 	}
 

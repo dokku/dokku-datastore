@@ -56,6 +56,24 @@ func ComposeCreate(ctx context.Context, input ComposeInput) error {
 	return nil
 }
 
+// EnsureVolumes creates each docker volume that does not exist yet. The compose
+// file declares the volumes a service mounts as external, so that compose uses
+// the one of that name rather than one named for its project, and an external
+// volume has to exist before compose will make a container with it. Docker's
+// -v creates one on the way, and this is the same thing done first.
+func EnsureVolumes(ctx context.Context, names []string) error {
+	for _, name := range names {
+		if _, err := execx.Run(ctx, common.ExecCommandInput{
+			Command: common.DockerBin(),
+			Args:    []string{"volume", "create", name},
+		}); err != nil {
+			return fmt.Errorf("failed to create the %s volume: %w", name, err)
+		}
+	}
+
+	return nil
+}
+
 // ComposeStart starts a service's container.
 func ComposeStart(ctx context.Context, input ComposeInput) error {
 	if _, err := execx.Run(ctx, common.ExecCommandInput{

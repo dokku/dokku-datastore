@@ -56,6 +56,11 @@ type Scope struct {
 	// definition's volumes, so one may sit inside a directory those mount.
 	Mounts []string
 
+	// VolumeMounts are the mounts the service was given that docker's -v
+	// cannot express, a docker volume mounted from a subpath within it. They
+	// are handed to docker's --mount instead, and follow the ones above.
+	VolumeMounts []VolumeMount
+
 	// Args are the positional arguments of an extra subcommand.
 	Args map[string]string
 }
@@ -129,4 +134,23 @@ func TemplateNames(body string) []string {
 	}
 
 	return names
+}
+
+// VolumeMount is a docker volume mounted from a subpath within it, which only
+// docker's --mount and compose's long volume syntax can say.
+type VolumeMount struct {
+	// Source is the name of the docker volume
+	Source string
+
+	// Target is where the subpath appears inside the container
+	Target string
+
+	// Subpath is the directory within the volume that is mounted
+	Subpath string
+
+	// Readonly mounts the subpath read only
+	Readonly bool
+
+	// NoCopy leaves the image's content at the target out of a new volume
+	NoCopy bool
 }

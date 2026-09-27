@@ -1,9 +1,11 @@
 package render
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/dokku/dokku-datastore/internal/definition"
 	"gopkg.in/yaml.v3"
 )
 
@@ -257,6 +259,79 @@ func TestComposeCarriesTheMounts(t *testing.T) {
 	}
 	if strings.Index(document, "/srv/extra:/data/extra") < definitionVolume {
 		t.Errorf("expected the mounts to follow the definition's volumes, got:\n%s", document)
+	}
+}
+
+// Compose refuses a service that mounts a docker volume its file does not
+// declare, and one declared without external would be made under the project's
+// name rather than the one the operator gave.
+func TestComposeDeclaresTheDockerVolumes(t *testing.T) {
+	input := redisInput(t)
+	input.Scope.Mounts = []string{"/srv/extra:/data/extra:ro", "some-volume:/opt/extra"}
+
+	rendered, err := Compose(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	file := map[string]any{}
+	if err := yaml.Unmarshal(rendered, &file); err != nil {
+		t.Fatalf("unable to parse the rendered file: %s", err)
+	}
+
+	expected := map[string]any{"some-volume": map[string]any{"external": true, "name": "some-volume"}}
+	if !reflect.DeepEqual(file["volumes"], expected) {
+		t.Errorf("expected %v, got %v", expected, file["volumes"])
+	}
+
+	// and none at all when nothing mounts one
+	rendered, err = Compose(redisInput(t))
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+	if strings.Contains(string(rendered), "\nvolumes:") {
+		t.Errorf("expected no top level volumes, got:\n%s", rendered)
+	}
+}
+
+// A docker volume mounted from a subpath takes compose's long syntax, which is
+// the only one that can say so, after the short entries.
+func TestComposeCarriesAVolumeSubpath(t *testing.T) {
+	input := redisInput(t)
+	input.Scope.VolumeMounts = []definition.VolumeMount{
+		{Source: "some-volume", Target: "/opt/sub", Subpath: "one/two", Readonly: true, NoCopy: true},
+	}
+
+	rendered, err := Compose(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	file := struct {
+		Services map[string]struct {
+			Volumes []any `yaml:"volumes"`
+		} `yaml:"services"`
+		Volumes map[string]any `yaml:"volumes"`
+	}{}
+	if err := yaml.Unmarshal(rendered, &file); err != nil {
+		t.Fatalf("unable to parse the rendered file: %s", err)
+	}
+
+	volumes := file.Services["redis"].Volumes
+	last := volumes[len(volumes)-1]
+	expected := map[string]any{
+		"type":      "volume",
+		"source":    "some-volume",
+		"target":    "/opt/sub",
+		"read_only": true,
+		"volume":    map[string]any{"nocopy": true, "subpath": "one/two"},
+	}
+	if !reflect.DeepEqual(last, expected) {
+		t.Errorf("expected %v, got %v", expected, last)
+	}
+
+	if _, ok := file.Volumes["some-volume"]; !ok {
+		t.Errorf("expected some-volume to be declared, got %v", file.Volumes)
 	}
 }
 

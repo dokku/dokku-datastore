@@ -147,6 +147,9 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	if err := service.CheckMounts(input.Datastore.Definition, input.Mounts); err != nil {
 		return err
 	}
+	if err := service.CheckMountsOnHost(ctx, service.Folders(input.Datastore, input.ServiceName).HostRoot, input.Mounts); err != nil {
+		return err
+	}
 
 	// a password the definition has no secret for would be dropped, and the
 	// service would start on one nobody was told
