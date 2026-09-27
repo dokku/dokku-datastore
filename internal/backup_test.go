@@ -3,7 +3,9 @@ package internal
 import (
 	"archive/tar"
 	"bytes"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -727,6 +729,103 @@ func TestBackupAuthTightensAnExistingCredentialFile(t *testing.T) {
 
 	if mode := fileMode(t, folder); mode != BackupFolderMode {
 		t.Errorf("expected %s to be %o, got %o", folder, BackupFolderMode, mode)
+	}
+}
+
+// A setting left out of a later call used to stay in place, so backups kept
+// using it and info kept reporting it (#255).
+func TestBackupAuthReplacesEarlierSettings(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    BackupAuthInput
+		expected map[string]string
+	}{
+		{
+			name:  "no optional settings",
+			input: BackupAuthInput{},
+			expected: map[string]string{
+				defaultRegionFile:    "",
+				signatureVersionFile: "",
+				endpointURLFile:      "",
+			},
+		},
+		{
+			name:  "only a region",
+			input: BackupAuthInput{DefaultRegion: "eu-west-1"},
+			expected: map[string]string{
+				defaultRegionFile:    "eu-west-1",
+				signatureVersionFile: "",
+				endpointURLFile:      "",
+			},
+		},
+		{
+			name: "every optional setting",
+			input: BackupAuthInput{
+				DefaultRegion:    "eu-west-1",
+				EndpointURL:      "http://10.0.0.4:9000",
+				SignatureVersion: "s3v2",
+			},
+			expected: map[string]string{
+				defaultRegionFile:    "eu-west-1",
+				signatureVersionFile: "s3v2",
+				endpointURLFile:      "http://10.0.0.4:9000",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			datastore := service.Datastores["redis"]
+			withDataRoot(t)
+
+			if err := BackupAuth(t.Context(), BackupAuthInput{
+				AccessKeyID:      "AKIAEXAMPLE",
+				Datastore:        datastore,
+				DefaultRegion:    "us-east-1",
+				EndpointURL:      "http://10.0.0.3:9000",
+				SecretAccessKey:  "wJalrXUtnFEMI",
+				ServiceName:      "lollipop",
+				SignatureVersion: "s3v4",
+			}); err != nil {
+				t.Fatalf("failed to store the credentials: %s", err)
+			}
+
+			input := tt.input
+			input.AccessKeyID = "AKIANEW"
+			input.Datastore = datastore
+			input.SecretAccessKey = "newsecret"
+			input.ServiceName = "lollipop"
+			if err := BackupAuth(t.Context(), input); err != nil {
+				t.Fatalf("failed to replace the credentials: %s", err)
+			}
+
+			expected := map[string]string{
+				accessKeyIDFile:     "AKIANEW",
+				secretAccessKeyFile: "newsecret",
+			}
+			for name, value := range tt.expected {
+				expected[name] = value
+			}
+
+			folder := service.Folders(datastore, "lollipop").Backup
+			for name, value := range expected {
+				filename := filepath.Join(folder, name)
+				contents, err := os.ReadFile(filename)
+				if value == "" {
+					if !errors.Is(err, fs.ErrNotExist) {
+						t.Errorf("expected %s to be removed, got %q (%v)", name, contents, err)
+					}
+					continue
+				}
+
+				if err != nil {
+					t.Fatalf("failed to read %s: %s", filename, err)
+				}
+				if string(contents) != value {
+					t.Errorf("expected %s to be %q, got %q", name, value, contents)
+				}
+			}
+		})
 	}
 }
 

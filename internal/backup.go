@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -158,27 +159,40 @@ type BackupAuthInput struct {
 	SignatureVersion string
 }
 
-// BackupAuth stores the credentials backups are shipped with
+// BackupAuth stores the credentials backups are shipped with. The stored
+// settings are replaced as a whole, so an optional setting that is not passed
+// is removed rather than left over from an earlier call.
 func BackupAuth(ctx context.Context, input BackupAuthInput) error {
 	folder := service.Folders(input.Datastore, input.ServiceName).Backup
 
-	entries := map[string]string{
-		accessKeyIDFile:     input.AccessKeyID,
-		secretAccessKeyFile: input.SecretAccessKey,
+	// the pair is written first, which also creates the folder
+	if err := writeBackupFile(folder, accessKeyIDFile, input.AccessKeyID); err != nil {
+		return err
 	}
-	for name, value := range map[string]string{
-		defaultRegionFile:    input.DefaultRegion,
-		signatureVersionFile: input.SignatureVersion,
-		endpointURLFile:      input.EndpointURL,
-	} {
-		if value != "" {
-			entries[name] = value
-		}
+	if err := writeBackupFile(folder, secretAccessKeyFile, input.SecretAccessKey); err != nil {
+		return err
 	}
 
-	for name, value := range entries {
-		if err := writeBackupFile(folder, name, value); err != nil {
-			return err
+	optional := []struct {
+		name  string
+		value string
+	}{
+		{defaultRegionFile, input.DefaultRegion},
+		{signatureVersionFile, input.SignatureVersion},
+		{endpointURLFile, input.EndpointURL},
+	}
+
+	for _, entry := range optional {
+		if entry.value != "" {
+			if err := writeBackupFile(folder, entry.name, entry.value); err != nil {
+				return err
+			}
+			continue
+		}
+
+		filename := filepath.Join(folder, entry.name)
+		if err := os.Remove(filename); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("unable to remove %s: %w", filename, err)
 		}
 	}
 
