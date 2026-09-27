@@ -259,6 +259,45 @@ teardown_file() {
   assert_stderr --partial "only prints text"
 }
 
+@test "($DEFINITION) list leaves out a service a user-auth-service trigger hides" {
+  local plugins="$DOKKU_LIB_ROOT/plugins" bin="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$plugins/enabled/datastore-auth" "$bin"
+
+  # handed the user, the key's name, the datastore and every service, and
+  # prints the ones that may be seen. What it says on stderr, the way a traced
+  # trigger does, is not a service
+  cat >"$plugins/enabled/datastore-auth/user-auth-service" <<EOS
+#!/usr/bin/env bash
+echo "+ tracing $SERVICE" >&2
+for service in "\${@:4}"; do
+  [[ "\$service" == "$SERVICE" ]] || echo "\$service"
+done
+EOS
+  chmod +x "$plugins/enabled/datastore-auth/user-auth-service"
+
+  # plugn runs the trigger every enabled plugin has
+  cat >"$bin/plugn" <<'EOS'
+#!/usr/bin/env bash
+shift
+trigger="$1"
+shift
+for script in "$PLUGIN_PATH"/enabled/*/"$trigger"; do
+  "$script" "$@" || exit $?
+done
+EOS
+  chmod +x "$bin/plugn"
+
+  run --separate-stderr env PATH="$bin:$PATH" PLUGIN_PATH="$plugins" "$BIN" list "$PLUGIN"
+  rm -rf "$plugins/enabled/datastore-auth"
+  assert_success
+  refute_output --partial "$SERVICE"
+
+  # and with nothing to ask, it is listed
+  run --separate-stderr env PATH="$bin:$PATH" PLUGIN_PATH="$plugins" "$BIN" list "$PLUGIN"
+  assert_success
+  assert_output --partial "$SERVICE"
+}
+
 @test "($DEFINITION) destroy leaves nothing behind" {
   run "$BIN" destroy "$PLUGIN" "$SERVICE" --force
   assert_success
