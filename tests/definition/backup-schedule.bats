@@ -50,6 +50,19 @@ assert_crontab_regenerated() {
   assert_success
   assert_output "0 3 * * * dokku $PLUGIN:backup $SERVICE my-bucket &>> /var/log/dokku/$PLUGIN.log"
 
+  # and the same two as json, for something other than dokku to read
+  run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local --format json
+  assert_success
+  run jq -r '.[0] | [.schedule, .command, .["log-file"]] | join(";")' <<<"$output"
+  assert_success
+  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE my-bucket;/var/log/dokku/$PLUGIN.log"
+
+  run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE" --format json
+  assert_success
+  run jq -r '[.schedule, .["bucket-name"], (.["use-iam"] | tostring), .["crontab-line"]] | join("|")' <<<"$output"
+  assert_success
+  assert_output "0 3 * * *|my-bucket|false|0 3 * * * dokku $PLUGIN:backup $SERVICE my-bucket &>> /var/log/dokku/$PLUGIN.log"
+
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-schedule
   assert_success
   assert_output "0 3 * * *"

@@ -13,9 +13,6 @@ import (
 type ListServicesInput struct {
 	// Datastore is the service to list the services for
 	Datastore *service.Datastore
-
-	// Trace is whether to enable trace output
-	Trace bool
 }
 
 // ListServices lists all services of a given datastore type
@@ -45,7 +42,6 @@ func ListServices(ctx context.Context, input ListServicesInput) ([]string, error
 	services, err = service.FilterServices(ctx, service.FilterServicesInput{
 		Datastore: input.Datastore,
 		Services:  services,
-		Trace:     input.Trace,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to filter services: %w", err)

@@ -359,21 +359,66 @@ func CronEntry(commandPrefix string, serviceName string, schedule BackupSchedule
 	}, ";")
 }
 
+// CronTask is one line the cron-entries trigger prints, as its json form
+// reports it.
+type CronTask struct {
+	Schedule string `json:"schedule"`
+	Command  string `json:"command"`
+	LogFile  string `json:"log-file"`
+}
+
+// SplitCronEntry reads a line CronEntry built back into its fields. Neither the
+// schedule nor the command can hold a semicolon, since both are validated before
+// a line is built, so the first two separate the three.
+func SplitCronEntry(entry string) CronTask {
+	fields := strings.SplitN(entry, ";", 3)
+	for len(fields) < 3 {
+		fields = append(fields, "")
+	}
+
+	return CronTask{Schedule: fields[0], Command: fields[1], LogFile: fields[2]}
+}
+
 // CrontabLine builds the line dokku writes into its crontab for a scheduled
 // backup, the same way it writes any task handed to it by cron-entries
 func CrontabLine(commandPrefix string, serviceName string, schedule BackupSchedule) string {
 	return fmt.Sprintf("%s %s &>> %s", schedule.Schedule, backupCommand(commandPrefix, serviceName, schedule), BackupLogFile(commandPrefix))
 }
 
+// BackupScheduleReport is a service's scheduled backup as backup-schedule-cat
+// reports it in json: what it was scheduled with, and the crontab line that is
+// all the text form prints.
+type BackupScheduleReport struct {
+	Schedule    string `json:"schedule"`
+	BucketName  string `json:"bucket-name"`
+	UseIAM      bool   `json:"use-iam"`
+	CrontabLine string `json:"crontab-line"`
+}
+
+// BackupScheduleCatReport reports a service's scheduled backup
+func BackupScheduleCatReport(s *service.Datastore, serviceName string) (BackupScheduleReport, error) {
+	schedule, ok := ReadBackupSchedule(s, serviceName)
+	if !ok {
+		return BackupScheduleReport{}, fmt.Errorf("There is no scheduled backup for %s.", serviceName) //nolint:staticcheck // matches the bash datastore plugins
+	}
+
+	return BackupScheduleReport{
+		Schedule:    schedule.Schedule,
+		BucketName:  schedule.BucketName,
+		UseIAM:      schedule.UseIAM,
+		CrontabLine: CrontabLine(s.Properties().CommandPrefix, serviceName, schedule),
+	}, nil
+}
+
 // BackupScheduleCat returns the crontab line a service's scheduled backup runs
 // from
 func BackupScheduleCat(s *service.Datastore, serviceName string) (string, error) {
-	schedule, ok := ReadBackupSchedule(s, serviceName)
-	if !ok {
-		return "", fmt.Errorf("There is no scheduled backup for %s.", serviceName) //nolint:staticcheck // matches the bash datastore plugins
+	report, err := BackupScheduleCatReport(s, serviceName)
+	if err != nil {
+		return "", err
 	}
 
-	return CrontabLine(s.Properties().CommandPrefix, serviceName, schedule) + "\n", nil
+	return report.CrontabLine + "\n", nil
 }
 
 // ParseCronEntry reads back the schedule a legacy cron file was written with,

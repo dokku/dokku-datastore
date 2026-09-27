@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"os"
 	"testing"
 
+	"github.com/mitchellh/cli"
 	flag "github.com/spf13/pflag"
 )
 
@@ -68,6 +70,70 @@ func TestGlobalFlagsDefaults(t *testing.T) {
 				t.Errorf("expected trace %t, got %t", test.expectedTrace, c.trace)
 			}
 		})
+	}
+}
+
+// The flags are handed on as the environment dokku would have set, so the dokku
+// helpers this binary calls and every trigger it runs see them too.
+func TestLoggerAppliesTheGlobalFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		quietEnv string
+		traceEnv string
+		args     []string
+		quiet    string
+		trace    string
+	}{
+		{name: "nothing", quiet: "", trace: ""},
+		{name: "the flags", args: []string{"--quiet", "--trace"}, quiet: "1", trace: "1"},
+		// dokku's own checks only count 1
+		{name: "any value dokku forwarded", quietEnv: "true", traceEnv: "true", quiet: "1", trace: "1"},
+		{name: "turned off", quietEnv: "1", traceEnv: "1", args: []string{"--quiet=false", "--trace=false"}, quiet: "", trace: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("DOKKU_QUIET_OUTPUT", test.quietEnv)
+			t.Setenv("DOKKU_TRACE", test.traceEnv)
+
+			c := &GlobalFlagCommand{}
+			f := flag.NewFlagSet("test", flag.ContinueOnError)
+			c.GlobalFlags(f)
+			if err := f.Parse(test.args); err != nil {
+				t.Fatalf("failed to parse flags: %v", err)
+			}
+
+			logger := c.Logger(cli.NewMockUi())
+			if logger.Quiet != c.quiet || logger.Format != c.format {
+				t.Errorf("expected the ui to carry the flags, got %+v", logger)
+			}
+
+			if actual := os.Getenv("DOKKU_QUIET_OUTPUT"); actual != test.quiet {
+				t.Errorf("expected DOKKU_QUIET_OUTPUT %q, got %q", test.quiet, actual)
+			}
+			if actual := os.Getenv("DOKKU_TRACE"); actual != test.trace {
+				t.Errorf("expected DOKKU_TRACE %q, got %q", test.trace, actual)
+			}
+		})
+	}
+}
+
+func TestAskedForJSON(t *testing.T) {
+	tests := []struct {
+		args     []string
+		expected bool
+	}{
+		{args: []string{"redis", "help"}},
+		{args: []string{"redis", "redis:help", "--format", "json"}, expected: true},
+		{args: []string{"redis", "--format=json"}, expected: true},
+		{args: []string{"redis", "--format", "text"}},
+		{args: []string{"redis", "--format"}},
+	}
+
+	for _, test := range tests {
+		if actual := askedForJSON(test.args); actual != test.expected {
+			t.Errorf("expected %v for %v, got %v", test.expected, test.args, actual)
+		}
 	}
 }
 

@@ -131,6 +131,12 @@ func TestCronEntry(t *testing.T) {
 			if fields := strings.Split(actual, ";"); len(fields) != 3 {
 				t.Errorf("expected three fields, got %d in %q", len(fields), actual)
 			}
+
+			// and the json form reads the same three back
+			task := SplitCronEntry(actual)
+			if rebuilt := strings.Join([]string{task.Schedule, task.Command, task.LogFile}, ";"); rebuilt != actual {
+				t.Errorf("expected %q to split into its fields, got %+v", actual, task)
+			}
 		})
 	}
 }
@@ -202,6 +208,20 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 	}
 	if contents != "0 3 * * * dokku redis:backup lollipop my-bucket --use-iam &>> /var/log/dokku/redis.log\n" {
 		t.Errorf("unexpected cat output %q", contents)
+	}
+
+	report, err := BackupScheduleCatReport(datastore, "lollipop")
+	if err != nil {
+		t.Fatalf("failed to report the schedule: %s", err)
+	}
+	expectedReport := BackupScheduleReport{
+		Schedule:    "0 3 * * *",
+		BucketName:  "my-bucket",
+		UseIAM:      true,
+		CrontabLine: strings.TrimSuffix(contents, "\n"),
+	}
+	if report != expectedReport {
+		t.Errorf("expected %+v, got %+v", expectedReport, report)
 	}
 
 	// scheduling again without --use-iam drops it rather than keeping the old

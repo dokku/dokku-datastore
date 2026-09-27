@@ -116,12 +116,7 @@ func (c *BackupScheduleCatCommand) Run(args []string) int {
 		return 1
 	}
 
-	logger = internal.Ui{
-		Ui:     c.Ui,
-		Format: c.format,
-		Quiet:  c.quiet,
-		Trace:  c.trace,
-	}
+	logger = c.Logger(c.Ui)
 
 	arguments, err := c.ParsedArguments(flags.Args())
 	if err != nil {
@@ -184,12 +179,16 @@ func (c *BackupScheduleCatCommand) Run(args []string) int {
 		return 1
 	}
 
-	contents, err := internal.BackupScheduleCat(datastore, serviceName)
+	report, err := internal.BackupScheduleCatReport(datastore, serviceName)
 	if err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}
 
-	fmt.Print(contents)
+	if err := logger.Document(report, report.CrontabLine+"\n"); err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
+	}
+
 	return 0
 }

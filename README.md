@@ -418,6 +418,18 @@ dokku postgres:link lollipop playground
 dokku ps:restart playground
 ```
 
+## Quiet, trace and json output
+
+Every command takes `--quiet`, `--trace` and `--format`, and dokku's own `--quiet` and `--trace` reach it as `DOKKU_QUIET_OUTPUT` and `DOKKU_TRACE`.
+
+`--quiet` leaves out what a command says it is doing - its headers and progress messages - and keeps its errors, its warnings and whatever it was asked to print. `--trace` echoes every command run on the way, to stderr. Both are handed on as `DOKKU_QUIET_OUTPUT=1` and `DOKKU_TRACE=1`, so the triggers and `dokku` commands a command runs are quiet or traced the way the bash plugins' were.
+
+`--format json` prints a command's result as json on stdout: `create`, `info`, `list`, `links`, `app-links`, `backup-schedule-cat`, `trigger-cron-entries` and `trigger-service-list` have one. Everything else - progress, warnings and errors as json objects, and whatever a trigger or a docker command prints on the way - goes to stderr, so stdout can be handed straight to a json reader. The text a trigger prints without it is unchanged, since dokku reads it a line at a time. `readme` and `trigger-help` only print text, and refuse `--format json`.
+
+```shell
+dokku-datastore backup-schedule-cat redis lollipop --format json
+```
+
 ## Plugin documentation
 
 `trigger-help` and `readme` render the documentation a dokku datastore plugin ships, so that the plugin help and its readme cannot drift apart. Both read the description, argument sketch, long form prose and readme section that every command declares, alongside the arguments and flags the command already accepts.

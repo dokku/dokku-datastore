@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
@@ -121,12 +122,7 @@ func (c *TriggerServiceListCommand) Run(args []string) int {
 		return 1
 	}
 
-	logger = internal.Ui{
-		Ui:     c.Ui,
-		Format: c.format,
-		Quiet:  c.quiet,
-		Trace:  c.trace,
-	}
+	logger = c.Logger(c.Ui)
 
 	arguments, err := c.ParsedArguments(flags.Args())
 	if err != nil {
@@ -163,8 +159,18 @@ func (c *TriggerServiceListCommand) Run(args []string) int {
 		return 1
 	}
 
+	text := strings.Builder{}
 	for _, name := range names {
-		fmt.Println(name)
+		text.WriteString(name + "\n")
+	}
+
+	if names == nil {
+		names = []string{}
+	}
+
+	if err := logger.Document(names, text.String()); err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
 	}
 
 	return 0
