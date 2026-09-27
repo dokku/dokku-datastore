@@ -11,7 +11,7 @@ import (
 )
 
 // SettableProperties are the properties a service exposes through the set command
-var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.WaitTimeoutProperty, service.ExposeAddressProperty, service.ExposeSourceRangeProperty, service.ExportArgsProperty, service.ImportArgsProperty}
+var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.WaitTimeoutProperty, service.ExposeAddressProperty, service.ExposeSourceRangeProperty, service.ExportArgsProperty, service.ImportArgsProperty}
 
 // InvalidPropertyError reports a property the set command does not manage
 func InvalidPropertyError() error {
@@ -36,6 +36,8 @@ func ValidateProperty(key string) error {
 // service would be left unable to start by a command that said it had succeeded.
 func ValidatePropertyValue(key string, value string) error {
 	switch key {
+	case service.BackupStorageClassProperty:
+		return service.ValidateBackupStorageClass(value)
 	case service.LogDriverProperty:
 		return service.ValidateLogDriver(value)
 	case service.LogOptProperty:

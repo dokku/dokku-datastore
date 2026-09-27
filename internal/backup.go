@@ -43,6 +43,12 @@ const (
 // it is passed only when a service has one.
 const keyserverEnv = "KEYSERVER"
 
+// storageClassEnv is what the backup image reads to decide the s3 storage class
+// it uploads with. The property that sets it is
+// service.BackupStorageClassProperty, and like the keyserver it is passed only
+// when a service has one, so that the bucket's default applies otherwise.
+const storageClassEnv = "S3_STORAGE_CLASS"
+
 // backupSourceEnv tells the backup image where to read the backup from, and
 // backupSourceStdin has it read a tar stream on stdin
 const (
@@ -589,6 +595,10 @@ type BackupArgsInput struct {
 	// a service sets one so that the image otherwise keeps its own default
 	Keyserver string
 
+	// StorageClass is the s3 storage class the object is uploaded with, passed
+	// only when a service sets one so that the bucket's default otherwise applies
+	StorageClass string
+
 	// Image is the image the backup runs in
 	Image string
 }
@@ -644,6 +654,10 @@ func BackupArgs(input BackupArgsInput) ([]string, map[string]string) {
 		setenv(keyserverEnv, input.Keyserver)
 	}
 
+	if input.StorageClass != "" {
+		setenv(storageClassEnv, input.StorageClass)
+	}
+
 	return append(args, input.Image), env
 }
 
@@ -661,11 +675,12 @@ func Backup(ctx context.Context, input BackupInput) error {
 	commandPrefix := input.Datastore.Properties().CommandPrefix
 
 	arguments := BackupArgsInput{
-		BucketName: input.BucketName,
-		BackupName: fmt.Sprintf("%s-%s", commandPrefix, input.ServiceName),
-		Keyserver:  service.Keyserver(input.Datastore, input.ServiceName),
-		Image:      hostenv.S3BackupImage,
-		Settings:   map[string]string{},
+		BucketName:   input.BucketName,
+		BackupName:   fmt.Sprintf("%s-%s", commandPrefix, input.ServiceName),
+		Keyserver:    service.Keyserver(input.Datastore, input.ServiceName),
+		StorageClass: service.BackupStorageClass(input.Datastore, input.ServiceName),
+		Image:        hostenv.S3BackupImage,
+		Settings:     map[string]string{},
 	}
 
 	if !input.UseIAM {

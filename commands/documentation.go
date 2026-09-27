@@ -284,7 +284,7 @@ func (c *CloneCommand) Documentation() string {
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2
 the new service starts from the settings of the one it copies: its config options,
 custom env, memory, shm size, networks, log driver, log options, restart policy,
-mounts and backup keyserver. A flag passed to clone overrides that one setting, and a
+mounts, backup keyserver and backup storage class. A flag passed to clone overrides that one setting, and a
 flag passed empty clears it
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --restart no --custom-env ""
 the password, exposed ports, links and backup credentials, schedule and encryption
@@ -891,6 +891,10 @@ unset the post-create-network value
 dokku {{.CommandPrefix}}:set lollipop post-create-network
 set the keyserver a public key for backup encryption is fetched from
 dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com
+set the s3 storage class backups are uploaded with, one of STANDARD, REDUCED_REDUNDANCY, STANDARD_IA, ONEZONE_IA, INTELLIGENT_TIERING, GLACIER, DEEP_ARCHIVE or GLACIER_IR
+dokku {{.CommandPrefix}}:set lollipop backup-storage-class STANDARD_IA
+go back to uploading backups with the bucket's default storage class
+dokku {{.CommandPrefix}}:set lollipop backup-storage-class
 cap the container log at a size of your own rather than the one it inherits
 dokku {{.CommandPrefix}}:set lollipop log-opt max-size=20m,max-file=3
 keep the log unbounded, which is what a service had before there was anything to say here

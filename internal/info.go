@@ -43,6 +43,7 @@ var InfoKeys = []InfoKey{
 	{Name: "backup-public-key-id", Description: "show the gpg public key id backups are encrypted with"},
 	{Name: "backup-schedule", Description: "show the cron schedule backups run on"},
 	{Name: "backup-signature-version", Description: "show the signature version backups authenticate with"},
+	{Name: "backup-storage-class", Description: "show the s3 storage class backups are uploaded with"},
 	{Name: "backup-use-iam", Description: "show whether scheduled backups authenticate with an instance role"},
 	{Name: "config-dir", Description: "show the service configuration directory"},
 	{Name: "config-options", Description: "show the config options the service container is run with"},
@@ -122,6 +123,7 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info["service"] = input.ServiceName
 	info["backend"] = common.ReadFirstLine(serviceFiles.Backend)
 	info[service.KeyserverProperty] = service.Keyserver(input.Datastore, input.ServiceName)
+	info[service.BackupStorageClassProperty] = service.BackupStorageClass(input.Datastore, input.ServiceName)
 	info["custom-env"] = customEnv(serviceFiles.Env)
 	info["database-name"] = service.DatabaseName(input.Datastore, input.ServiceName)
 	info["definition"] = common.ReadFirstLine(serviceFiles.Definition)

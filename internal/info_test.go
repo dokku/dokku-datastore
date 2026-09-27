@@ -204,6 +204,31 @@ func TestInfoReportsAnUnsetPropertyAsEmpty(t *testing.T) {
 	}
 }
 
+// The storage class is reported as it was set, so tooling can tell which class
+// the next backup will be uploaded with, and as empty once it is cleared.
+func TestInfoReportsTheBackupStorageClass(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withInfoService(t, datastore, "lollipop")
+
+	if err := SetProperty(datastore, "lollipop", service.BackupStorageClassProperty, "STANDARD_IA"); err != nil {
+		t.Fatalf("failed to set the property: %s", err)
+	}
+
+	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if info[service.BackupStorageClassProperty] != "STANDARD_IA" {
+		t.Errorf("expected the storage class to be reported, got %q", info[service.BackupStorageClassProperty])
+	}
+
+	if err := SetProperty(datastore, "lollipop", service.BackupStorageClassProperty, ""); err != nil {
+		t.Fatalf("failed to unset the property: %s", err)
+	}
+
+	info = Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if info[service.BackupStorageClassProperty] != "" {
+		t.Errorf("expected an unset storage class to report empty, got %q", info[service.BackupStorageClassProperty])
+	}
+}
+
 // Backup settings are reported as being present and as a fingerprint rather
 // than as their values, because the credentials and the passphrase are secrets.
 func TestInfoReportsBackupStateWithoutItsSecrets(t *testing.T) {
@@ -222,6 +247,7 @@ func TestInfoReportsBackupStateWithoutItsSecrets(t *testing.T) {
 		"backup-public-key-id":          "",
 		"backup-schedule":               "",
 		"backup-signature-version":      "",
+		"backup-storage-class":          "",
 		"backup-use-iam":                "false",
 	} {
 		if info[key] != expected {

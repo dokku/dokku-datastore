@@ -87,6 +87,7 @@ type CloneServiceInput struct {
 // backup credentials, schedule and encryption are secrets whose copy would
 // ship a second set of backups to the same bucket.
 type serviceSettings struct {
+	BackupStorageClass string
 	ConfigOptions      string
 	CustomEnv          string
 	ExportArgs         string
@@ -129,6 +130,7 @@ func readServiceSettings(datastore *service.Datastore, serviceName string) (serv
 	}
 
 	return serviceSettings{
+		BackupStorageClass: service.BackupStorageClass(datastore, serviceName),
 		ConfigOptions:      service.ConfigOptions(datastore, serviceName),
 		CustomEnv:          customEnv(serviceFiles.Env),
 		ExportArgs:         service.ServiceExtraArgs(datastore, serviceName, service.ExportArgsProperty),
@@ -269,11 +271,18 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 		return err
 	}
 
-	// create has no flag for it, since it is only ever read when a backup runs,
-	// so it is written onto the clone once the clone exists
-	if settings.Keyserver != "" {
-		if err := SetProperty(input.Datastore, input.NewServiceName, service.KeyserverProperty, settings.Keyserver); err != nil {
-			return fmt.Errorf("failed to write the %s property: %w", service.KeyserverProperty, err)
+	// create has no flag for these, since they are only ever read when a backup
+	// runs, so they are written onto the clone once the clone exists
+	for property, value := range map[string]string{
+		service.KeyserverProperty:          settings.Keyserver,
+		service.BackupStorageClassProperty: settings.BackupStorageClass,
+	} {
+		if value == "" {
+			continue
+		}
+
+		if err := SetProperty(input.Datastore, input.NewServiceName, property, value); err != nil {
+			return fmt.Errorf("failed to write the %s property: %w", property, err)
 		}
 	}
 
