@@ -187,3 +187,38 @@ setup() {
   assert_success
   assert_output "$DEFINITION"
 }
+
+@test "($DEFINITION) an upgrade changes the memory limit and keeps it when not asked" {
+  # generous, since what is checked is that the limit lands rather than that the
+  # datastore runs in little memory
+  run "$BIN" upgrade "$PLUGIN" "$SERVICE" --memory 2048
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --memory
+  assert_success
+  assert_output "2048"
+
+  run container_inspect "$(service_container)" '{{ .HostConfig.Memory }}'
+  assert_success
+  assert_output "$((2048 * 1024 * 1024))"
+
+  # an upgrade that does not name it leaves it where it is
+  run "$BIN" upgrade "$PLUGIN" "$SERVICE" --restart always
+  assert_success
+
+  run container_inspect "$(service_container)" '{{ .HostConfig.Memory }}'
+  assert_success
+  assert_output "$((2048 * 1024 * 1024))"
+
+  # and zero takes it away
+  run "$BIN" upgrade "$PLUGIN" "$SERVICE" --memory 0
+  assert_success
+
+  run container_inspect "$(service_container)" '{{ .HostConfig.Memory }}'
+  assert_success
+  assert_output "0"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --status
+  assert_success
+  assert_output "running"
+}

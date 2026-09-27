@@ -220,6 +220,14 @@ dokku-datastore create redis lollipop --restart on-failure:5
 
 A definition still cannot set `restart:` itself. The policy belongs to the service rather than to the datastore it runs.
 
+## Container memory limit
+
+A service's memory limit, in megabytes, is settable at `create`, `clone` and `upgrade` with `--memory`, and `0` means no limit. An `upgrade` not passed it keeps the limit the service has, and a `clone` not passed it takes the source's. `info --memory` reports it.
+
+```shell
+dokku-datastore upgrade redis lollipop --memory 512
+```
+
 ## Mounted host paths and volumes
 
 `--config-options` is handed to the process a service container runs, not to docker, so a docker flag passed through it reaches the datastore's own command line. A `--volume` given that way broke the container's entrypoint and left the service unable to start, and there was no other way to mount anything into a service. A service may now be given mounts of its own with `mount` and `unmount`, which take what `dokku storage:mount` and `dokku storage:unmount` take for a host path or a docker volume.

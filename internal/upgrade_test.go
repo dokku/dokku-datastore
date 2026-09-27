@@ -2,6 +2,7 @@ package internal
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -17,6 +18,7 @@ func TestUpgradeChangesSettings(t *testing.T) {
 	driver := "json-file"
 	options := []string{"max-size=20m"}
 	policy := "unless-stopped"
+	memory := 512
 
 	tests := []struct {
 		name     string
@@ -30,6 +32,7 @@ func TestUpgradeChangesSettings(t *testing.T) {
 		{name: "post create networks", input: UpgradeServiceInput{PostCreateNetworks: &list}, expected: true},
 		{name: "post start networks", input: UpgradeServiceInput{PostStartNetworks: &list}, expected: true},
 		{name: "shm size", input: UpgradeServiceInput{ShmSize: &value}, expected: true},
+		{name: "memory", input: UpgradeServiceInput{Memory: &memory}, expected: true},
 		{name: "log driver", input: UpgradeServiceInput{LogDriver: &driver}, expected: true},
 		{name: "log options", input: UpgradeServiceInput{LogOptions: &options}, expected: true},
 		{name: "restart policy", input: UpgradeServiceInput{RestartPolicy: &policy}, expected: true},
@@ -51,6 +54,13 @@ func TestUpgradeCanClearASetting(t *testing.T) {
 	empty := ""
 	if !(UpgradeServiceInput{ConfigOptions: &empty}).changesSettings() {
 		t.Error("expected clearing config options to count as a change")
+	}
+
+	// a limit of zero is no limit, which is a value to set rather than an
+	// absent flag
+	unlimited := 0
+	if !(UpgradeServiceInput{Memory: &unlimited}).changesSettings() {
+		t.Error("expected clearing the memory limit to count as a change")
 	}
 }
 
@@ -248,5 +258,48 @@ func TestUpgradeSettingsKeepTheEnvironmentPrivate(t *testing.T) {
 	}
 	if string(contents) != env {
 		t.Errorf("expected the new environment, got %q", contents)
+	}
+}
+
+// The memory limit is read from its file each time a container is made, so an
+// upgrade changes it by writing the file, and leaves it alone when not asked.
+func TestApplyUpgradeSettingsWritesTheMemory(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withDataRoot(t)
+
+	files := service.Files(datastore, "lollipop")
+	if err := os.MkdirAll(service.Folders(datastore, "lollipop").Root, 0775); err != nil {
+		t.Fatalf("failed to create the service root: %s", err)
+	}
+	if err := os.WriteFile(files.Memory, []byte("512"), 0644); err != nil {
+		t.Fatalf("failed to write %s: %s", files.Memory, err)
+	}
+
+	readMemory := func() string {
+		t.Helper()
+		contents, err := os.ReadFile(files.Memory)
+		if err != nil {
+			t.Fatalf("failed to read %s: %s", files.Memory, err)
+		}
+		return string(contents)
+	}
+
+	if err := applyUpgradeSettings(UpgradeServiceInput{Datastore: datastore, ServiceName: "lollipop"}); err != nil {
+		t.Fatalf("failed to apply the settings: %s", err)
+	}
+	if actual := readMemory(); actual != "512" {
+		t.Errorf("expected the memory limit to be kept, got %q", actual)
+	}
+
+	for _, memory := range []int{256, 0} {
+		if err := applyUpgradeSettings(UpgradeServiceInput{Datastore: datastore, ServiceName: "lollipop", Memory: &memory}); err != nil {
+			t.Fatalf("failed to apply the settings: %s", err)
+		}
+		if actual, expected := readMemory(), strconv.Itoa(memory); actual != expected {
+			t.Errorf("expected %q, got %q", expected, actual)
+		}
+		if mode := fileMode(t, files.Memory); mode != 0644 {
+			t.Errorf("expected %s to be 644, got %o", files.Memory, mode)
+		}
 	}
 }
