@@ -184,43 +184,74 @@ func TestInfoReportsAnUnsetPropertyAsEmpty(t *testing.T) {
 	}
 }
 
-// Backup settings are reported as being present rather than as their values,
-// because the credentials and the passphrase are secrets.
+// Backup settings are reported as being present and as a fingerprint rather
+// than as their values, because the credentials and the passphrase are secrets.
 func TestInfoReportsBackupStateWithoutItsSecrets(t *testing.T) {
 	datastore := service.Datastores["redis"]
 	withInfoService(t, datastore, "lollipop")
 
 	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
 	for key, expected := range map[string]string{
-		"backup-authenticated": "false",
-		"backup-bucket":        "",
-		"backup-encrypted":     "false",
-		"backup-public-key-id": "",
-		"backup-schedule":      "",
-		"backup-use-iam":       "false",
+		"backup-auth-fingerprint":       "",
+		"backup-authenticated":          "false",
+		"backup-bucket":                 "",
+		"backup-default-region":         "",
+		"backup-encrypted":              "false",
+		"backup-encryption-fingerprint": "",
+		"backup-endpoint-url":           "",
+		"backup-public-key-id":          "",
+		"backup-schedule":               "",
+		"backup-signature-version":      "",
+		"backup-use-iam":                "false",
 	} {
 		if info[key] != expected {
 			t.Errorf("with nothing configured, expected %s to be %q, got %q", key, expected, info[key])
 		}
 	}
 
+	// half a pair is not something a backup can authenticate with
 	folders := service.Folders(datastore, "lollipop")
 	writeInfoFile(t, filepath.Join(folders.Backup, accessKeyIDFile), "AKIAEXAMPLE")
-	writeInfoFile(t, filepath.Join(folders.BackupEncryption, encryptionKeyFile), "a passphrase")
-	writeInfoFile(t, filepath.Join(folders.BackupEncryption, publicKeyIDFile), "DEADBEEF")
 
 	info = Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
 	for key, expected := range map[string]string{
-		"backup-authenticated": "true",
-		"backup-encrypted":     "true",
-		"backup-public-key-id": "DEADBEEF",
+		"backup-auth-fingerprint": "",
+		"backup-authenticated":    "false",
+	} {
+		if info[key] != expected {
+			t.Errorf("with only an access key id stored, expected %s to be %q, got %q", key, expected, info[key])
+		}
+	}
+
+	writeInfoFile(t, filepath.Join(folders.Backup, secretAccessKeyFile), "wJalrXUtnFEMI")
+	writeInfoFile(t, filepath.Join(folders.Backup, defaultRegionFile), "us-east-1")
+	writeInfoFile(t, filepath.Join(folders.Backup, signatureVersionFile), "s3v4")
+	writeInfoFile(t, filepath.Join(folders.Backup, endpointURLFile), "http://127.0.0.1:9000")
+	// the way the bash plugins wrote it, with echo, which a backup reads past
+	writeInfoFile(t, filepath.Join(folders.BackupEncryption, encryptionKeyFile), "a passphrase\n")
+	writeInfoFile(t, filepath.Join(folders.BackupEncryption, publicKeyIDFile), "DEADBEEF")
+
+	// the digests are what sha256sum prints, rather than recomputed here, so
+	// the format tooling compares against cannot drift unnoticed:
+	//   printf '%s\n%s' AKIAEXAMPLE wJalrXUtnFEMI | sha256sum
+	//   printf '%s' 'a passphrase' | sha256sum
+	info = Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	for key, expected := range map[string]string{
+		"backup-auth-fingerprint":       "405216607097c7a8e61ea3d1c6df1c8352cbf9c956da9d3a0e64657f7aa9dcd7",
+		"backup-authenticated":          "true",
+		"backup-default-region":         "us-east-1",
+		"backup-encrypted":              "true",
+		"backup-encryption-fingerprint": "33edb1c3746c802e8e12876b4a0ab6d2dbeaf56af9e4d90e51fa649e67230256",
+		"backup-endpoint-url":           "http://127.0.0.1:9000",
+		"backup-public-key-id":          "DEADBEEF",
+		"backup-signature-version":      "s3v4",
 	} {
 		if info[key] != expected {
 			t.Errorf("expected %s to be %q, got %q", key, expected, info[key])
 		}
 	}
 
-	for _, secret := range []string{"AKIAEXAMPLE", "a passphrase"} {
+	for _, secret := range []string{"AKIAEXAMPLE", "wJalrXUtnFEMI", "a passphrase"} {
 		for key, value := range info {
 			if strings.Contains(value, secret) {
 				t.Errorf("the %s key leaks a stored secret: %q", key, value)

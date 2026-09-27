@@ -540,7 +540,14 @@ dokku {{.CommandPrefix}}:info lollipop --status
 dokku {{.CommandPrefix}}:info lollipop --initial-network
 > NOTE: a flag cannot be combined with --format, and only one may be given
 the properties {{.CommandPrefix}}:set writes are reported under the names it takes, so a value read here can be written back:
-dokku {{.CommandPrefix}}:set lollipop initial-network my-network`
+dokku {{.CommandPrefix}}:set lollipop initial-network my-network
+the stored backup credentials and passphrase are never printed. each is reported as a lowercase hex sha256 fingerprint of the stored value, with surrounding whitespace trimmed, so a copy of the values can be compared against it:
+dokku {{.CommandPrefix}}:info lollipop --backup-auth-fingerprint
+dokku {{.CommandPrefix}}:info lollipop --backup-encryption-fingerprint
+the same fingerprints can be computed from the values that were passed to backup-auth and backup-set-encryption:
+
+    printf '%s\n%s' "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" | sha256sum
+    printf '%s' "$PASSPHRASE" | sha256sum`
 }
 
 // Group is the readme usage section the command is documented under

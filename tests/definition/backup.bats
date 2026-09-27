@@ -25,9 +25,53 @@ teardown_file() {
     assert_mode 640 "$(service_root)/backup/$name"
   done
 
+  # the pair is reported only as a fingerprint tooling can compute for itself
+  local fingerprint
+  fingerprint="$(printf '%s\n%s' AKIAEXAMPLE wJalrXUtnFEMI | sha256sum | cut -d' ' -f1)"
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-auth-fingerprint
+  assert_success
+  assert_output "$fingerprint"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --format json
+  assert_success
+  refute_output --partial "wJalrXUtnFEMI"
+  assert_output --partial '"backup-authenticated":"true"'
+  assert_output --partial '"backup-default-region":"us-east-1"'
+  assert_output --partial '"backup-signature-version":"s3v4"'
+  assert_output --partial '"backup-endpoint-url":"http://127.0.0.1:9000"'
+
   run "$BIN" backup-deauth "$PLUGIN" "$SERVICE"
   assert_success
   [[ ! -d "$(service_root)/backup" ]] || fail "backup-deauth left the credentials behind"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-auth-fingerprint
+  assert_success
+  assert_output ""
+}
+
+@test "($DEFINITION) the backup passphrase is reported as a fingerprint" {
+  run "$BIN" backup-set-encryption "$PLUGIN" "$SERVICE" "correct horse battery staple"
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup-set-encryption"
+  fi
+  assert_success
+
+  local fingerprint
+  fingerprint="$(printf '%s' "correct horse battery staple" | sha256sum | cut -d' ' -f1)"
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-encryption-fingerprint
+  assert_success
+  assert_output "$fingerprint"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --format json
+  assert_success
+  refute_output --partial "correct horse battery staple"
+
+  run "$BIN" backup-unset-encryption "$PLUGIN" "$SERVICE"
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-encryption-fingerprint
+  assert_success
+  assert_output ""
 }
 
 @test "($DEFINITION) export and import round trip" {

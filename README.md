@@ -308,6 +308,20 @@ ssh -t dokku@dokku.me mysql:connect lollipop
 echo 'SHOW TABLES;' | ssh dokku@dokku.me mysql:connect lollipop
 ```
 
+## Backup credentials in info
+
+`info` reports every setting `backup-auth` and `backup-set-encryption` store, so tooling can tell whether what it would apply is already in place. The region, signature version and endpoint are reported as they are, under `--backup-default-region`, `--backup-signature-version` and `--backup-endpoint-url`. The access key id and secret, and the backup passphrase, are secrets and are never printed. Each is reported as a lowercase hex sha256 fingerprint of the stored value with surrounding whitespace trimmed, under `--backup-auth-fingerprint` and `--backup-encryption-fingerprint`, and is empty when nothing is stored. `--backup-authenticated` is only `true` when both the access key id and the secret are stored, since a backup refuses to run with either one missing.
+
+A fingerprint is compared against one computed from a copy of the values:
+
+```shell
+# the access key id and the secret, joined by a newline
+printf '%s\n%s' "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" | sha256sum
+
+# the passphrase
+printf '%s' "$PASSPHRASE" | sha256sum
+```
+
 ## Backups when dokku runs in a container
 
 `backup` exported a service into a temporary directory and mounted it into the container that ships it to s3. The mount is resolved by dockerd, and when dokku is installed in docker that directory is inside the dokku container, where dockerd cannot see it. Docker mounted an empty directory in its place, and an archive holding nothing but an empty `backup` directory was uploaded and reported as a success.

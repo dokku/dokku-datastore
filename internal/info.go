@@ -2,6 +2,8 @@ package internal
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -30,12 +32,17 @@ type InfoKey struct {
 // anything that can be set can be read back.
 var InfoKeys = []InfoKey{
 	{Name: "backend", Description: "show the execution backend the service was created with"},
+	{Name: "backup-auth-fingerprint", Description: "show a sha256 fingerprint of the stored backup access key id and secret"},
 	{Name: "backup-authenticated", Description: "show whether backup credentials are stored for the service"},
 	{Name: "backup-bucket", Description: "show the bucket scheduled backups are shipped to"},
+	{Name: "backup-default-region", Description: "show the region backups authenticate against"},
 	{Name: "backup-encrypted", Description: "show whether scheduled backups are encrypted with a passphrase"},
+	{Name: "backup-encryption-fingerprint", Description: "show a sha256 fingerprint of the stored backup passphrase"},
+	{Name: "backup-endpoint-url", Description: "show the s3-compatible endpoint backups are shipped to"},
 	{Name: "backup-keyserver", Description: "show the keyserver backup public keys are fetched from"},
 	{Name: "backup-public-key-id", Description: "show the gpg public key id backups are encrypted with"},
 	{Name: "backup-schedule", Description: "show the cron schedule backups run on"},
+	{Name: "backup-signature-version", Description: "show the signature version backups authenticate with"},
 	{Name: "backup-use-iam", Description: "show whether scheduled backups authenticate with an instance role"},
 	{Name: "config-dir", Description: "show the service configuration directory"},
 	{Name: "config-options", Description: "show the config options the service container is run with"},
@@ -91,7 +98,8 @@ type InfoInput struct {
 // and adds what that has no way of saying: every property the set command
 // writes, the state recorded when the service was created, and the backup
 // settings. Nothing secret is reported - stored credentials and the backup
-// passphrase are reported as being present rather than as their values.
+// passphrase are reported as being present and as a sha256 fingerprint, never
+// as their values.
 //
 // It returns no error. A service whose container is gone, or whose files were
 // never written, reports an empty value rather than failing, because a report
@@ -129,8 +137,29 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info["mounts"] = service.MountSpecs(mounts)
 	info["shm-size"] = common.ReadFirstLine(serviceFiles.ShmSize)
 
-	info["backup-authenticated"] = strconv.FormatBool(common.FileExists(filepath.Join(serviceFolders.Backup, accessKeyIDFile)))
-	info["backup-encrypted"] = strconv.FormatBool(common.FileExists(filepath.Join(serviceFolders.BackupEncryption, encryptionKeyFile)))
+	// authenticated only when a backup would find both halves of the pair, since
+	// it refuses to run with either one missing. The secrets are fingerprinted
+	// as a backup reads them, so tooling holding the values it stored can tell
+	// whether they are still the ones in place
+	accessKeyID := filepath.Join(serviceFolders.Backup, accessKeyIDFile)
+	secretAccessKey := filepath.Join(serviceFolders.Backup, secretAccessKeyFile)
+	authenticated := common.FileExists(accessKeyID) && common.FileExists(secretAccessKey)
+	info["backup-authenticated"] = strconv.FormatBool(authenticated)
+	info["backup-auth-fingerprint"] = ""
+	if authenticated {
+		info["backup-auth-fingerprint"] = backupFingerprint(common.ReadFirstLine(accessKeyID), common.ReadFirstLine(secretAccessKey))
+	}
+	info["backup-default-region"] = common.ReadFirstLine(filepath.Join(serviceFolders.Backup, defaultRegionFile))
+	info["backup-signature-version"] = common.ReadFirstLine(filepath.Join(serviceFolders.Backup, signatureVersionFile))
+	info["backup-endpoint-url"] = common.ReadFirstLine(filepath.Join(serviceFolders.Backup, endpointURLFile))
+
+	encryptionKey := filepath.Join(serviceFolders.BackupEncryption, encryptionKeyFile)
+	encrypted := common.FileExists(encryptionKey)
+	info["backup-encrypted"] = strconv.FormatBool(encrypted)
+	info["backup-encryption-fingerprint"] = ""
+	if encrypted {
+		info["backup-encryption-fingerprint"] = backupFingerprint(common.ReadFirstLine(encryptionKey))
+	}
 	info["backup-public-key-id"] = common.ReadFirstLine(filepath.Join(serviceFolders.BackupEncryption, publicKeyIDFile))
 
 	schedule, _ := ReadBackupSchedule(input.Datastore, input.ServiceName)
@@ -139,6 +168,14 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info["backup-use-iam"] = strconv.FormatBool(schedule.UseIAM)
 
 	return info
+}
+
+// backupFingerprint is the lowercase hex sha256 of the values joined by
+// newlines. A stored value is a single line, so the join is unambiguous, and
+// the digest is what `printf '%s\n%s' "$a" "$b" | sha256sum` prints for it
+func backupFingerprint(values ...string) string {
+	sum := sha256.Sum256([]byte(strings.Join(values, "\n")))
+	return hex.EncodeToString(sum[:])
 }
 
 // customEnv renders the environment a service was created with the way the
