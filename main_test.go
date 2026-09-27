@@ -149,6 +149,69 @@ func TestLinkHelpShowsTheAliasInUse(t *testing.T) {
 	}
 }
 
+// The promote help walks through linking a second service and promoting it. The
+// variable names it shows are worked out here the way link and promote work
+// them out, so the example cannot name variables the code never sets.
+func TestPromoteHelpNamesTheGeneratedAliases(t *testing.T) {
+	t.Setenv("DOKKU_NO_COLOR", "1")
+
+	var promote internal.PluginCommand
+	for _, c := range registeredPluginCommands(t) {
+		if c.Name() == "promote" {
+			promote = c
+		}
+	}
+	if promote == nil {
+		t.Fatal("expected the registry to hold the promote command")
+	}
+
+	for _, name := range []string{"mysql", "redis"} {
+		t.Run(name, func(t *testing.T) {
+			datastore := service.Datastores[name]
+			data := internal.NewDocumentationData(internal.DocumentationDataInput{Datastore: datastore})
+			defaultKey := data.DefaultAlias + "_URL"
+
+			// lollipop is linked first and takes the default alias, so linking
+			// other_service falls back to a generated one
+			lollipopURL := "lollipop-url"
+			otherURL := "other-service-url"
+			environment := map[string]string{defaultKey: lollipopURL}
+			linkedKey := internal.AlternateAlias(datastore, environment) + "_URL"
+			environment[linkedKey] = otherURL
+
+			entries, err := internal.PromotionEntries(internal.PromoteServiceInput{
+				AppName:     "playground",
+				Datastore:   datastore,
+				ServiceName: "other_service",
+			}, environment, otherURL)
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			displacedKey := ""
+			for key, value := range entries {
+				if value == lollipopURL {
+					displacedKey = key
+				}
+			}
+			if displacedKey == "" {
+				t.Fatalf("expected promote to keep the displaced url, got %v", entries)
+			}
+
+			help, err := internal.PluginCommandHelp(promote, data)
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			for _, expected := range []string{linkedKey + "=", displacedKey + "="} {
+				if !strings.Contains(help, expected) {
+					t.Errorf("expected the help to contain %q, got:\n%s", expected, help)
+				}
+			}
+		})
+	}
+}
+
 func TestPluginCommandArgumentsAreDocumented(t *testing.T) {
 	for _, c := range registeredPluginCommands(t) {
 		t.Run(c.Name(), func(t *testing.T) {

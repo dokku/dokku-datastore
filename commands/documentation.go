@@ -818,7 +818,7 @@ func (c *PromoteCommand) Documentation() string {
 	return `if you have a {{.CommandPrefix}} service linked to an app and try to link another {{.CommandPrefix}} service
 another link environment variable will be generated automatically:
 
-    DOKKU_{{.DefaultAlias}}_BLUE_URL={{.Scheme}}://:ANOTHER_PASSWORD@dokku-{{.CommandPrefix}}-other-service:{{.Port}}/other_service
+    {{.AltAlias}}_AQUA_URL={{.Scheme}}://:ANOTHER_PASSWORD@dokku-{{.CommandPrefix}}-other-service:{{.Port}}/other_service
 
 you can promote the new service to be the primary one
 > NOTE: this will restart your app
@@ -828,8 +828,8 @@ another environment variable to hold the previous value if necessary.
 you could end up with the following for example:
 
     {{.DefaultAlias}}_URL={{.Scheme}}://:ANOTHER_PASSWORD@dokku-{{.CommandPrefix}}-other-service:{{.Port}}/other_service
-    DOKKU_{{.DefaultAlias}}_BLUE_URL={{.Scheme}}://:ANOTHER_PASSWORD@dokku-{{.CommandPrefix}}-other-service:{{.Port}}/other_service
-    DOKKU_{{.DefaultAlias}}_SILVER_URL={{.Scheme}}://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}/lollipop`
+    {{.AltAlias}}_AQUA_URL={{.Scheme}}://:ANOTHER_PASSWORD@dokku-{{.CommandPrefix}}-other-service:{{.Port}}/other_service
+    {{.AltAlias}}_BLACK_URL={{.Scheme}}://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}/lollipop`
 }
 
 // Group is the readme usage section the command is documented under

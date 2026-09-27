@@ -58,6 +58,7 @@ func TestNewDocumentationData(t *testing.T) {
 		actual   string
 		expected string
 	}{
+		{name: "alt alias", actual: data.AltAlias, expected: "DOKKU_REDIS"},
 		{name: "command prefix", actual: data.CommandPrefix, expected: "redis"},
 		{name: "default alias", actual: data.DefaultAlias, expected: "REDIS"},
 		{name: "plugin variable", actual: data.PluginVariable, expected: "REDIS"},
