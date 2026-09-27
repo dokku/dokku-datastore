@@ -699,59 +699,90 @@ type FilterServicesInput struct {
 	Services []string
 }
 
-// FilterServices filters out services that are not allowed by the user-auth-service trigger
+// UserAuthServiceTrigger is the trigger a plugin implements to hide services
+// from a user. It is handed the ssh user, the ssh key's name, the datastore's
+// command prefix and every service name, and prints the ones that user may see,
+// one per line on stdout.
+const UserAuthServiceTrigger = "user-auth-service"
+
+// userAuthServiceTriggerExists reports whether a plugin other than dokku's own
+// 20_events implements the user-auth-service trigger, which is the rule the
+// bash plugins and dokku's own app filter both apply.
+func userAuthServiceTriggerExists() (bool, error) {
+	enabled := filepath.Join(PluginPath, "enabled")
+	triggers, err := filepath.Glob(filepath.Join(enabled, "*", UserAuthServiceTrigger))
+	if err != nil {
+		return false, fmt.Errorf("failed to glob plugins with the %s trigger: %w", UserAuthServiceTrigger, err)
+	}
+
+	for _, trigger := range triggers {
+		if filepath.Base(filepath.Dir(trigger)) != "20_events" {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// FilterServices filters out services that are not allowed by the
+// user-auth-service trigger, the way the bash plugins did.
+//
+// The user and the key's name are read the way dokku's own app filter reads
+// them: SSH_USER, falling back to USER, and SSH_NAME, falling back to the NAME
+// sshcommand sets for the key and then to default.
 func FilterServices(ctx context.Context, input FilterServicesInput) ([]string, error) {
 	if len(input.Services) == 0 {
 		return input.Services, nil
 	}
 
-	// check if there are plugins with the user-auth-service trigger
-	triggers, err := filepath.Glob(filepath.Join(PluginPath, "enabled", "*", "user-auth-service"))
+	exists, err := userAuthServiceTriggerExists()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return input.Services, nil
-		}
-		return input.Services, fmt.Errorf("failed to glob plugins with user-auth-service trigger: %w", err)
+		return input.Services, err
 	}
 
-	if len(triggers) == 0 {
+	if !exists {
 		return input.Services, nil
 	}
 
-	// check if there is only one trigger and if the file  `PLUGIN_PATH/enabled/20_events/user-auth-service` exists
-	if len(triggers) == 1 {
-		if _, err := os.Stat(filepath.Join(PluginPath, "enabled", "20_events", "user-auth-service")); err == nil {
-			return input.Services, nil
-		}
+	sshUser := os.Getenv("SSH_USER")
+	if sshUser == "" {
+		sshUser = os.Getenv("USER")
 	}
 
-	// the output of this trigger should be all the services a user has access to
-	defaultSShUser := os.Getenv("SSH_USER")
-	defaultSShName := os.Getenv("SSH_NAME")
-	if defaultSShUser == "" {
-		defaultSShUser = os.Getenv("USER")
+	sshName := os.Getenv("SSH_NAME")
+	if sshName == "" {
+		sshName = os.Getenv("NAME")
 	}
-	if defaultSShName == "" {
-		defaultSShName = "default"
+	if sshName == "" {
+		sshName = "default"
 	}
 
 	pluginCommandPrefix := input.Datastore.Properties().CommandPrefix
 	results, err := execx.PlugnTrigger(ctx, common.PlugnTriggerInput{
-		Trigger: "user-auth-app",
-		Args:    append([]string{defaultSShUser, defaultSShName, pluginCommandPrefix}, input.Services...),
+		Trigger: UserAuthServiceTrigger,
+		Args:    append([]string{sshUser, sshName, pluginCommandPrefix}, input.Services...),
 		Env: map[string]string{
-			"SSH_NAME": defaultSShName,
-			"SSH_USER": defaultSShUser,
+			"SSH_NAME": sshName,
+			"SSH_USER": sshUser,
 		},
 	})
 	if err != nil {
-		return input.Services, fmt.Errorf("failed to call user-auth-service trigger: %w", err)
+		return input.Services, fmt.Errorf("failed to call the %s trigger: %w", UserAuthServiceTrigger, err)
+	}
+
+	// read from stdout, where the trigger prints what may be seen: stderr is
+	// where a trigger says anything else, its set -x trace included. Only a
+	// service that was asked about is kept, so a trigger cannot list one that
+	// does not exist
+	asked := map[string]bool{}
+	for _, serviceName := range input.Services {
+		asked[serviceName] = true
 	}
 
 	filteredServices := make([]string, 0)
-	for line := range strings.SplitSeq(results.StderrContents(), "\n") {
+	for line := range strings.SplitSeq(results.StdoutContents(), "\n") {
 		trimmedLine := strings.TrimSpace(line)
-		if trimmedLine == "" {
+		if trimmedLine == "" || !asked[trimmedLine] {
 			continue
 		}
 

@@ -418,6 +418,26 @@ dokku postgres:link lollipop playground
 dokku ps:restart playground
 ```
 
+## Hiding services from users
+
+A plugin may hide services from some users by implementing the `user-auth-service` trigger, the one the bash plugins fired. It is handed the ssh user, the name of the ssh key they connected with, the datastore's command prefix and every service, and prints the services that user may see, one per line on stdout. Anything it prints on stderr is ignored, and a service it names that was not asked about is dropped. `list`, `info` with no service named, `app-links` and the triggers that list services all see only what it prints.
+
+```shell
+#!/usr/bin/env bash
+# hides any service whose name starts with admin- from everybody but root
+main() {
+  declare SSH_USER="$1" SSH_NAME="$2" COMMAND_PREFIX="$3"
+  for service in "${@:4}"; do
+    [[ "$service" == admin-* ]] && [[ "$SSH_USER" != "root" ]] && [[ "$SSH_NAME" != "root" ]] && continue
+    echo "$service"
+  done
+}
+
+main "$@"
+```
+
+The user is `SSH_USER`, or `USER` without one, and the key's name is `SSH_NAME`, or the `NAME` sshcommand sets for the key, or `default`. Nothing is asked when no plugin implements it, and one in dokku's own `20_events` plugin is not counted, as the bash plugins did not count it.
+
 ## Quiet, trace and json output
 
 Every command takes `--quiet`, `--trace` and `--format`, and dokku's own `--quiet` and `--trace` reach it as `DOKKU_QUIET_OUTPUT` and `DOKKU_TRACE`.
