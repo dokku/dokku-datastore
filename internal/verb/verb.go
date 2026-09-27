@@ -219,16 +219,17 @@ func runSidecar(ctx context.Context, input RunInput) error {
 	}
 
 	return backend.Run(ctx, backend.RunInput{
-		Image:   image,
-		Argv:    exec.Argv,
-		Env:     exec.Env,
-		Volumes: input.Volumes,
-		Network: "container:" + input.Names.Container,
-		User:    exec.User,
-		TTY:     input.TTY,
-		Stdin:   exec.Stdin,
-		Stdout:  exec.Stdout,
-		Stderr:  exec.Stderr,
+		Image:      image,
+		Argv:       exec.Argv,
+		Env:        exec.Env,
+		Volumes:    input.Volumes,
+		Network:    "container:" + input.Names.Container,
+		User:       exec.User,
+		Entrypoint: command.Entrypoint,
+		TTY:        input.TTY,
+		Stdin:      exec.Stdin,
+		Stdout:     exec.Stdout,
+		Stderr:     exec.Stderr,
 	})
 }
 
@@ -253,15 +254,18 @@ func runOffline(ctx context.Context, input RunInput) error {
 	// the service is stopped rather than removed, so that bringing it back is a
 	// start: the container keeps its id, its mounts and its network attachments,
 	// and nothing has to be recreated from a definition that may have moved on
+	command, _ := input.command()
+
 	runErr := backend.Run(ctx, backend.RunInput{
-		Image:   input.Image,
-		Argv:    exec.Argv,
-		Env:     exec.Env,
-		Volumes: input.Volumes,
-		User:    exec.User,
-		Stdin:   exec.Stdin,
-		Stdout:  exec.Stdout,
-		Stderr:  exec.Stderr,
+		Image:      input.Image,
+		Argv:       exec.Argv,
+		Env:        exec.Env,
+		Volumes:    input.Volumes,
+		User:       exec.User,
+		Entrypoint: command.Entrypoint,
+		Stdin:      exec.Stdin,
+		Stdout:     exec.Stdout,
+		Stderr:     exec.Stderr,
 	})
 
 	// the service comes back up either way: a datastore left down because an
