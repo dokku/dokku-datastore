@@ -72,6 +72,20 @@ func TestParseValidDefinition(t *testing.T) {
 	}
 }
 
+// A declared alt_alias is the one used. It is checked with a value the derived
+// one could never be, since every embedded definition declares the value it
+// would have been given anyway, which is how the key going unread went unseen.
+func TestParseReadsADeclaredAltAlias(t *testing.T) {
+	parsed, err := parseCompose(t, validCompose+"  alt_alias: OTHER_THING\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if parsed.Dokku.AltAlias != "OTHER_THING" {
+		t.Errorf("expected %q, got %q", "OTHER_THING", parsed.Dokku.AltAlias)
+	}
+}
+
 func TestParseRejects(t *testing.T) {
 	tests := []struct {
 		name     string

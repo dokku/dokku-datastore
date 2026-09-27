@@ -218,7 +218,7 @@ type Dokku struct {
 	Alias string `yaml:"alias"`
 
 	// AltAlias prefixes the generated alternate alias when Alias is taken.
-	AltAlias string `yaml:"alt-alias"`
+	AltAlias string `yaml:"alt_alias"`
 
 	// DSN is the url template a linked app receives. It is a template rather
 	// than a set of flags because the plugins use seven different url shapes.
