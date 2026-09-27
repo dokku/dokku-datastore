@@ -289,3 +289,111 @@ skip_unless_log_is_capped() {
   assert_success
   assert_output ""
 }
+
+@test "($DEFINITION) a host path is mounted from its subpath" {
+  local source target="/opt/dokku-subpath"
+  source="$(mount_source subpath)"
+  mkdir -p "$source/inner"
+
+  run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "$source:$target:volume-subpath=inner"
+  assert_success
+
+  run rebuild_service
+  assert_success
+
+  run mount_of "$(service_container)" "$target"
+  assert_success
+  assert_output "$source/inner:true"
+
+  # a subpath that is not there is one docker would create, empty and owned by
+  # root, so it is refused the way a missing host path is
+  if [[ "$DOKKU_LIB_HOST_ROOT" == "$DOKKU_LIB_ROOT" ]]; then
+    run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "$source:/opt/dokku-missing:volume-subpath=missing"
+    assert_failure
+    assert_stderr --partial "$source/missing does not exist"
+  fi
+
+  run --separate-stderr "$BIN" unmount --all "$PLUGIN" "$SERVICE"
+  assert_success
+
+  run rebuild_service
+  assert_success
+}
+
+@test "($DEFINITION) a docker volume is mounted from its subpath" {
+  local api volume="dokku-datastore-$SERVICE-subpath" target="/opt/dokku-volume-subpath"
+  api="$(docker version --format '{{ .Server.APIVersion }}')"
+  if [[ "$(printf '%s\n' "1.45" "$api" | sort -V | head -n 1)" != "1.45" ]]; then
+    skip "the daemon speaks api $api, older than the 1.45 a volume subpath needs"
+  fi
+
+  # docker requires the subpath to exist inside the volume already
+  docker volume create "$volume" >/dev/null
+  docker container run --rm --volume "$volume:/volume" busybox:1.37.0-uclibc mkdir -p /volume/inner
+
+  run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "$volume:$target:volume-subpath=inner"
+  assert_success
+
+  run rebuild_service
+  assert_success
+
+  run container_inspect "$(service_container)" "{{ range .HostConfig.Mounts }}{{ if eq .Target \"$target\" }}{{ .Source }}:{{ .VolumeOptions.Subpath }}{{ end }}{{ end }}"
+  assert_success
+  assert_output "$volume:inner"
+
+  # a bind mount's options mean nothing to a volume, and are refused rather
+  # than handed to a --mount that would not take them
+  run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "$volume:/opt/dokku-relabelled:volume-subpath=inner,z"
+  assert_failure
+  assert_stderr --partial "only takes nocopy"
+
+  run --separate-stderr "$BIN" unmount --all "$PLUGIN" "$SERVICE"
+  assert_success
+
+  run rebuild_service
+  assert_success
+
+  docker volume rm "$volume" >/dev/null
+}
+
+@test "($DEFINITION) a mounted directory inside the service is chowned before the container is made" {
+  [[ "$DOKKU_LIB_HOST_ROOT" == "$DOKKU_LIB_ROOT" ]] || skip "dockerd sees another host root, so the owner is not readable from here"
+
+  local directory target="/opt/dokku-chown"
+  directory="$(service_root)/chowned"
+  mkdir -p "$directory"
+
+  run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "$directory:$target:volume-chown=4321"
+  assert_success
+
+  run rebuild_service
+  assert_success
+
+  run stat -c %u "$directory"
+  assert_success
+  assert_output "4321"
+
+  run --separate-stderr "$BIN" unmount --all "$PLUGIN" "$SERVICE"
+  assert_success
+
+  run rebuild_service
+  assert_success
+}
+
+@test "($DEFINITION) a chown outside the service is refused" {
+  local source
+  source="$(mount_source chown)"
+
+  # anything outside the service's own directory belongs to somebody else
+  run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "$source:/opt/dokku-chown:volume-chown=heroku"
+  assert_failure
+  assert_stderr --partial "only supported on a host path inside"
+
+  run --separate-stderr "$BIN" mount "$PLUGIN" "$SERVICE" "some-volume:/opt/dokku-chown:volume-chown=heroku"
+  assert_failure
+  assert_stderr --partial "not supported on docker volume"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --mounts
+  assert_success
+  assert_output ""
+}

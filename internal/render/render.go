@@ -111,6 +111,7 @@ func ContainerArgs(input Input) (ContainerArgsInput, error) {
 		ShmSize:        input.Scope.ShmSize,
 		TaggedImage:    image,
 		Volumes:        volumes,
+		VolumeMounts:   input.Scope.VolumeMounts,
 	}, nil
 }
 

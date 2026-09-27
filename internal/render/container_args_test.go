@@ -4,8 +4,11 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/dokku/dokku-datastore/internal/definition"
 )
 
 var updateGolden = flag.Bool("update-golden", false, "rewrite the golden files instead of comparing against them")
@@ -95,6 +98,18 @@ func TestContainerArgs(t *testing.T) {
 			},
 		},
 		{
+			// a docker volume mounted from a subpath is one -v cannot say, and
+			// follows the -v arguments as a --mount
+			name: "a volume mounted from a subpath",
+			mutate: func(input *ContainerArgsInput) {
+				input.Volumes = append(input.Volumes, "some-volume:/opt/extra")
+				input.VolumeMounts = []definition.VolumeMount{
+					{Source: "some-volume", Target: "/opt/sub", Subpath: "one/two"},
+					{Source: "other-volume", Target: "/opt/other", Subpath: "three", Readonly: true, NoCopy: true},
+				}
+			},
+		},
+		{
 			name: "no volumes at all",
 			mutate: func(input *ContainerArgsInput) {
 				input.Volumes = nil
@@ -158,5 +173,25 @@ func TestContainerArgsOmitsUnsetValues(t *testing.T) {
 		if strings.Contains(args, absent) {
 			t.Errorf("expected %s to be absent when it is unset, got: %s", absent, args)
 		}
+	}
+}
+
+// Only docker volumes are named, and each once, since a host path is not
+// something compose has to be told about.
+func TestNamedVolumes(t *testing.T) {
+	input := redisContainerArgs()
+	input.Volumes = append(input.Volumes, "some-volume:/opt/extra:ro", "/srv/extra:/opt/srv")
+	input.VolumeMounts = []definition.VolumeMount{
+		{Source: "some-volume", Target: "/opt/sub", Subpath: "one"},
+		{Source: "other-volume", Target: "/opt/other", Subpath: "two"},
+	}
+
+	expected := []string{"some-volume", "other-volume"}
+	if actual := NamedVolumes(input); !reflect.DeepEqual(actual, expected) {
+		t.Errorf("expected %v, got %v", expected, actual)
+	}
+
+	if actual := NamedVolumes(redisContainerArgs()); len(actual) != 0 {
+		t.Errorf("expected no named volumes, got %v", actual)
 	}
 }

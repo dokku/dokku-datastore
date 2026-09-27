@@ -2,6 +2,9 @@ package render
 
 import (
 	"sort"
+	"strings"
+
+	"github.com/dokku/dokku-datastore/internal/definition"
 )
 
 // ContainerArgsInput is the input for ContainerArgs. Every value a container's
@@ -61,6 +64,55 @@ type ContainerArgsInput struct {
 
 	// Volumes are host:container bind mounts, in the order they are passed
 	Volumes []string
+
+	// VolumeMounts are docker volumes mounted from a subpath, which -v cannot
+	// express and so are passed to --mount after the volumes above
+	VolumeMounts []definition.VolumeMount
+}
+
+// NamedVolumes are the docker volumes a container mounts, as opposed to host
+// paths, each named once and in the order they are first mounted.
+func NamedVolumes(input ContainerArgsInput) []string {
+	names := []string{}
+	seen := map[string]bool{}
+	add := func(name string) {
+		if name == "" || strings.HasPrefix(name, "/") || seen[name] {
+			return
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+
+	for _, volume := range input.Volumes {
+		source, _, _ := strings.Cut(volume, ":")
+		add(source)
+	}
+
+	for _, mount := range input.VolumeMounts {
+		add(mount.Source)
+	}
+
+	return names
+}
+
+// MountArg is the docker --mount value for a volume mounted from a subpath.
+func MountArg(mount definition.VolumeMount) string {
+	fields := []string{
+		"type=volume",
+		"source=" + mount.Source,
+		"target=" + mount.Target,
+		"volume-subpath=" + mount.Subpath,
+	}
+
+	if mount.Readonly {
+		fields = append(fields, "readonly")
+	}
+
+	if mount.NoCopy {
+		fields = append(fields, "volume-nocopy")
+	}
+
+	return strings.Join(fields, ",")
 }
 
 // DefaultRestartPolicy is what a container is made with when its service names
@@ -111,6 +163,10 @@ func DockerCreateArgs(input ContainerArgsInput) []string {
 
 	for _, volume := range input.Volumes {
 		args = append(args, "--volume="+volume)
+	}
+
+	for _, mount := range input.VolumeMounts {
+		args = append(args, "--mount="+MountArg(mount))
 	}
 
 	if input.Memory != "" {

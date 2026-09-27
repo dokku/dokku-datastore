@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path"
@@ -42,7 +43,7 @@ type MountServiceInput struct {
 // Every mount is checked before anything is written, so a refused one leaves
 // the service's mounts as they were. What is written reaches the container the
 // next time one is made.
-func MountService(input MountServiceInput) (string, error) {
+func MountService(ctx context.Context, input MountServiceInput) (string, error) {
 	current, err := service.ServiceMounts(input.Datastore, input.ServiceName)
 	if err != nil {
 		return "", err
@@ -54,6 +55,9 @@ func MountService(input MountServiceInput) (string, error) {
 	}
 
 	if err := service.CheckMounts(input.Datastore.Definition, mounts); err != nil {
+		return "", err
+	}
+	if err := service.CheckMountsOnHost(ctx, service.Folders(input.Datastore, input.ServiceName).HostRoot, mounts); err != nil {
 		return "", err
 	}
 

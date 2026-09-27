@@ -212,7 +212,11 @@ func (s *Datastore) CreateServiceContainer(ctx context.Context, input CreateServ
 	if err := CheckMounts(s.Definition, mounts); err != nil {
 		return fmt.Errorf("unable to mount into %s: %w", input.ServiceName, err)
 	}
+	if err := CheckMountsOnHost(ctx, Folders(s, input.ServiceName).HostRoot, mounts); err != nil {
+		return fmt.Errorf("unable to mount into %s: %w", input.ServiceName, err)
+	}
 	scope.Mounts = MountVolumes(mounts)
+	scope.VolumeMounts = VolumeMounts(mounts)
 
 	if input.TaggedImage != "" {
 		scope.TaggedImage = input.TaggedImage
@@ -242,6 +246,12 @@ func (s *Datastore) CreateServiceContainer(ctx context.Context, input CreateServ
 	}
 
 	if err := s.writeCompose(input.ServiceName, scope, configOptions, serviceFiles.Env, cidFilename); err != nil {
+		return err
+	}
+
+	// the mounted directories are handed over before the container that uses
+	// them exists, so the datastore never starts on one it cannot write
+	if err := ChownMounts(ctx, s, input.ServiceName, mounts); err != nil {
 		return err
 	}
 
@@ -360,6 +370,10 @@ func (s *Datastore) createContainer(ctx context.Context, serviceName string, arg
 			Args:    render.DockerCreateArgs(arguments),
 		})
 
+		return err
+	}
+
+	if err := backend.EnsureVolumes(ctx, render.NamedVolumes(arguments)); err != nil {
 		return err
 	}
 

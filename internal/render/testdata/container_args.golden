@@ -210,6 +210,27 @@ redis-server
 --bind
 0.0.0.0
 
+### a volume mounted from a subpath
+container
+create
+--cidfile=/var/lib/dokku/services/redis/lollipop/ID
+--env-file=/var/lib/dokku/services/redis/lollipop/ENV
+--hostname=dokku.redis.lollipop
+--label=dokku.service=redis
+--label=dokku=service
+--name=dokku.redis.lollipop
+--restart=always
+--volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
+--volume=/var/lib/dokku/services/redis/lollipop/data:/data
+--volume=some-volume:/opt/extra
+--mount=type=volume,source=some-volume,target=/opt/sub,volume-subpath=one/two
+--mount=type=volume,source=other-volume,target=/opt/other,volume-subpath=three,readonly,volume-nocopy
+redis:8.8.0
+redis-server
+/usr/local/etc/redis/redis.conf
+--bind
+0.0.0.0
+
 ### no volumes at all
 container
 create

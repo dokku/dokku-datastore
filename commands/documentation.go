@@ -710,9 +710,15 @@ func (c *MountCommand) Documentation() string {
 	return `mount a host directory into the service container
 dokku {{.CommandPrefix}}:mount lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra
 the source is an absolute host path, which must already exist, or the name of a docker volume.
-options follow a second colon: ro or rw, docker's own mount options, and volume-subpath=<path>
-and volume-chown=<option>, which are recorded but not applied
+options follow a second colon: ro or rw, docker's own mount options, volume-subpath=<path>
+and volume-chown=<option>
 dokku {{.CommandPrefix}}:mount lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra:ro,z
+a subpath mounts a directory within the source rather than the source itself. A docker volume
+mounted from a subpath needs Docker Engine 26.0 or newer, and takes no mount option but nocopy.
+dokku {{.CommandPrefix}}:mount lollipop my-volume:/opt/extra:volume-subpath=uploads
+a chown hands the mounted directory to a user before the container is made: herokuish, heroku,
+paketo, root or a uid. It is only taken for a host path inside the service's own directory.
+dokku {{.CommandPrefix}}:mount lollipop /var/lib/dokku/services/{{.CommandPrefix}}/lollipop/extra:/opt/extra:volume-chown=heroku
 the same can be said with flags instead
 dokku {{.CommandPrefix}}:mount lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra --volume-readonly --volume-options z
 mounting the same source at the same directory again rewrites its options
