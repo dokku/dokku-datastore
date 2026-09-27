@@ -104,6 +104,14 @@ func (c *ReadmeCommand) Run(args []string) int {
 		return 1
 	}
 
+	logger = c.Logger(c.Ui)
+
+	// the readme is markdown written into a file, with nothing to put in json
+	if c.format == "json" {
+		logger.Error(internal.ErrorInput{Error: errTextOnly(c.Name())})
+		return 1
+	}
+
 	arguments, err := c.ParsedArguments(flags.Args())
 	if err != nil {
 		logger.Error(internal.ErrorInput{

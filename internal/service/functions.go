@@ -697,9 +697,6 @@ type FilterServicesInput struct {
 
 	// Services is the services to filter
 	Services []string
-
-	// Trace is whether to enable trace output
-	Trace bool
 }
 
 // FilterServices filters out services that are not allowed by the user-auth-service trigger
@@ -745,7 +742,6 @@ func FilterServices(ctx context.Context, input FilterServicesInput) ([]string, e
 		Env: map[string]string{
 			"SSH_NAME": defaultSShName,
 			"SSH_USER": defaultSShUser,
-			"TRACE":    strconv.FormatBool(input.Trace),
 		},
 	})
 	if err != nil {

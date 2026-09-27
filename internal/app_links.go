@@ -25,7 +25,6 @@ func LinkedServices(ctx context.Context, input LinkedServicesInput) ([]string, e
 
 	services, err := ListServices(ctx, ListServicesInput{
 		Datastore: input.Datastore,
-		Trace:     true,
 	})
 	if err != nil {
 		return []string{}, err

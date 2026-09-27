@@ -127,7 +127,7 @@ func (c *TriggerCommand) Run(args []string) int {
 		return 1
 	}
 
-	logger = internal.Ui{Ui: c.Ui, Format: c.format, Quiet: c.quiet, Trace: c.trace}
+	logger = c.Logger(c.Ui)
 
 	arguments, err := c.ParsedArguments(flags.Args())
 	if err != nil {

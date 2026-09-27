@@ -1,10 +1,13 @@
 package commands
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/dokku/dokku-datastore/internal"
+	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/mitchellh/cli"
 	"github.com/posener/complete"
 	flag "github.com/spf13/pflag"
 )
@@ -27,6 +30,43 @@ func (c *GlobalFlagCommand) GlobalFlags(f *flag.FlagSet) {
 	// one of json, table
 	f.StringVar(&c.format, "format", "text", "the format to output the data in")
 	f.BoolVar(&c.trace, "trace", os.Getenv("DOKKU_TRACE") != "", "enable trace output")
+}
+
+// Logger applies the global flags once they are parsed, and returns the ui the
+// command reports through.
+//
+// Trace and quiet are handed on the way dokku hands them to a plugin, as
+// DOKKU_TRACE and DOKKU_QUIET_OUTPUT, which is what the dokku helpers this binary
+// calls read and what every trigger and dokku command it runs inherits. And json
+// keeps stdout for the document, so what a child process streams goes to stderr.
+func (c *GlobalFlagCommand) Logger(ui cli.Ui) internal.Ui {
+	setEnvFlag("DOKKU_TRACE", c.trace)
+	setEnvFlag("DOKKU_QUIET_OUTPUT", c.quiet)
+	execx.StreamStdoutToStderr(c.format == "json")
+
+	return internal.Ui{
+		Ui:     ui,
+		Format: c.format,
+		Quiet:  c.quiet,
+		Trace:  c.trace,
+	}
+}
+
+// errTextOnly refuses --format json on a command whose output is text that
+// something else reads as it is.
+func errTextOnly(name string) error {
+	return fmt.Errorf("%s only prints text, and does not take --format json", name)
+}
+
+// setEnvFlag exports a boolean the way dokku does, as 1, and removes it when the
+// flag was turned off, since dokku's helpers read any value as set.
+func setEnvFlag(name string, enabled bool) {
+	if enabled {
+		os.Setenv(name, "1") //nolint:errcheck
+		return
+	}
+
+	os.Unsetenv(name) //nolint:errcheck
 }
 
 // ReportFormat maps the format flag onto what the report helper accepts. The

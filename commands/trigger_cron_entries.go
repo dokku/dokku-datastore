@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
@@ -121,12 +122,7 @@ func (c *TriggerCronEntriesCommand) Run(args []string) int {
 		return 1
 	}
 
-	logger = internal.Ui{
-		Ui:     c.Ui,
-		Format: c.format,
-		Quiet:  c.quiet,
-		Trace:  c.trace,
-	}
+	logger = c.Logger(c.Ui)
 
 	arguments, err := c.ParsedArguments(flags.Args())
 	if err != nil {
@@ -168,8 +164,17 @@ func (c *TriggerCronEntriesCommand) Run(args []string) int {
 		logger.Warn(internal.WarnInput{Warning: err.Error()})
 	}
 
+	// dokku reads the text a line at a time and splits each on semicolons
+	tasks := make([]internal.CronTask, 0, len(entries))
+	text := strings.Builder{}
 	for _, entry := range entries {
-		fmt.Println(entry)
+		tasks = append(tasks, internal.SplitCronEntry(entry))
+		text.WriteString(entry + "\n")
+	}
+
+	if err := logger.Document(tasks, text.String()); err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
 	}
 
 	return 0

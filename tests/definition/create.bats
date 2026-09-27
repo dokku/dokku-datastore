@@ -23,7 +23,7 @@ setup_file() {
 }
 
 teardown_file() {
-  datastore_teardown_file "$SERVICE" "$SERVICE-unpinned"
+  datastore_teardown_file "$SERVICE" "$SERVICE-unpinned" "$SERVICE-json"
 }
 
 @test "($DEFINITION) a create naming an image with no version is refused" {
@@ -220,6 +220,43 @@ teardown_file() {
 
   run "$BIN" destroy "$PLUGIN" "$SERVICE-unpinned" --force
   assert_success
+}
+
+@test "($DEFINITION) a create asked for json prints one json document" {
+  # what it says on the way, and what the triggers it fires print, go to
+  # stderr, so that stdout can be handed straight to a json reader
+  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-json" --image-version "$IMAGE_VERSION" --format json
+  assert_success
+
+  run jq -e --slurp 'length == 1' <<<"$output"
+  assert_success
+
+  run "$BIN" destroy "$PLUGIN" "$SERVICE-json" --force
+  assert_success
+}
+
+@test "($DEFINITION) info asked to be quiet leaves out its header" {
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_output --partial "=====>"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --quiet
+  assert_success
+  refute_output --partial "=====>"
+  assert_output --partial "$SERVICE"
+}
+
+@test "($DEFINITION) a command asked to trace echoes what it runs" {
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --status --trace
+  assert_success
+  assert_output "running"
+  [[ "$stderr" == *"exec: "* ]] || fail "expected the commands run to be echoed on stderr, got '$stderr'"
+}
+
+@test "($DEFINITION) a command that only prints text refuses json" {
+  run --separate-stderr "$BIN" readme "$PLUGIN" --format json
+  assert_failure
+  assert_stderr --partial "only prints text"
 }
 
 @test "($DEFINITION) destroy leaves nothing behind" {

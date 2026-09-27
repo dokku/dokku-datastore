@@ -102,6 +102,14 @@ func (c *TriggerHelpCommand) AutocompleteFlags() complete.Flags {
 func (c *TriggerHelpCommand) Run(args []string) int {
 	logger := internal.Ui{Ui: c.Ui}
 
+	// dokku pipes the help through sort and column, so there is no json to be
+	// had. The flag is looked for rather than parsed, for the reason above;
+	// quiet and trace arrive from dokku in the environment
+	if askedForJSON(args) {
+		logger.Error(internal.ErrorInput{Error: errTextOnly(c.Name())})
+		return 1
+	}
+
 	arguments, err := c.ParsedArguments(args)
 	if err != nil {
 		logger.Error(internal.ErrorInput{
@@ -223,6 +231,22 @@ func (c *TriggerHelpCommand) printCommandList(logger internal.Ui, input internal
 	}
 
 	return 0
+}
+
+// askedForJSON reports whether --format json is among arguments that are not
+// parsed as flags
+func askedForJSON(args []string) bool {
+	for index, arg := range args {
+		if arg == "--format=json" {
+			return true
+		}
+
+		if arg == "--format" && index+1 < len(args) && args[index+1] == "json" {
+			return true
+		}
+	}
+
+	return false
 }
 
 // notImplementedExit is the exit code that tells dokku to keep looking for a
