@@ -452,7 +452,7 @@ func (c *ExportCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *ExportCommand) Usage() string {
-	return `<service> [-f|--file <path>]`
+	return `<service> [-f|--file <path>] [--force]`
 }
 
 // Documentation returns the long form documentation for the command
@@ -463,7 +463,9 @@ you can redirect this output to a file
 dokku {{.CommandPrefix}}:export lollipop > data.dump
 a dump can be written to a file on the dokku host with --file.
 the path is on the dokku host, not on the machine running ssh.
-dokku {{.CommandPrefix}}:export lollipop --file /var/lib/dokku/data/storage/data.dump`
+dokku {{.CommandPrefix}}:export lollipop --file /var/lib/dokku/data/storage/data.dump
+a file that already exists is not overwritten unless --force is given
+dokku {{.CommandPrefix}}:export lollipop --file /var/lib/dokku/data/storage/data.dump --force`
 }
 
 // Group is the readme usage section the command is documented under

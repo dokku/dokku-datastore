@@ -1059,7 +1059,7 @@ func TestAtomicFile(t *testing.T) {
 			t.Fatalf("failed to write %s: %v", target, err)
 		}
 
-		file, err := CreateAtomicFile(target, PrivateFileMode)
+		file, err := CreateAtomicFile(target, PrivateFileMode, true)
 		if err != nil {
 			t.Fatalf("failed to create: %v", err)
 		}
@@ -1095,6 +1095,62 @@ func TestAtomicFile(t *testing.T) {
 		assertNoTemporaryFile(t, dir, ".data.dump.")
 	})
 
+	t.Run("commit without replace writes a new target", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "data.dump")
+
+		file, err := CreateAtomicFile(target, PrivateFileMode, false)
+		if err != nil {
+			t.Fatalf("failed to create: %v", err)
+		}
+		defer file.Abort()
+
+		if _, err := file.WriteString("new"); err != nil {
+			t.Fatalf("failed to write: %v", err)
+		}
+		if err := file.Commit(); err != nil {
+			t.Fatalf("failed to commit: %v", err)
+		}
+
+		assertFileContents(t, target, "new")
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatalf("failed to stat %s: %v", target, err)
+		}
+		if info.Mode().Perm() != PrivateFileMode {
+			t.Errorf("expected %o, got %o", PrivateFileMode, info.Mode().Perm())
+		}
+		assertNoTemporaryFile(t, dir, ".data.dump.")
+	})
+
+	// a file that appears at the target while the contents are written is not
+	// overwritten, since the check before it was made cannot see it
+	t.Run("commit without replace leaves a target created since alone", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "data.dump")
+
+		file, err := CreateAtomicFile(target, PrivateFileMode, false)
+		if err != nil {
+			t.Fatalf("failed to create: %v", err)
+		}
+
+		if err := os.WriteFile(target, []byte("old"), 0644); err != nil {
+			t.Fatalf("failed to write %s: %v", target, err)
+		}
+		if _, err := file.WriteString("new"); err != nil {
+			t.Fatalf("failed to write: %v", err)
+		}
+
+		err = file.Commit()
+		if !errors.Is(err, os.ErrExist) {
+			t.Fatalf("expected the target to exist, got %v", err)
+		}
+		file.Abort()
+
+		assertFileContents(t, target, "old")
+		assertNoTemporaryFile(t, dir, ".data.dump.")
+	})
+
 	t.Run("abort leaves the target alone", func(t *testing.T) {
 		dir := t.TempDir()
 		target := filepath.Join(dir, "data.dump")
@@ -1102,7 +1158,7 @@ func TestAtomicFile(t *testing.T) {
 			t.Fatalf("failed to write %s: %v", target, err)
 		}
 
-		file, err := CreateAtomicFile(target, PrivateFileMode)
+		file, err := CreateAtomicFile(target, PrivateFileMode, true)
 		if err != nil {
 			t.Fatalf("failed to create: %v", err)
 		}
@@ -1117,7 +1173,7 @@ func TestAtomicFile(t *testing.T) {
 	})
 
 	t.Run("a missing directory is an error", func(t *testing.T) {
-		if _, err := CreateAtomicFile(filepath.Join(t.TempDir(), "missing", "data.dump"), PrivateFileMode); err == nil {
+		if _, err := CreateAtomicFile(filepath.Join(t.TempDir(), "missing", "data.dump"), PrivateFileMode, false); err == nil {
 			t.Fatal("expected an error, got none")
 		}
 	})
@@ -1133,7 +1189,7 @@ func TestAtomicFile(t *testing.T) {
 		}
 		t.Cleanup(func() { os.Chmod(dir, 0755) }) //nolint:errcheck
 
-		if _, err := CreateAtomicFile(filepath.Join(dir, "data.dump"), PrivateFileMode); err == nil {
+		if _, err := CreateAtomicFile(filepath.Join(dir, "data.dump"), PrivateFileMode, false); err == nil {
 			t.Fatal("expected an error, got none")
 		}
 	})

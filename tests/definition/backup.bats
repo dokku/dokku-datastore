@@ -189,6 +189,32 @@ teardown_file() {
   fi
 }
 
+@test "($DEFINITION) export to an existing file needs --force" {
+  local existing="$BATS_TEST_TMPDIR/existing.dump"
+  echo "old" >"$existing"
+
+  run "$BIN" export "$PLUGIN" "$SERVICE" --file "$existing"
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement export"
+  fi
+  assert_failure
+  assert_output --partial "$existing"
+  assert_output --partial "pass --force"
+  run cat "$existing"
+  assert_output "old"
+
+  # --force is only for a file, since stdout has nothing to replace
+  run "$BIN" export "$PLUGIN" "$SERVICE" --force
+  assert_failure
+  assert_output --partial "--force only applies"
+
+  run --separate-stderr "$BIN" export "$PLUGIN" "$SERVICE" --file "$existing" --force
+  assert_success
+  assert_output ""
+  [[ "$(cat "$existing")" != "old" ]] || fail "export --force left the old file in place"
+  [[ -s "$existing" ]] || fail "export --force produced nothing"
+}
+
 @test "($DEFINITION) export to an unwritable destination fails before exporting" {
   # a directory is not a file an export can replace
   run "$BIN" export "$PLUGIN" "$SERVICE" --file "$BATS_TEST_TMPDIR"

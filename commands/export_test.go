@@ -8,7 +8,8 @@ import (
 )
 
 // A file named with --file is written on the dokku host in place of stdout, and
-// only replaces what is at the path once the export is committed.
+// a file already at the path is only replaced with --force, once the export is
+// committed.
 func TestExportDestinationWrites(t *testing.T) {
 	dir := t.TempDir()
 	existing := filepath.Join(dir, "existing.dump")
@@ -17,16 +18,18 @@ func TestExportDestinationWrites(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
-		path string
+		name  string
+		path  string
+		force bool
 	}{
 		{name: "a new file is written", path: filepath.Join(dir, "new.dump")},
-		{name: "an existing file is replaced", path: existing},
+		{name: "a new file is written with --force", path: filepath.Join(dir, "forced.dump"), force: true},
+		{name: "an existing file is replaced with --force", path: existing, force: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			destination, err := exportDestination(test.path)
+			destination, err := exportDestination(test.path, test.force)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -63,7 +66,7 @@ func TestExportDestinationFollowsSymlinks(t *testing.T) {
 		t.Fatalf("failed to link %s: %v", link, err)
 	}
 
-	destination, err := exportDestination(link)
+	destination, err := exportDestination(link, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -114,13 +117,27 @@ func TestExportDestinationRefuses(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chmod(readOnly, 0o755) }) //nolint:errcheck
 
+	existing := filepath.Join(dir, "existing.dump")
+	if err := os.WriteFile(existing, []byte("old"), 0o644); err != nil {
+		t.Fatalf("failed to write %s: %v", existing, err)
+	}
+
+	link := filepath.Join(dir, "link.dump")
+	if err := os.Symlink(existing, link); err != nil {
+		t.Fatalf("failed to link %s: %v", link, err)
+	}
+
 	tests := []struct {
 		name          string
 		path          string
+		force         bool
 		expectedError string
 		skipAsRoot    bool
 	}{
+		{name: "an existing file without --force", path: existing, expectedError: "existing.dump: the file already exists on the dokku host, pass --force"},
+		{name: "a symlink to an existing file without --force", path: link, expectedError: "link.dump: the file already exists on the dokku host, pass --force"},
 		{name: "a directory", path: dir, expectedError: "not a regular file"},
+		{name: "a directory with --force", path: dir, force: true, expectedError: "not a regular file"},
 		{name: "a dangling symlink", path: dangling, expectedError: "dangling.dump on the dokku host"},
 		{name: "a missing directory", path: filepath.Join(dir, "missing", "data.dump"), expectedError: "missing/data.dump on the dokku host"},
 		{name: "a file as the directory", path: filepath.Join(file, "data.dump"), expectedError: "file/data.dump on the dokku host"},
@@ -133,7 +150,7 @@ func TestExportDestinationRefuses(t *testing.T) {
 				t.Skip("root writes a directory whatever its mode")
 			}
 
-			destination, err := exportDestination(test.path)
+			destination, err := exportDestination(test.path, test.force)
 			if err == nil {
 				destination.Abort()
 				t.Fatalf("expected an error containing %q, got none", test.expectedError)
@@ -142,5 +159,14 @@ func TestExportDestinationRefuses(t *testing.T) {
 				t.Fatalf("expected an error containing %q, got %q", test.expectedError, err)
 			}
 		})
+	}
+
+	// nothing refused was touched
+	contents, err := os.ReadFile(existing)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", existing, err)
+	}
+	if string(contents) != "old" {
+		t.Errorf("expected %s to be left alone, got %q", existing, contents)
 	}
 }
