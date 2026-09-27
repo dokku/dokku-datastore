@@ -400,6 +400,78 @@ func ReplaceFileAtomically(filename string, content string, mode os.FileMode) er
 	return os.Rename(temporary.Name(), filename)
 }
 
+// AtomicFile is a file that only replaces the one at its target once it has been
+// written in full. It is ReplaceFileAtomically split in two, for contents that
+// are streamed rather than held in memory: the temporary file is created first,
+// so a directory that cannot be written is found before anything is produced,
+// and it is renamed over the target only once the caller commits it.
+//
+// Unlike ReplaceFileAtomically it does not chown, since it is meant for a path a
+// user names rather than a service file, and the file is already owned by the
+// user this process runs as.
+type AtomicFile struct {
+	*os.File
+	// target is the path the temporary file is renamed over
+	target string
+	// committed is whether the temporary file has been renamed away
+	committed bool
+}
+
+// CreateAtomicFile creates the temporary file beside target, in the same
+// directory so the rename stays within one filesystem, and gives it mode while
+// it is still empty.
+func CreateAtomicFile(target string, mode os.FileMode) (*AtomicFile, error) {
+	temporary, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".*")
+	if err != nil {
+		return nil, err
+	}
+
+	file := &AtomicFile{File: temporary, target: target}
+	if err := temporary.Chmod(mode); err != nil {
+		file.Abort()
+		return nil, err
+	}
+
+	return file, nil
+}
+
+// Commit syncs and closes the temporary file and renames it over the target,
+// then syncs the directory so the rename itself is on disk.
+func (f *AtomicFile) Commit() error {
+	if err := f.Sync(); err != nil {
+		return err
+	}
+
+	if err := f.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(f.Name(), f.target); err != nil {
+		return err
+	}
+	f.committed = true
+
+	directory, err := os.Open(filepath.Dir(f.target))
+	if err != nil {
+		return err
+	}
+	defer directory.Close() //nolint:errcheck
+
+	return directory.Sync()
+}
+
+// Abort closes and removes the temporary file, leaving the target as it was. It
+// does nothing once Commit has renamed the file away, so it can always be
+// deferred.
+func (f *AtomicFile) Abort() {
+	if f.committed {
+		return
+	}
+
+	f.Close()           //nolint:errcheck
+	os.Remove(f.Name()) //nolint:errcheck
+}
+
 // GenerateRandomHexString generates a random hex string
 func GenerateRandomHexString(length int) (string, error) {
 	bytes := make([]byte, length/2)

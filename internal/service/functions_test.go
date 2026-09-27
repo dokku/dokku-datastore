@@ -1047,3 +1047,118 @@ func TestGetAvailablePort(t *testing.T) {
 		t.Error("expected no ports to be generated on an address the host does not have")
 	}
 }
+
+// An atomic file is created, with its mode, before anything is written into it,
+// and only replaces its target once committed, so an abandoned write leaves the
+// target as it was and nothing beside it.
+func TestAtomicFile(t *testing.T) {
+	t.Run("commit replaces the target", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "data.dump")
+		if err := os.WriteFile(target, []byte("old"), 0644); err != nil {
+			t.Fatalf("failed to write %s: %v", target, err)
+		}
+
+		file, err := CreateAtomicFile(target, PrivateFileMode)
+		if err != nil {
+			t.Fatalf("failed to create: %v", err)
+		}
+		defer file.Abort()
+
+		// the mode is applied while the file is still empty
+		info, err := os.Stat(file.Name())
+		if err != nil {
+			t.Fatalf("failed to stat the temporary file: %v", err)
+		}
+		if info.Mode().Perm() != PrivateFileMode {
+			t.Errorf("expected the temporary file to be %o, got %o", PrivateFileMode, info.Mode().Perm())
+		}
+
+		if _, err := file.WriteString("new"); err != nil {
+			t.Fatalf("failed to write: %v", err)
+		}
+		if err := file.Commit(); err != nil {
+			t.Fatalf("failed to commit: %v", err)
+		}
+
+		// a deferred abort after a commit leaves the committed file alone
+		file.Abort()
+
+		assertFileContents(t, target, "new")
+		info, err = os.Stat(target)
+		if err != nil {
+			t.Fatalf("failed to stat %s: %v", target, err)
+		}
+		if info.Mode().Perm() != PrivateFileMode {
+			t.Errorf("expected %o, got %o", PrivateFileMode, info.Mode().Perm())
+		}
+		assertNoTemporaryFile(t, dir, ".data.dump.")
+	})
+
+	t.Run("abort leaves the target alone", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "data.dump")
+		if err := os.WriteFile(target, []byte("old"), 0644); err != nil {
+			t.Fatalf("failed to write %s: %v", target, err)
+		}
+
+		file, err := CreateAtomicFile(target, PrivateFileMode)
+		if err != nil {
+			t.Fatalf("failed to create: %v", err)
+		}
+		if _, err := file.WriteString("partial"); err != nil {
+			t.Fatalf("failed to write: %v", err)
+		}
+		file.Abort()
+		file.Abort()
+
+		assertFileContents(t, target, "old")
+		assertNoTemporaryFile(t, dir, ".data.dump.")
+	})
+
+	t.Run("a missing directory is an error", func(t *testing.T) {
+		if _, err := CreateAtomicFile(filepath.Join(t.TempDir(), "missing", "data.dump"), PrivateFileMode); err == nil {
+			t.Fatal("expected an error, got none")
+		}
+	})
+
+	t.Run("a directory that cannot be written is an error", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root writes a directory whatever its mode")
+		}
+
+		dir := t.TempDir()
+		if err := os.Chmod(dir, 0555); err != nil {
+			t.Fatalf("failed to chmod %s: %v", dir, err)
+		}
+		t.Cleanup(func() { os.Chmod(dir, 0755) }) //nolint:errcheck
+
+		if _, err := CreateAtomicFile(filepath.Join(dir, "data.dump"), PrivateFileMode); err == nil {
+			t.Fatal("expected an error, got none")
+		}
+	})
+}
+
+func assertFileContents(t *testing.T, filename string, expected string) {
+	t.Helper()
+	contents, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", filename, err)
+	}
+	if string(contents) != expected {
+		t.Errorf("expected %q, got %q", expected, contents)
+	}
+}
+
+func assertNoTemporaryFile(t *testing.T, dir string, prefix string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", dir, err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), prefix) {
+			t.Errorf("expected no temporary file to be left behind, found %s", entry.Name())
+		}
+	}
+}

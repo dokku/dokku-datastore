@@ -3,8 +3,10 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
@@ -15,12 +17,15 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
-// ExportCommand is the command for unexposing a service
+// ExportCommand is the command for exporting a service's data
 type ExportCommand struct {
 	// Meta is the command meta
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+
+	// file is a path on the dokku host to export to instead of stdout
+	file string
 }
 
 // Name returns the name of the command
@@ -30,7 +35,7 @@ func (c *ExportCommand) Name() string {
 
 // Synopsis returns the synopsis of the command
 func (c *ExportCommand) Synopsis() string {
-	return "Exports a service's data to stdout"
+	return "Exports a service's data to stdout or a file"
 }
 
 // Help returns the help text for the command
@@ -42,7 +47,8 @@ func (c *ExportCommand) Help() string {
 func (c *ExportCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Exports a redis service named test": fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Exports a redis service named test":                             fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Exports a redis service named test to a file on the dokku host": fmt.Sprintf("%s %s redis test --file /var/lib/dokku/data/storage/test.rdb", appName, c.Name()),
 	}
 }
 
@@ -78,6 +84,7 @@ func (c *ExportCommand) ParsedArguments(args []string) (map[string]command.Argum
 func (c *ExportCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.StringVarP(&c.file, "file", "f", "", "a file on the dokku host to export to instead of writing stdout")
 	return f
 }
 
@@ -86,7 +93,9 @@ func (c *ExportCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--file": complete.PredictFiles("*"),
+		},
 	)
 }
 
@@ -164,6 +173,20 @@ func (c *ExportCommand) Run(args []string) int {
 		return 1
 	}
 
+	// the destination is created before anything is exported, so a path that
+	// cannot be written fails without exporting a dump only to throw it away
+	var writer io.Writer = os.Stdout
+	var destination *service.AtomicFile
+	if c.file != "" {
+		destination, err = exportDestination(c.file)
+		if err != nil {
+			logger.Error(internal.ErrorInput{Error: err})
+			return 1
+		}
+		defer destination.Abort()
+		writer = destination
+	}
+
 	// a service runs the definition it was created with, which for a datastore
 	// split by major version is not always the newest one
 	datastore, unresolved := datastore.ForService(serviceName)
@@ -182,11 +205,60 @@ func (c *ExportCommand) Run(args []string) int {
 	if err := datastore.ExportService(ctx, service.ExportServiceInput{
 		Datastore:   datastore,
 		ServiceName: serviceName,
-		Writer:      os.Stdout,
+		Writer:      writer,
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}
 
+	if destination != nil {
+		if err := destination.Commit(); err != nil {
+			logger.Error(internal.ErrorInput{
+				Error: fmt.Errorf("unable to write %s on the dokku host: %w", c.file, err),
+			})
+			return 1
+		}
+	}
+
 	return 0
+}
+
+// exportDestination is the file an export is written to when one is named. The
+// dump is streamed into a temporary file beside it, which only replaces the path
+// once the export has succeeded, so a failed export never leaves a truncated
+// dump behind nor clobbers the one already there.
+//
+// The file is written by this process, so it is a path on the dokku host rather
+// than on the machine running ssh. A redirection inside a quoted ssh command is
+// never run through a shell there, which is why the file has to be named instead.
+//
+// The temporary file is created here, before the export runs, since creating it
+// is the one check that answers whether the path can be written: it needs the
+// same access to the directory the rename does.
+func exportDestination(path string) (*service.AtomicFile, error) {
+	target := path
+
+	// a symlink is written through, the way a redirection would, rather than
+	// replaced by the rename
+	if stat, err := os.Lstat(path); err == nil && stat.Mode()&os.ModeSymlink != 0 {
+		target, err = filepath.EvalSymlinks(path)
+		if err != nil {
+			return nil, fmt.Errorf("unable to write %s on the dokku host: %w", path, err)
+		}
+	}
+
+	stat, err := os.Stat(target)
+	switch {
+	case err == nil && !stat.Mode().IsRegular():
+		return nil, fmt.Errorf("unable to export to %s: not a regular file on the dokku host", path)
+	case err != nil && !os.IsNotExist(err):
+		return nil, fmt.Errorf("unable to write %s on the dokku host: %w", path, err)
+	}
+
+	file, err := service.CreateAtomicFile(target, service.PrivateFileMode)
+	if err != nil {
+		return nil, fmt.Errorf("unable to write %s on the dokku host: %w", path, err)
+	}
+
+	return file, nil
 }
