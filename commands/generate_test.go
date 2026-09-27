@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +14,9 @@ import (
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/registry"
 	"github.com/dokku/dokku-datastore/internal/service"
+
+	"github.com/josegonzalez/cli-skeleton/command"
+	"github.com/mitchellh/cli"
 )
 
 // generated lays a datastore's definitions into a checkout and returns it.
@@ -281,5 +286,176 @@ func TestGenerateWritesEveryTrigger(t *testing.T) {
 		if !strings.Contains(string(contents), `dokku-datastore" `+dispatch+` "$PLUGIN_COMMAND_PREFIX" "$@"`) {
 			t.Errorf("expected %s to dispatch to %q, got:\n%s", name, dispatch, contents)
 		}
+	}
+}
+
+// renamedCommand is a command of the tool under another name, for a registry
+// holding a command a datastore also declares.
+type renamedCommand struct {
+	*ExposeCommand
+	name string
+}
+
+func (c renamedCommand) Name() string {
+	return c.name
+}
+
+// commandRegistry returns a command registry holding the given commands, in
+// the shape main hands the commands that need one.
+func commandRegistry(commands ...cli.Command) command.CommandFunc {
+	return func(ctx context.Context, meta command.Meta) map[string]cli.CommandFactory {
+		factories := map[string]cli.CommandFactory{}
+		for _, c := range commands {
+			factories[c.(interface{ Name() string }).Name()] = func() (cli.Command, error) {
+				return c, nil
+			}
+		}
+
+		return factories
+	}
+}
+
+// writtenSubcommands generates a datastore's subcommands against a registry and
+// returns the scripts by name.
+func writtenSubcommands(t *testing.T, datastoreType string, commandFunc command.CommandFunc) map[string]string {
+	t.Helper()
+
+	datastore := service.Datastores[datastoreType]
+	pluginDir := t.TempDir()
+	generate := &GenerateCommand{CommandFunc: commandFunc, pluginDir: pluginDir}
+
+	written, err := generate.writeSubcommands(datastore, internal.NewDocumentationData(internal.DocumentationDataInput{Datastore: datastore}))
+	if err != nil {
+		t.Fatalf("unable to write the subcommands: %s", err)
+	}
+
+	scripts := map[string]string{}
+	for _, path := range written {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("unable to stat %s: %s", path, err)
+		}
+		if info.Mode().Perm() != 0755 {
+			t.Errorf("expected %s to be executable, got %v", path, info.Mode().Perm())
+		}
+
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("unable to read %s: %s", path, err)
+		}
+
+		scripts[filepath.Base(path)] = string(contents)
+	}
+
+	return scripts
+}
+
+// The scripts for the tool's own commands are the ones the plugins kept by
+// hand, byte for byte, so regenerating a plugin changes nothing but what the
+// tool itself has changed. These two are dokku-redis's own.
+func TestGenerateWritesTheToolsSubcommandsAsThePluginsDid(t *testing.T) {
+	scripts := writtenSubcommands(t, "redis", commandRegistry(
+		&ConnectCommand{},
+		&EnterCommand{},
+		&ExposeCommand{},
+		&InvokeCommand{},
+		&PromoteCommand{},
+	))
+
+	expose := `#!/usr/bin/env bash
+source "$(dirname "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)")/config"
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+service-expose-cmd() {
+  declare desc="expose a $PLUGIN_SERVICE service on custom host:port if provided (random port on the 0.0.0.0 interface if otherwise unspecified)"
+  local cmd="$PLUGIN_COMMAND_PREFIX:expose" argv=("$@")
+  [[ ${argv[0]} == "$cmd" ]] && shift 1
+
+  "${DOKKU_LIB_ROOT}/data/${PLUGIN_COMMAND_PREFIX}/dokku-datastore" expose "$PLUGIN_COMMAND_PREFIX" "$@"
+}
+
+service-expose-cmd "$@"
+`
+	if scripts["expose"] != expose {
+		t.Errorf("expected expose to be written as the plugins wrote it, got:\n%s", scripts["expose"])
+	}
+
+	// the command run in the container is fenced off with --, so a flag of its
+	// own is not read as one of the binary's
+	enter := `#!/usr/bin/env bash
+source "$(dirname "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)")/config"
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+service-enter-cmd() {
+  declare desc="enter or run a command in a running $PLUGIN_SERVICE service container"
+  local cmd="$PLUGIN_COMMAND_PREFIX:enter" argv=("$@")
+  [[ ${argv[0]} == "$cmd" ]] && shift 1
+
+  # everything after the service name belongs to the command run in the
+  # container, so it is fenced off from the binary's own flag and help parsing
+  local args=()
+  [[ $# -gt 0 ]] && args=("$1" -- "${@:2}")
+
+  "${DOKKU_LIB_ROOT}/data/${PLUGIN_COMMAND_PREFIX}/dokku-datastore" enter "$PLUGIN_COMMAND_PREFIX" "${args[@]}"
+}
+
+service-enter-cmd "$@"
+`
+	if scripts["enter"] != enter {
+		t.Errorf("expected enter to be written as the plugins wrote it, got:\n%s", scripts["enter"])
+	}
+
+	// the rest of what a plugin's config exports is left to the shell as well
+	for name, expected := range map[string]string{
+		"connect": `declare desc="connect to the service via the $PLUGIN_COMMAND_PREFIX connection tool"`,
+		"promote": `declare desc="promote service <service> as ${PLUGIN_DEFAULT_ALIAS}_URL in <app>"`,
+	} {
+		if !strings.Contains(scripts[name], expected) {
+			t.Errorf("expected %s to contain %q, got:\n%s", name, expected, scripts[name])
+		}
+	}
+
+	// invoke is how a datastore's own commands are reached, not a command
+	if _, ok := scripts["invoke"]; ok {
+		t.Errorf("expected no script for invoke, got:\n%s", scripts["invoke"])
+	}
+
+	if len(scripts) != 4 {
+		t.Errorf("expected a script for each of the four commands, got %v", slices.Sorted(maps.Keys(scripts)))
+	}
+}
+
+// A datastore's own commands are written beside the tool's, dispatched through
+// invoke since the binary has no command of that name.
+func TestGenerateWritesADatastoresOwnSubcommands(t *testing.T) {
+	scripts := writtenSubcommands(t, "mongo", commandRegistry(&ExposeCommand{}))
+
+	if !strings.Contains(scripts["connect-admin"], `dokku-datastore" invoke "$PLUGIN_COMMAND_PREFIX" connect-admin "$@"`) {
+		t.Errorf("expected connect-admin to dispatch through invoke, got:\n%s", scripts["connect-admin"])
+	}
+
+	if !strings.Contains(scripts["expose"], `dokku-datastore" expose "$PLUGIN_COMMAND_PREFIX" "$@"`) {
+		t.Errorf("expected expose to be written beside it, got:\n%s", scripts["expose"])
+	}
+}
+
+// Both would be written to the same script, and one would silently replace the
+// other.
+func TestGenerateRefusesADatastoreCommandNamedLikeTheTools(t *testing.T) {
+	datastore := service.Datastores["mongo"]
+	generate := &GenerateCommand{
+		CommandFunc: commandRegistry(renamedCommand{ExposeCommand: &ExposeCommand{}, name: "connect-admin"}),
+		pluginDir:   t.TempDir(),
+	}
+
+	_, err := generate.writeSubcommands(datastore, internal.NewDocumentationData(internal.DocumentationDataInput{Datastore: datastore}))
+	if err == nil || err.Error() != "custom command connect-admin has the name of a command the tool implements" {
+		t.Fatalf("expected the clash to be refused, got %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(generate.pluginDir, "subcommands")); !os.IsNotExist(err) {
+		t.Errorf("expected nothing to be written, got %v", err)
 	}
 }

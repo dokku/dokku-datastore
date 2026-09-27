@@ -192,7 +192,7 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 			return &command.VersionCommand{Meta: meta}, nil
 		},
 		"generate": func() (cli.Command, error) {
-			return &commands.GenerateCommand{Meta: meta}, nil
+			return &commands.GenerateCommand{Meta: meta, CommandFunc: Commands}, nil
 		},
 		"invoke": func() (cli.Command, error) {
 			return &commands.InvokeCommand{Meta: meta}, nil
