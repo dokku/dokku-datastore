@@ -109,6 +109,46 @@ func TestPluginCommandUsageNamesRealFlags(t *testing.T) {
 	}
 }
 
+// The link help has to say which variable --alias sets, since the flag alone
+// did not make that clear.
+func TestLinkHelpShowsTheAliasInUse(t *testing.T) {
+	t.Setenv("DOKKU_NO_COLOR", "1")
+
+	var link internal.PluginCommand
+	for _, c := range registeredPluginCommands(t) {
+		if c.Name() == "link" {
+			link = c
+		}
+	}
+	if link == nil {
+		t.Fatal("expected the registry to hold the link command")
+	}
+
+	for _, name := range []string{"mysql", "redis"} {
+		t.Run(name, func(t *testing.T) {
+			data := internal.NewDocumentationData(internal.DocumentationDataInput{
+				Datastore: service.Datastores[name],
+			})
+
+			help, err := internal.PluginCommandHelp(link, data)
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			for _, expected := range []string{
+				"dokku " + name + ":link lollipop playground --alias BLUE_" + data.DefaultAlias,
+				"BLUE_" + data.DefaultAlias + "_URL=",
+				"dokku " + name + ":link lollipop playground --querystring",
+				"which is suffixed with _URL",
+			} {
+				if !strings.Contains(help, expected) {
+					t.Errorf("expected the help to contain %q, got:\n%s", expected, help)
+				}
+			}
+		})
+	}
+}
+
 func TestPluginCommandArgumentsAreDocumented(t *testing.T) {
 	for _, c := range registeredPluginCommands(t) {
 		t.Run(c.Name(), func(t *testing.T) {

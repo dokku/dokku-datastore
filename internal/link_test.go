@@ -246,6 +246,7 @@ func TestLinkService(t *testing.T) {
 	tests := []struct {
 		name          string
 		alias         string
+		querystring   string
 		links         []string
 		config        func(serviceURL string) map[string]string
 		expectedError string
@@ -278,6 +279,36 @@ func TestLinkService(t *testing.T) {
 				return []string{
 					"docker-options:add my-app build,deploy,run " + option,
 					"config:set --no-restart my-app REDIS_URL=" + serviceURL,
+				}
+			},
+			expectedLinks: []string{"my-app"},
+		},
+		{
+			name:  "the alias passed is the prefix of the variable set",
+			alias: "BLUE_REDIS",
+			links: []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{}
+			},
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{
+					"docker-options:add my-app build,deploy,run " + option,
+					"config:set --no-restart my-app BLUE_REDIS_URL=" + serviceURL,
+				}
+			},
+			expectedLinks: []string{"my-app"},
+		},
+		{
+			name:        "the querystring passed is appended to the url",
+			querystring: "foo=bar&baz=qux",
+			links:       []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{}
+			},
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{
+					"docker-options:add my-app build,deploy,run " + option,
+					"config:set --no-restart my-app REDIS_URL=" + serviceURL + "?foo=bar&baz=qux",
 				}
 			},
 			expectedLinks: []string{"my-app"},
@@ -378,6 +409,7 @@ func TestLinkService(t *testing.T) {
 				Datastore:   datastore,
 				Logger:      Ui{Ui: ui},
 				NoRestart:   true,
+				Querystring: test.querystring,
 				ServiceName: "lollipop",
 			})
 
