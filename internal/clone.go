@@ -89,6 +89,8 @@ type CloneServiceInput struct {
 type serviceSettings struct {
 	ConfigOptions      string
 	CustomEnv          string
+	ExportArgs         string
+	ImportArgs         string
 	InitialNetwork     string
 	Keyserver          string
 	LogDriver          string
@@ -129,6 +131,8 @@ func readServiceSettings(datastore *service.Datastore, serviceName string) (serv
 	return serviceSettings{
 		ConfigOptions:      service.ConfigOptions(datastore, serviceName),
 		CustomEnv:          customEnv(serviceFiles.Env),
+		ExportArgs:         service.ServiceExtraArgs(datastore, serviceName, service.ExportArgsProperty),
+		ImportArgs:         service.ServiceExtraArgs(datastore, serviceName, service.ImportArgsProperty),
 		InitialNetwork:     service.InitialNetwork(datastore, serviceName),
 		Keyserver:          service.Keyserver(datastore, serviceName),
 		LogDriver:          common.PropertyGet(commandPrefix, serviceName, service.LogDriverProperty),
@@ -264,6 +268,21 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 	if settings.Keyserver != "" {
 		if err := SetProperty(input.Datastore, input.NewServiceName, service.KeyserverProperty, settings.Keyserver); err != nil {
 			return fmt.Errorf("failed to write the %s property: %w", service.KeyserverProperty, err)
+		}
+	}
+
+	// the same for the extra arguments, which are written before the data is
+	// copied so that the import below already runs with the clone's own
+	for property, value := range map[string]string{
+		service.ExportArgsProperty: settings.ExportArgs,
+		service.ImportArgsProperty: settings.ImportArgs,
+	} {
+		if value == "" {
+			continue
+		}
+
+		if err := SetProperty(input.Datastore, input.NewServiceName, property, value); err != nil {
+			return fmt.Errorf("failed to write the %s property: %w", property, err)
 		}
 	}
 

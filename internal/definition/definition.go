@@ -323,6 +323,12 @@ type Command struct {
 	// Stdin is true when the command consumes standard input, as import does.
 	Stdin bool `yaml:"stdin"`
 
+	// ExtraArgs is true when the arguments an operator passes are appended to
+	// the rendered argv. Only export and import take them, and only where the
+	// tool reads its argv: a wrapper script that ignores it would drop them
+	// without a word, so a command that does not declare this refuses them.
+	ExtraArgs bool `yaml:"extra_args"`
+
 	// Description and Arguments document a custom command. The base verbs take
 	// theirs from the tool.
 	Description string     `yaml:"description"`

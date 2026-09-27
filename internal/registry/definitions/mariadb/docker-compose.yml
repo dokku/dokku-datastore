@@ -80,11 +80,13 @@ x-dokku:
         LC_ALL: C.UTF-8
 
     export:
+      extra_args: true
       exec: ["dokku-mariadb-dump", "--user=mariadb", "{{ .Database }}"]
       env:
         MYSQL_PWD: "{{ .Secret.password }}"
 
     import:
+      extra_args: true
       stdin: true
       exec: ["dokku-mariadb-client", "--user=mariadb", "{{ .Database }}"]
       env:

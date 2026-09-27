@@ -183,6 +183,13 @@ func TestParseRejects(t *testing.T) {
 			expected: `custom command "thing-expose" needs a description`,
 		},
 		{
+			// nothing but export and import passes extra arguments on, so it
+			// would be a setting that does nothing
+			name:     "extra arguments on a command that cannot take them",
+			compose:  validCompose + "\n  commands:\n    connect:\n      extra_args: true\n      exec: [thing]\n",
+			expected: `command "connect" cannot take extra arguments`,
+		},
+		{
 			name:     "a protocol that is neither tcp nor udp",
 			compose:  strings.Replace(validCompose, "        target: 1234", "        target: 1234\n        protocol: sctp", 1),
 			expected: "neither tcp nor udp",

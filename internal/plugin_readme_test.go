@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 func TestProcessSentence(t *testing.T) {
@@ -228,5 +230,31 @@ func TestPluginSponsorsWithoutAManifest(t *testing.T) {
 
 	if len(sponsors) != 0 {
 		t.Errorf("expected no sponsors, got %v", sponsors)
+	}
+}
+
+// The section is only written for a datastore whose tools take extra arguments.
+func TestReadmeExtraArgs(t *testing.T) {
+	t.Setenv("DOKKU_NO_COLOR", "1")
+	clearImageEnv(t)
+
+	for name, expected := range map[string]bool{"mysql": true, "redis": false} {
+		t.Run(name, func(t *testing.T) {
+			readme, err := Readme(ReadmeInput{
+				Commands: helpTestCommands(),
+				Data:     NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores[name]}),
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			if actual := strings.Contains(readme, "### Passing extra arguments to export and import"); actual != expected {
+				t.Errorf("expected the extra arguments section to be present to be %t, got %t", expected, actual)
+			}
+
+			if expected && !strings.Contains(readme, "`export-args` or `import-args` property with `dokku "+name+":set`") {
+				t.Error("expected the section to name both properties and the set command")
+			}
+		})
 	}
 }

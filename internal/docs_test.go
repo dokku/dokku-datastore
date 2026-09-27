@@ -242,3 +242,16 @@ func TestDocumentedArgumentsLeavesOutTheDatastoreType(t *testing.T) {
 		t.Errorf("unexpected arguments: %v", arguments)
 	}
 }
+
+// Only a datastore whose tools read extra arguments is documented as taking
+// them, so the redis readme never shows something redis would refuse.
+func TestNewDocumentationDataExtraArgs(t *testing.T) {
+	clearImageEnv(t)
+
+	for name, expected := range map[string]bool{"mysql": true, "postgres": true, "redis": false, "couchdb": false} {
+		data := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores[name]})
+		if data.ExportArgs != expected || data.ImportArgs != expected {
+			t.Errorf("expected %s to take extra arguments to be %t, got export %t and import %t", name, expected, data.ExportArgs, data.ImportArgs)
+		}
+	}
+}

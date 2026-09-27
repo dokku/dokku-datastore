@@ -61,6 +61,12 @@ type DocumentationData struct {
 	PortList       string
 	Scheme         string
 	Title          string
+
+	// ExportArgs and ImportArgs are whether the datastore passes extra
+	// arguments on to its export and import tools, so that a datastore that
+	// refuses them is never documented as taking them
+	ExportArgs bool
+	ImportArgs bool
 }
 
 // DocumentationDataInput is the input for the NewDocumentationData function
@@ -99,6 +105,8 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		PortList:       strings.Join(ports, " "),
 		Scheme:         properties.Scheme,
 		Title:          input.Datastore.Title(),
+		ExportArgs:     input.Datastore.AcceptsExtraArgs("export"),
+		ImportArgs:     input.Datastore.AcceptsExtraArgs("import"),
 	}
 }
 

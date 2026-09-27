@@ -61,6 +61,10 @@ type RunInput struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+
+	// ExtraArgs are appended to the rendered argv, each as an argument of its
+	// own, for a command that declares it takes them
+	ExtraArgs []string
 }
 
 // command is what this input runs: the one it was handed, or the one the
@@ -88,6 +92,21 @@ func (e ErrNotImplemented) Error() string {
 	return fmt.Sprintf("%s does not implement %s", e.Plugin, e.Name)
 }
 
+// ErrExtraArgsRefused is returned for extra arguments given to a verb that does
+// not declare it takes them. Its command would ignore them, and a dump made
+// without the arguments the operator asked for is worse than no dump at all.
+type ErrExtraArgsRefused struct {
+	// Plugin is the datastore type
+	Plugin string
+
+	// Name is the verb that was given them
+	Name string
+}
+
+func (e ErrExtraArgsRefused) Error() string {
+	return fmt.Sprintf("%s %s does not take extra arguments", e.Plugin, e.Name)
+}
+
 // Resolve renders a verb into something runnable, without running it. It is
 // separate from Run so that what a definition turns into can be tested without
 // a docker daemon.
@@ -109,6 +128,19 @@ func Resolve(input RunInput) (backend.ExecInput, error) {
 
 	if len(argv) == 0 {
 		return backend.ExecInput{}, fmt.Errorf("the %s command rendered to nothing", input.Name)
+	}
+
+	// appended after rendering rather than rendered, so an argument is passed
+	// exactly as it was given, template syntax and all
+	if len(input.ExtraArgs) > 0 {
+		if !command.ExtraArgs {
+			return backend.ExecInput{}, ErrExtraArgsRefused{
+				Plugin: input.Definition.Dokku.Plugin,
+				Name:   input.Name,
+			}
+		}
+
+		argv = append(argv, input.ExtraArgs...)
 	}
 
 	env := map[string]string{}

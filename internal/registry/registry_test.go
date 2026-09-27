@@ -1441,3 +1441,41 @@ func TestAnOlderVariantStaysInsideItsMajor(t *testing.T) {
 		t.Error("expected at least one older variant to check")
 	}
 }
+
+// Extra arguments are only declared where the tool reads its argv. redis and
+// couchdb dump and load with scripts that never look at theirs, so declaring it
+// there would drop an operator's arguments without a word.
+func TestExtraArgsAreDeclaredWhereTheToolReadsThem(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	accepts := map[string]bool{
+		"mariadb":     true,
+		"mongo":       true,
+		"mysql":       true,
+		"postgres-17": true,
+		"postgres-18": true,
+	}
+
+	for _, name := range loaded.Names() {
+		t.Run(name, func(t *testing.T) {
+			parsed, ok := loaded.Definition(name)
+			if !ok {
+				t.Fatalf("%s is listed but does not resolve", name)
+			}
+
+			for _, verb := range []string{"export", "import"} {
+				command, declared := parsed.CommandFor(verb)
+				if accepts[name] && !declared {
+					t.Errorf("expected %s to declare %s", name, verb)
+				}
+
+				if actual := declared && command.ExtraArgs; actual != accepts[name] {
+					t.Errorf("expected %s %s to take extra arguments to be %t, got %t", name, verb, accepts[name], actual)
+				}
+			}
+		})
+	}
+}

@@ -303,6 +303,12 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		default:
 			return fail("command %q has an unknown mode %q", name, command.Mode)
 		}
+
+		// nothing else passes arguments on, so extra_args anywhere else would
+		// be a setting that does nothing
+		if command.ExtraArgs && name != "export" && name != "import" {
+			return fail("command %q cannot take extra arguments; only export and import do", name)
+		}
 	}
 
 	return nil

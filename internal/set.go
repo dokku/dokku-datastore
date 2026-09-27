@@ -6,11 +6,12 @@ import (
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/dokku/dokku-datastore/internal/verb"
 	"github.com/dokku/dokku/plugins/common"
 )
 
 // SettableProperties are the properties a service exposes through the set command
-var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.WaitTimeoutProperty, service.ExposeAddressProperty, service.ExposeSourceRangeProperty}
+var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.WaitTimeoutProperty, service.ExposeAddressProperty, service.ExposeSourceRangeProperty, service.ExportArgsProperty, service.ImportArgsProperty}
 
 // InvalidPropertyError reports a property the set command does not manage
 func InvalidPropertyError() error {
@@ -47,6 +48,8 @@ func ValidatePropertyValue(key string, value string) error {
 		return service.ValidateExposeAddress(value)
 	case service.ExposeSourceRangeProperty:
 		return service.ValidateExposeSourceRange(value)
+	case service.ExportArgsProperty, service.ImportArgsProperty:
+		return service.ValidateExtraArgs(key, value)
 	}
 
 	return nil
@@ -61,6 +64,13 @@ func SetProperty(s *service.Datastore, serviceName string, key string, value str
 
 	if err := ValidatePropertyValue(key, value); err != nil {
 		return err
+	}
+
+	// refused here as well as when the verb runs, so that a backup is not the
+	// first thing to find out the setting can never be used. Clearing it is
+	// always allowed, so one written by hand can still be taken away
+	if verbName := service.ExtraArgsVerb(key); verbName != "" && value != "" && !s.AcceptsExtraArgs(verbName) {
+		return verb.ErrExtraArgsRefused{Plugin: s.Definition.Dokku.Plugin, Name: verbName}
 	}
 
 	commandPrefix := s.Properties().CommandPrefix

@@ -452,7 +452,7 @@ func (c *ExportCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *ExportCommand) Usage() string {
-	return `<service> [-f|--file <path>] [--force]`
+	return `<service> [-f|--file <path>] [--force]{{if .ExportArgs}} [-- <export-args...>]{{end}}`
 }
 
 // Documentation returns the long form documentation for the command
@@ -465,7 +465,13 @@ a dump can be written to a file on the dokku host with --file.
 the path is on the dokku host, not on the machine running ssh.
 dokku {{.CommandPrefix}}:export lollipop --file /var/lib/dokku/data/storage/data.dump
 a file that already exists is not overwritten unless --force is given
-dokku {{.CommandPrefix}}:export lollipop --file /var/lib/dokku/data/storage/data.dump --force`
+dokku {{.CommandPrefix}}:export lollipop --file /var/lib/dokku/data/storage/data.dump --force
+{{- if .ExportArgs}}
+arguments after -- are passed to the tool that makes the dump, in place of the export-args property
+dokku {{.CommandPrefix}}:export lollipop -- <export-args...>
+the export-args property holds the arguments every export, backup and clone of the service is made with
+dokku {{.CommandPrefix}}:set lollipop export-args -- "<export-args...>"
+{{- end}}`
 }
 
 // Group is the readme usage section the command is documented under
@@ -509,7 +515,7 @@ func (c *ImportCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *ImportCommand) Usage() string {
-	return `<service> [-f|--file <path>]`
+	return `<service> [-f|--file <path>]{{if .ImportArgs}} [-- <import-args...>]{{end}}`
 }
 
 // Documentation returns the long form documentation for the command
@@ -518,7 +524,13 @@ func (c *ImportCommand) Documentation() string {
 dokku {{.CommandPrefix}}:import lollipop < data.dump
 a dump that is already on the dokku host can be imported with --file.
 the path is on the dokku host, not on the machine running ssh.
-dokku {{.CommandPrefix}}:import lollipop --file /var/lib/dokku/data/storage/data.dump`
+dokku {{.CommandPrefix}}:import lollipop --file /var/lib/dokku/data/storage/data.dump
+{{- if .ImportArgs}}
+arguments after -- are passed to the tool that loads the dump, in place of the import-args property
+dokku {{.CommandPrefix}}:import lollipop -- <import-args...> < data.dump
+the import-args property holds the arguments every import into the service is made with, a clone's included
+dokku {{.CommandPrefix}}:set lollipop import-args -- "<import-args...>"
+{{- end}}`
 }
 
 // Group is the readme usage section the command is documented under
@@ -873,6 +885,18 @@ only accept connections to the exposed ports from clients in one IP address or C
 dokku {{.CommandPrefix}}:set lollipop expose-source-range 10.0.0.0/8
 go back to accepting every client
 dokku {{.CommandPrefix}}:set lollipop expose-source-range
+{{- if .ExportArgs}}
+pass extra arguments to every export of the service, including the ones backups and clones make. the value follows -- so that its leading dash is not read as a flag, and an argument with a space in it is quoted
+dokku {{.CommandPrefix}}:set lollipop export-args -- "<export-args...>"
+go back to exporting with the datastore's own arguments alone
+dokku {{.CommandPrefix}}:set lollipop export-args
+{{- end}}
+{{- if .ImportArgs}}
+pass extra arguments to every import into the service, including the one a clone makes
+dokku {{.CommandPrefix}}:set lollipop import-args -- "<import-args...>"
+go back to importing with the datastore's own arguments alone
+dokku {{.CommandPrefix}}:set lollipop import-args
+{{- end}}
 > NOTE: a log setting or a restart policy reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.
 > NOTE: an expose-address or expose-source-range reaches an exposed service with {{.CommandPrefix}}:reexpose, which replaces the container publishing its ports and leaves the service container running.`
 }

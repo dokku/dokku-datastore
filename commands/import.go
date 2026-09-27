@@ -47,8 +47,9 @@ func (c *ImportCommand) Help() string {
 func (c *ImportCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Imports into a redis service named test":               fmt.Sprintf("%s %s redis test", appName, c.Name()),
-		"Imports a file on the dokku host into a redis service": fmt.Sprintf("%s %s redis test --file /var/lib/dokku/data/storage/data.dump", appName, c.Name()),
+		"Imports into a redis service named test":                           fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Imports a file on the dokku host into a redis service":             fmt.Sprintf("%s %s redis test --file /var/lib/dokku/data/storage/data.dump", appName, c.Name()),
+		"Imports into a mysql service named test with a larger packet size": fmt.Sprintf("%s %s mysql test -- --max-allowed-packet=1G", appName, c.Name()),
 	}
 }
 
@@ -127,7 +128,8 @@ func (c *ImportCommand) Run(args []string) int {
 
 	logger = c.Logger(c.Ui)
 
-	arguments, err := c.ParsedArguments(flags.Args())
+	positional, extraArgs := splitExtraArgs(flags.Args(), flags.ArgsLenAtDash())
+	arguments, err := c.ParsedArguments(positional)
 	if err != nil {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
@@ -199,6 +201,7 @@ func (c *ImportCommand) Run(args []string) int {
 		Datastore:   datastore,
 		Reader:      reader,
 		ServiceName: serviceName,
+		ExtraArgs:   extraArgs,
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1

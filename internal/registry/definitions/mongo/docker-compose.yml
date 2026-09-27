@@ -111,6 +111,7 @@ x-dokku:
         LC_ALL: C.UTF-8
 
     export:
+      extra_args: true
       exec:
         - mongodump
         - -d
@@ -126,6 +127,7 @@ x-dokku:
         - --archive
 
     import:
+      extra_args: true
       stdin: true
       exec:
         - mongorestore

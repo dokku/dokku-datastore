@@ -263,3 +263,132 @@ teardown_file() {
     assert_output "known"
   fi
 }
+
+@test "($DEFINITION) extra arguments reach the export and import tools" {
+  local probe="$REPO_ROOT/tests/probes/$DEFINITION.sh"
+  if [[ -x "$probe" ]]; then
+    run "$probe" write "$SERVICE"
+    assert_success
+  fi
+
+  local dump="$BATS_TEST_TMPDIR/dump" export_status=0
+  "$BIN" export "$PLUGIN" "$SERVICE" >"$dump" 2>"$dump.err" || export_status=$?
+  if [[ "$export_status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement export"
+  fi
+  [[ "$export_status" -eq 0 ]] || fail "export failed with status $export_status: $(cat "$dump.err")"
+
+  # a definition whose tools ignore their arguments refuses them rather than
+  # making a dump without them, and leaves the data alone
+  if [[ -z "$(extra_arg export)" ]]; then
+    run "$BIN" export "$PLUGIN" "$SERVICE" -- "$UNKNOWN_ARG"
+    assert_failure
+    assert_output --partial "does not take extra arguments"
+
+    run "$BIN" import "$PLUGIN" "$SERVICE" -- "$UNKNOWN_ARG" <"$dump"
+    assert_failure
+    assert_output --partial "does not take extra arguments"
+
+    if [[ -x "$probe" ]]; then
+      run --separate-stderr "$probe" read "$SERVICE"
+      assert_success
+      assert_output "known"
+    fi
+    return
+  fi
+
+  # a flag the tool does not have is refused by the tool, which is what shows
+  # the argument reached it. The import is refused before it touches the data
+  run "$BIN" export "$PLUGIN" "$SERVICE" -- "$UNKNOWN_ARG"
+  assert_failure
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" -- "$UNKNOWN_ARG" <"$dump"
+  assert_failure
+
+  if [[ -x "$probe" ]]; then
+    run --separate-stderr "$probe" read "$SERVICE"
+    assert_success
+    assert_output "known"
+  fi
+
+  # and one it has makes a dump that loads back, alongside --file, which is
+  # still read as the command's own flag
+  local file_dump="$BATS_TEST_TMPDIR/extra.dump"
+  run --separate-stderr "$BIN" export "$PLUGIN" "$SERVICE" --file "$file_dump" -- "$(extra_arg export)"
+  assert_success
+  [[ -s "$file_dump" ]] || fail "export with extra arguments produced nothing"
+
+  if [[ -x "$probe" ]]; then
+    run "$probe" clobber "$SERVICE"
+    assert_success
+  fi
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" --file "$file_dump" -- "$(extra_arg import)" </dev/null
+  assert_success
+
+  if [[ -x "$probe" ]]; then
+    run --separate-stderr "$probe" read "$SERVICE"
+    assert_success
+    assert_output "known"
+  fi
+}
+
+@test "($DEFINITION) the export and import properties are used unless replaced" {
+  if [[ -z "$(extra_arg export)" ]]; then
+    skip "$PLUGIN does not take extra arguments"
+  fi
+
+  local probe="$REPO_ROOT/tests/probes/$DEFINITION.sh"
+  if [[ -x "$probe" ]]; then
+    run "$probe" write "$SERVICE"
+    assert_success
+  fi
+
+  # the value follows -- so that set does not read it as a flag of its own
+  run "$BIN" set "$PLUGIN" "$SERVICE" export-args -- "$UNKNOWN_ARG"
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" import-args -- "$UNKNOWN_ARG"
+  assert_success
+
+  # every export and import is made with the property, which the tools refuse
+  local dump="$BATS_TEST_TMPDIR/dump"
+  run "$BIN" export "$PLUGIN" "$SERVICE" --file "$dump"
+  assert_failure
+
+  # until arguments given for the run replace it
+  run --separate-stderr "$BIN" export "$PLUGIN" "$SERVICE" --file "$dump" -- "$(extra_arg export)"
+  assert_success
+  [[ -s "$dump" ]] || fail "export with extra arguments produced nothing"
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" --file "$dump" </dev/null
+  assert_failure
+
+  if [[ -x "$probe" ]]; then
+    run --separate-stderr "$probe" read "$SERVICE"
+    assert_success
+    assert_output "known"
+    run "$probe" clobber "$SERVICE"
+    assert_success
+  fi
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" --file "$dump" -- "$(extra_arg import)" </dev/null
+  assert_success
+
+  if [[ -x "$probe" ]]; then
+    run --separate-stderr "$probe" read "$SERVICE"
+    assert_success
+    assert_output "known"
+  fi
+
+  # and unset, the datastore's own arguments are enough again
+  run "$BIN" set "$PLUGIN" "$SERVICE" export-args
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" import-args
+  assert_success
+
+  run --separate-stderr "$BIN" export "$PLUGIN" "$SERVICE" --file "$dump" --force
+  assert_success
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" --file "$dump" </dev/null
+  assert_success
+}
