@@ -11,6 +11,7 @@ load ../test_helper
 
 GIVEN_PASSWORD="givenpassword1234"
 GIVEN_ROOT_PASSWORD="givenrootpassword1234"
+INITIAL_NETWORK="dokku-datastore-test-$DEFINITION"
 
 setup_file() {
   datastore_setup_file
@@ -23,7 +24,11 @@ setup_file() {
 }
 
 teardown_file() {
-  datastore_teardown_file "$SERVICE" "$SERVICE-unpinned" "$SERVICE-json"
+  datastore_teardown_file "$SERVICE" "$SERVICE-unpinned" "$SERVICE-json" "$SERVICE-network"
+
+  # after the services, since docker will not remove a network a container is
+  # still attached to
+  docker network rm "$INITIAL_NETWORK" >/dev/null 2>/dev/null || true
 }
 
 @test "($DEFINITION) a create naming an image with no version is refused" {
@@ -141,6 +146,39 @@ teardown_file() {
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --dsn
   assert_success
   [[ "$output" == "$scheme://"?* ]] || fail "expected a $scheme connection string, got '$output'"
+}
+
+@test "($DEFINITION) info reports the internal ip of the running service" {
+  # the address used to be read from a top level field newer docker daemons no
+  # longer report, which left this empty on every service
+  local expected
+  expected="$(container_inspect "$(service_container)" '{{ .NetworkSettings.Networks.bridge.IPAddress }}')"
+  [[ -n "$expected" ]] || fail "expected $(service_container) to have an address on the bridge"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --internal-ip
+  assert_success
+  assert_output "$expected"
+}
+
+@test "($DEFINITION) info reports the internal ip on the network the service was created on" {
+  # the top level field only ever held the default bridge address, so a
+  # service created on another network had no internal ip at all
+  local network="$INITIAL_NETWORK" expected
+  # left behind by a run that never reached its teardown
+  docker network inspect "$network" >/dev/null 2>/dev/null || docker network create "$network" >/dev/null
+
+  run "$BIN" create "$PLUGIN" "$SERVICE-network" --image-version "$IMAGE_VERSION" --initial-network "$network"
+  assert_success
+
+  expected="$(container_inspect "$(service_container "$SERVICE-network")" "{{ (index .NetworkSettings.Networks \"$network\").IPAddress }}")"
+  [[ -n "$expected" ]] || fail "expected $(service_container "$SERVICE-network") to have an address on $network"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE-network" --internal-ip
+  assert_success
+  assert_output "$expected"
+
+  run "$BIN" destroy "$PLUGIN" "$SERVICE-network" --force
+  assert_success
 }
 
 @test "($DEFINITION) the service records the definition it was created with" {
