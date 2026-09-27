@@ -163,6 +163,84 @@ teardown_file() {
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --status
   assert_success
   assert_output "running"
+
+  # an export named as a file on the host rather than redirected, which writes
+  # nothing to stdout and a file only the dokku user and group read
+  local file_dump="$BATS_TEST_TMPDIR/file.dump"
+  run --separate-stderr "$BIN" export "$PLUGIN" "$SERVICE" --file "$file_dump"
+  assert_success
+  assert_output ""
+  [[ -s "$file_dump" ]] || fail "export --file produced nothing"
+  run find "$file_dump" -perm 640
+  assert_output "$file_dump"
+
+  if [[ -x "$probe" ]]; then
+    run "$probe" clobber "$SERVICE"
+    assert_success
+  fi
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" --file "$file_dump" </dev/null
+  assert_success
+
+  if [[ -x "$probe" ]]; then
+    run --separate-stderr "$probe" read "$SERVICE"
+    assert_success
+    assert_output "known"
+  fi
+}
+
+@test "($DEFINITION) export to an existing file needs --force" {
+  local existing="$BATS_TEST_TMPDIR/existing.dump"
+  echo "old" >"$existing"
+
+  run "$BIN" export "$PLUGIN" "$SERVICE" --file "$existing"
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement export"
+  fi
+  assert_failure
+  assert_output --partial "$existing"
+  assert_output --partial "pass --force"
+  run cat "$existing"
+  assert_output "old"
+
+  # --force is only for a file, since stdout has nothing to replace
+  run "$BIN" export "$PLUGIN" "$SERVICE" --force
+  assert_failure
+  assert_output --partial "--force only applies"
+
+  run --separate-stderr "$BIN" export "$PLUGIN" "$SERVICE" --file "$existing" --force
+  assert_success
+  assert_output ""
+  [[ "$(cat "$existing")" != "old" ]] || fail "export --force left the old file in place"
+  [[ -s "$existing" ]] || fail "export --force produced nothing"
+}
+
+@test "($DEFINITION) export to an unwritable destination fails before exporting" {
+  # a directory is not a file an export can replace
+  run "$BIN" export "$PLUGIN" "$SERVICE" --file "$BATS_TEST_TMPDIR"
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement export"
+  fi
+  assert_failure
+  assert_output --partial "$BATS_TEST_TMPDIR"
+  assert_output --partial "not a regular file"
+
+  # the dump is written beside the path, so a directory the user cannot write
+  # into fails before anything is exported and leaves nothing behind
+  if [[ "$EUID" -eq 0 ]]; then
+    skip "root writes a directory whatever its mode"
+  fi
+  local read_only="$BATS_TEST_TMPDIR/read-only"
+  mkdir "$read_only"
+  chmod 555 "$read_only"
+  run "$BIN" export "$PLUGIN" "$SERVICE" --file "$read_only/data.dump"
+  chmod 755 "$read_only"
+  assert_failure
+  assert_output --partial "$read_only/data.dump"
+
+  run ls -A "$read_only"
+  assert_success
+  assert_output ""
 }
 
 @test "($DEFINITION) import of a missing file leaves the data alone" {

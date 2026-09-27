@@ -52,7 +52,7 @@ Available commands are:
     destroy                               Destroys a datastore service
     enter                                 Enters a service or runs a command in it
     exists                                Checks if a service exists
-    export                                Exports a service's data to stdout
+    export                                Exports a service's data to stdout or a file
     expose                                Exposes a service
     import                                Imports data into a service from stdin or a file
     info                                  Gets information about a service
@@ -317,6 +317,23 @@ dokku postgres:import lollipop --file /var/lib/dokku/data/storage/data.dump
 
 # a dump on this machine, redirected here rather than on the dokku host
 ssh dokku@dokku.me postgres:import lollipop < data.dump
+```
+
+## Exporting to a file on the dokku host
+
+`export` wrote only to stdout, so a dump could not be written to the dokku host over ssh: `ssh dokku@dokku.me "postgres:export lollipop > /path/to/data.dump"` hands the whole string to dokku, which splits it into words without a shell, so the `>` and the path arrive as arguments and the dump comes back through the ssh session instead.
+
+`export` now takes `--file`, which names a file to write instead of stdout. The path is on the dokku host, not on the machine running ssh, and its directory must be writable by the dokku user. That is checked before the export starts, so a path that cannot be written fails without exporting anything. A file that already exists at the path is not overwritten unless `--force` is given, and then it is only replaced once the export succeeds, so a failed export leaves the previous dump in place. The dump is written beside the path and only moved there once it is complete, so a file that appears at the path during the export is not overwritten either. The file is readable by the dokku user and group only.
+
+```shell
+# a dump written on the dokku host
+dokku postgres:export lollipop --file /var/lib/dokku/data/storage/data.dump
+
+# replacing a dump already at that path
+dokku postgres:export lollipop --file /var/lib/dokku/data/storage/data.dump --force
+
+# a dump written on this machine, redirected here rather than on the dokku host
+ssh dokku@dokku.me postgres:export lollipop > data.dump
 ```
 
 ## Connecting without a terminal
