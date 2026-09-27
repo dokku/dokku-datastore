@@ -632,9 +632,11 @@ this will cause {{.DefaultAlias}}_URL to be set as:
     {{.Scheme}}://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}?foo=bar&baz=qux
 
 it is possible to change the protocol for {{.DefaultAlias}}_URL by setting the
-environment variable {{.PluginVariable}}_DATABASE_SCHEME on the app. doing so
-after linking means unlink no longer finds the variable it set, and leaves it
-in place, so we advise you to unlink before proceeding.
+environment variable {{.PluginVariable}}_DATABASE_SCHEME on the app. link records
+the variable it set, so unlink still removes it after the scheme or querystring
+on it changes. a link made by an earlier version of the plugin is recorded the
+next time link or promote runs for it, and until then we advise you to unlink
+before changing the scheme.
 dokku config:set playground {{.PluginVariable}}_DATABASE_SCHEME={{.Scheme}}2
 dokku {{.CommandPrefix}}:link lollipop playground
 this will cause {{.DefaultAlias}}_URL to be set as:
@@ -1032,7 +1034,8 @@ dokku {{.CommandPrefix}}:unlink lollipop playground
 an app is still linked after its {{.DefaultAlias}}_URL is changed to point
 elsewhere, and is unlinked the same way. the variable it now holds is not
 the service's, so it is left alone, nothing is unset, the app is not
-restarted, and a warning says so.`
+restarted, and a warning says so. a variable link set that has only had its
+scheme or querystring changed still points at the service, and is unset.`
 }
 
 // Group is the readme usage section the command is documented under

@@ -541,6 +541,18 @@ dokku postgres:link lollipop playground
 dokku ps:restart playground
 ```
 
+### The variable a link sets
+
+The variable holding the url used to be found only by the url it held, so once the scheme on it changed, through `POSTGRES_DATABASE_SCHEME` or by hand, `unlink` no longer found it and left it in place. `link` now records the variables it sets on each app in the service's `link-config-keys` property, and `unlink` and `promote` find a recorded variable as long as it still names the service's credentials, host, port and database, whatever its scheme or querystring. A variable pointed at another datastore is still left alone. A link made by an earlier version has nothing recorded and is found by its exact url, as before, until `link` or `promote` next runs for it and records it.
+
+```shell
+dokku postgres:link lollipop playground
+
+# still unsets DATABASE_URL, though the scheme on it changed
+dokku config:set playground DATABASE_URL=postgresql://postgres:password@dokku-postgres-lollipop:5432/lollipop
+dokku postgres:unlink lollipop playground
+```
+
 ## Hiding services from users
 
 A plugin may hide services from some users by implementing the `user-auth-service` trigger, the one the bash plugins fired. It is handed the ssh user, the name of the ssh key they connected with, the datastore's command prefix and every service, and prints the services that user may see, one per line on stdout. Anything it prints on stderr is ignored, and a service it names that was not asked about is dropped. `list`, `info` with no service named, `app-links` and the triggers that list services all see only what it prints.

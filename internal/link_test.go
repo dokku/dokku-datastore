@@ -2,6 +2,7 @@ package internal
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,12 +109,17 @@ func fakeDokku(t *testing.T, environment map[string]string) string {
 func recordedCalls(t *testing.T, calls string) []string {
 	t.Helper()
 
+	recorded := []string{}
+
+	// a link refused before dokku was asked anything leaves nothing recorded
 	contents, err := os.ReadFile(calls)
+	if errors.Is(err, os.ErrNotExist) {
+		return recorded
+	}
 	if err != nil {
 		t.Fatalf("failed to read the recorded calls: %s", err)
 	}
 
-	recorded := []string{}
 	for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
 		if !strings.HasPrefix(line, "config:export") {
 			recorded = append(recorded, line)
@@ -123,6 +129,111 @@ func recordedCalls(t *testing.T, calls string) []string {
 	return recorded
 }
 
+// recordKeys records the config keys a link to the lollipop service set on
+// my-app, as a link made by this version of the plugin would have
+func recordKeys(t *testing.T, datastore *service.Datastore, keys []string) {
+	t.Helper()
+
+	if len(keys) == 0 {
+		return
+	}
+
+	if err := service.SetLinkConfigKeys(datastore, "lollipop", "my-app", keys); err != nil {
+		t.Fatalf("failed to record the keys: %s", err)
+	}
+}
+
+// withScheme returns a url with its scheme replaced
+func withScheme(t *testing.T, u string, scheme string) string {
+	t.Helper()
+
+	_, rest, ok := strings.Cut(u, "://")
+	if !ok {
+		t.Fatalf("expected %q to have a scheme", u)
+	}
+
+	return scheme + "://" + rest
+}
+
+// A link made by an earlier version is found by its exact url, and one this
+// version recorded is found for as long as it names the service, whatever
+// scheme or querystring it has been given since.
+func TestLinkedConfigKeys(t *testing.T) {
+	serviceURL := "redis://:hunter2@dokku-redis-ls:6379"
+
+	tests := []struct {
+		name        string
+		environment map[string]string
+		recorded    []string
+		unrendered  bool
+		expected    []string
+	}{
+		{
+			name:        "nothing recorded, with the exact url",
+			environment: map[string]string{"REDIS_URL": serviceURL},
+			expected:    []string{"REDIS_URL"},
+		},
+		{
+			name:        "nothing recorded, with the scheme changed",
+			environment: map[string]string{"REDIS_URL": "rediss://:hunter2@dokku-redis-ls:6379"},
+			expected:    []string{},
+		},
+		{
+			name:        "a recorded key with the scheme changed",
+			environment: map[string]string{"MB_DB_CONNECTION_URI": "rediss://:hunter2@dokku-redis-ls:6379"},
+			recorded:    []string{"MB_DB_CONNECTION_URI"},
+			expected:    []string{"MB_DB_CONNECTION_URI"},
+		},
+		{
+			name:        "a recorded key with a querystring added",
+			environment: map[string]string{"MB_DB_CONNECTION_URI": serviceURL + "?pool=5"},
+			recorded:    []string{"MB_DB_CONNECTION_URI"},
+			expected:    []string{"MB_DB_CONNECTION_URI"},
+		},
+		{
+			name:        "a recorded key pointed at another datastore",
+			environment: map[string]string{"REDIS_URL": "redis://:other@elsewhere:6379"},
+			recorded:    []string{"REDIS_URL"},
+			expected:    []string{},
+		},
+		{
+			name:        "a recorded key no longer on the app",
+			environment: map[string]string{},
+			recorded:    []string{"REDIS_URL"},
+			expected:    []string{},
+		},
+		{
+			name: "recorded and unrecorded keys together, reported once each",
+			environment: map[string]string{
+				"REDIS_URL":            serviceURL,
+				"MB_DB_CONNECTION_URI": "rediss://:hunter2@dokku-redis-ls:6379",
+			},
+			recorded: []string{"REDIS_URL", "MB_DB_CONNECTION_URI"},
+			expected: []string{"MB_DB_CONNECTION_URI", "REDIS_URL"},
+		},
+		{
+			name:        "a url that failed to render matches nothing",
+			environment: map[string]string{"REDIS_URL": serviceURL},
+			recorded:    []string{"REDIS_URL"},
+			unrendered:  true,
+			expected:    []string{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			url := serviceURL
+			if test.unrendered {
+				url = ""
+			}
+
+			if actual := LinkedConfigKeys(test.environment, test.recorded, url); !slices.Equal(actual, test.expected) {
+				t.Errorf("expected %v, got %v", test.expected, actual)
+			}
+		})
+	}
+}
+
 // The links file decides whether an app is linked, since that is what destroy,
 // linked and links read. An app whose url was repointed at another datastore
 // used to be reported as not linked by unlink while destroy still refused.
@@ -130,6 +241,7 @@ func TestUnlinkService(t *testing.T) {
 	tests := []struct {
 		name          string
 		links         []string
+		recorded      []string
 		config        func(serviceURL string) map[string]string
 		expectedError string
 		expectedCalls func(option string) []string
@@ -183,11 +295,52 @@ func TestUnlinkService(t *testing.T) {
 				return []string{}
 			},
 		},
+		{
+			name:     "linked, with the url under a recorded env var",
+			links:    []string{"my-app"},
+			recorded: []string{"MB_DB_CONNECTION_URI"},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"MB_DB_CONNECTION_URI": serviceURL}
+			},
+			expectedCalls: func(option string) []string {
+				return []string{
+					"docker-options:remove my-app build,deploy,run " + option,
+					"config:unset --no-restart my-app MB_DB_CONNECTION_URI",
+				}
+			},
+		},
+		{
+			name:     "linked, with the scheme on a recorded key changed",
+			links:    []string{"my-app"},
+			recorded: []string{"MB_DB_CONNECTION_URI"},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"MB_DB_CONNECTION_URI": withScheme(t, serviceURL, "rediss") + "?pool=5"}
+			},
+			expectedCalls: func(option string) []string {
+				return []string{
+					"docker-options:remove my-app build,deploy,run " + option,
+					"config:unset --no-restart my-app MB_DB_CONNECTION_URI",
+				}
+			},
+		},
+		{
+			name:     "linked, with a recorded key repointed at another datastore",
+			links:    []string{"my-app"},
+			recorded: []string{"REDIS_URL"},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"REDIS_URL": "redis://:other@elsewhere:6379"}
+			},
+			expectedCalls: func(option string) []string {
+				return []string{"docker-options:remove my-app build,deploy,run " + option}
+			},
+			expectedWarn: true,
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			datastore := linkedServices(t, map[string][]string{"lollipop": test.links})
+			recordKeys(t, datastore, test.recorded)
 
 			dokkuRoot := t.TempDir()
 			t.Setenv("DOKKU_ROOT", dokkuRoot)
@@ -231,6 +384,16 @@ func TestUnlinkService(t *testing.T) {
 				t.Errorf("expected the links %v, got %v", expectedLinks, actualLinks)
 			}
 
+			// the record goes with the link, and one that was never linked keeps
+			// whatever it had
+			expectedRecorded := test.recorded
+			if test.expectedError == "" {
+				expectedRecorded = nil
+			}
+			if actual := service.LinkConfigKeys(datastore, "lollipop", "my-app"); !slices.Equal(actual, expectedRecorded) {
+				t.Errorf("expected the recorded keys %v, got %v", expectedRecorded, actual)
+			}
+
 			warned := strings.Contains(ui.ErrorWriter.String(), "none was unset")
 			if warned != test.expectedWarn {
 				t.Errorf("expected a warning to be %t, got the output %q", test.expectedWarn, ui.ErrorWriter.String())
@@ -244,15 +407,17 @@ func TestUnlinkService(t *testing.T) {
 // the url is given the rest of the link rather than refused.
 func TestLinkService(t *testing.T) {
 	tests := []struct {
-		name          string
-		alias         string
-		querystring   string
-		links         []string
-		config        func(serviceURL string) map[string]string
-		expectedError string
-		expectedCalls func(serviceURL string, option string) []string
-		expectedLinks []string
-		expectedWarn  bool
+		name             string
+		alias            string
+		querystring      string
+		links            []string
+		recorded         []string
+		config           func(serviceURL string) map[string]string
+		expectedError    string
+		expectedCalls    func(serviceURL string, option string) []string
+		expectedLinks    []string
+		expectedRecorded []string
+		expectedWarn     bool
 	}{
 		{
 			name:  "a key merely containing the alias does not take its place",
@@ -266,7 +431,8 @@ func TestLinkService(t *testing.T) {
 					"config:set --no-restart my-app REDIS_URL=" + serviceURL,
 				}
 			},
-			expectedLinks: []string{"my-app"},
+			expectedLinks:    []string{"my-app"},
+			expectedRecorded: []string{"REDIS_URL"},
 		},
 		{
 			name:  "a key merely containing the alias does not stop it being passed",
@@ -281,7 +447,8 @@ func TestLinkService(t *testing.T) {
 					"config:set --no-restart my-app REDIS_URL=" + serviceURL,
 				}
 			},
-			expectedLinks: []string{"my-app"},
+			expectedLinks:    []string{"my-app"},
+			expectedRecorded: []string{"REDIS_URL"},
 		},
 		{
 			name:  "the alias passed is the prefix of the variable set",
@@ -296,7 +463,8 @@ func TestLinkService(t *testing.T) {
 					"config:set --no-restart my-app BLUE_REDIS_URL=" + serviceURL,
 				}
 			},
-			expectedLinks: []string{"my-app"},
+			expectedLinks:    []string{"my-app"},
+			expectedRecorded: []string{"BLUE_REDIS_URL"},
 		},
 		{
 			name:        "the querystring passed is appended to the url",
@@ -311,7 +479,8 @@ func TestLinkService(t *testing.T) {
 					"config:set --no-restart my-app REDIS_URL=" + serviceURL + "?foo=bar&baz=qux",
 				}
 			},
-			expectedLinks: []string{"my-app"},
+			expectedLinks:    []string{"my-app"},
+			expectedRecorded: []string{"REDIS_URL"},
 		},
 		{
 			name:  "the default alias holding another url",
@@ -325,7 +494,8 @@ func TestLinkService(t *testing.T) {
 					"config:set --no-restart my-app DOKKU_REDIS_AQUA_URL=" + serviceURL,
 				}
 			},
-			expectedLinks: []string{"my-app"},
+			expectedLinks:    []string{"my-app"},
+			expectedRecorded: []string{"DOKKU_REDIS_AQUA_URL"},
 		},
 		{
 			name:  "not in the links file, with the url in the config",
@@ -336,8 +506,9 @@ func TestLinkService(t *testing.T) {
 			expectedCalls: func(serviceURL string, option string) []string {
 				return []string{"docker-options:add my-app build,deploy,run " + option}
 			},
-			expectedLinks: []string{"my-app"},
-			expectedWarn:  true,
+			expectedLinks:    []string{"my-app"},
+			expectedRecorded: []string{"REDIS_URL"},
+			expectedWarn:     true,
 		},
 		{
 			name:  "not in the links file, with the url under the alias passed",
@@ -349,8 +520,9 @@ func TestLinkService(t *testing.T) {
 			expectedCalls: func(serviceURL string, option string) []string {
 				return []string{"docker-options:add my-app build,deploy,run " + option}
 			},
-			expectedLinks: []string{"my-app"},
-			expectedWarn:  true,
+			expectedLinks:    []string{"my-app"},
+			expectedRecorded: []string{"FOO_URL"},
+			expectedWarn:     true,
 		},
 		{
 			name:  "linked, with the url in the config",
@@ -362,7 +534,8 @@ func TestLinkService(t *testing.T) {
 			expectedCalls: func(serviceURL string, option string) []string {
 				return []string{}
 			},
-			expectedLinks: []string{"my-app"},
+			expectedLinks:    []string{"my-app"},
+			expectedRecorded: []string{"REDIS_URL"},
 		},
 		{
 			name:  "linked, with the url repointed at another datastore",
@@ -389,11 +562,26 @@ func TestLinkService(t *testing.T) {
 			},
 			expectedLinks: []string{},
 		},
+		{
+			name:     "linked, with the url under a recorded env var whose scheme changed",
+			links:    []string{"my-app"},
+			recorded: []string{"MB_DB_CONNECTION_URI"},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"MB_DB_CONNECTION_URI": withScheme(t, serviceURL, "rediss")}
+			},
+			expectedError: "Already linked as MB_DB_CONNECTION_URI",
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{}
+			},
+			expectedLinks:    []string{"my-app"},
+			expectedRecorded: []string{"MB_DB_CONNECTION_URI"},
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			datastore := linkedServices(t, map[string][]string{"lollipop": test.links})
+			recordKeys(t, datastore, test.recorded)
 
 			serviceURL := datastore.URL("lollipop", "")
 			if serviceURL == "" {
@@ -428,6 +616,10 @@ func TestLinkService(t *testing.T) {
 			actualLinks := service.LinkedApps(t.Context(), service.LinkedAppsInput{Datastore: datastore, ServiceName: "lollipop"})
 			if !slices.Equal(actualLinks, test.expectedLinks) {
 				t.Errorf("expected the links %v, got %v", test.expectedLinks, actualLinks)
+			}
+
+			if actual := service.LinkConfigKeys(datastore, "lollipop", "my-app"); !slices.Equal(actual, test.expectedRecorded) {
+				t.Errorf("expected the recorded keys %v, got %v", test.expectedRecorded, actual)
 			}
 
 			warned := strings.Contains(ui.ErrorWriter.String(), "none was set")

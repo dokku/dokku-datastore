@@ -149,6 +149,45 @@ func ConfigKeysForURL(environment map[string]string, serviceURL string) []string
 	return keys
 }
 
+// urlAfterScheme returns a url without its scheme, which is the part of it that
+// names the service: its credentials, host, port and path
+func urlAfterScheme(u string) string {
+	if _, rest, ok := strings.Cut(u, "://"); ok {
+		return rest
+	}
+
+	return u
+}
+
+// LinkedConfigKeys returns the config keys on an app that hold the service url,
+// sorted so the output is stable.
+//
+// A key holding the exact url counts, as it always has, which is all a link
+// made by an earlier version of the plugin can be found by. A key recorded by
+// the link counts as well when it still names the service once its scheme is
+// set aside, so a scheme or querystring changed after linking does not lose it.
+// A recorded key pointed at something else entirely no longer belongs to the
+// link, and is left alone.
+func LinkedConfigKeys(environment map[string]string, recorded []string, serviceURL string) []string {
+	keys := ConfigKeysForURL(environment, serviceURL)
+
+	// every value contains the empty string, as ConfigKeysForURL guards against
+	withoutScheme := urlAfterScheme(serviceURL)
+	if withoutScheme == "" {
+		return keys
+	}
+
+	for _, key := range recorded {
+		value, ok := environment[key]
+		if ok && strings.Contains(value, withoutScheme) {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+
+	return slices.Compact(keys)
+}
+
 // AlternateAlias returns the first alternate alias that is not already in use on
 // the app, or an empty string when every alias is taken
 func AlternateAlias(s *service.Datastore, environment map[string]string) string {
@@ -194,7 +233,7 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 	}
 
 	serviceURL := input.Datastore.URL(input.ServiceName, SchemeForApp(input.Datastore, environment))
-	linkedKeys := ConfigKeysForURL(environment, serviceURL)
+	linkedKeys := LinkedConfigKeys(environment, service.LinkConfigKeys(input.Datastore, input.ServiceName, input.AppName), serviceURL)
 
 	// the links file decides whether the app is linked, as it does for unlink,
 	// destroy, linked and links. An app on it whose url was repointed is still
@@ -204,6 +243,12 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 		ServiceName: input.ServiceName,
 	}), input.AppName)
 	if linked && len(linkedKeys) > 0 {
+		// a link made before the keys were recorded is recorded now, so that
+		// the keys are still found once the url on the app has changed
+		if err := service.SetLinkConfigKeys(input.Datastore, input.ServiceName, input.AppName, linkedKeys); err != nil {
+			return err
+		}
+
 		return fmt.Errorf("Already linked as %s", strings.Join(linkedKeys, " ")) //nolint:staticcheck // matches the bash datastore plugins
 	}
 	if linked {
@@ -219,6 +264,10 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 			return err
 		}
 
+		if err := service.SetLinkConfigKeys(input.Datastore, input.ServiceName, input.AppName, linkedKeys); err != nil {
+			return err
+		}
+
 		input.Logger.Warn(WarnInput{
 			Warning: fmt.Sprintf("App %s already holds the url for service %s as %s, so none was set. The app has no container link until it is restarted", input.AppName, input.ServiceName, strings.Join(linkedKeys, " ")),
 		})
@@ -226,18 +275,9 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 		return callServiceAction(ctx, input.Datastore, "post-link-complete", input.ServiceName, input.AppName)
 	}
 
-	alias := input.Datastore.Properties().DefaultAlias
-	if input.Alias != "" {
-		alias = input.Alias
-		if _, ok := environment[fmt.Sprintf("%s_URL", alias)]; ok {
-			return fmt.Errorf("Specified alias %s already in use", alias) //nolint:staticcheck // matches the bash datastore plugins
-		}
-	} else if _, ok := environment[fmt.Sprintf("%s_URL", alias)]; ok {
-		alias = AlternateAlias(input.Datastore, environment)
-	}
-
-	if alias == "" {
-		return errors.New("Unable to use default or generated URL alias") //nolint:staticcheck // matches the bash datastore plugins
+	key, err := linkConfigKey(input, environment)
+	if err != nil {
+		return err
 	}
 
 	if input.Querystring != "" {
@@ -248,13 +288,40 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 		return err
 	}
 
+	// recorded before the config is set, so a link whose config:set fails
+	// part way is still unlinked by the key it was meant to have
+	if err := service.SetLinkConfigKeys(input.Datastore, input.ServiceName, input.AppName, []string{key}); err != nil {
+		return err
+	}
+
 	if err := SetAppConfig(ctx, input.AppName, map[string]string{
-		fmt.Sprintf("%s_URL", alias): serviceURL,
+		key: serviceURL,
 	}, !input.NoRestart); err != nil {
 		return err
 	}
 
 	return callServiceAction(ctx, input.Datastore, "post-link-complete", input.ServiceName, input.AppName)
+}
+
+// linkConfigKey returns the config key a new link sets the service url as: the
+// alias asked for suffixed with _URL, or the default alias, falling back to a
+// generated one when the default is in use
+func linkConfigKey(input LinkServiceInput, environment map[string]string) (string, error) {
+	alias := input.Datastore.Properties().DefaultAlias
+	if input.Alias != "" {
+		alias = input.Alias
+		if _, ok := environment[fmt.Sprintf("%s_URL", alias)]; ok {
+			return "", fmt.Errorf("Specified alias %s already in use", alias) //nolint:staticcheck // matches the bash datastore plugins
+		}
+	} else if _, ok := environment[fmt.Sprintf("%s_URL", alias)]; ok {
+		alias = AlternateAlias(input.Datastore, environment)
+	}
+
+	if alias == "" {
+		return "", errors.New("Unable to use default or generated URL alias") //nolint:staticcheck // matches the bash datastore plugins
+	}
+
+	return fmt.Sprintf("%s_URL", alias), nil
 }
 
 // UnlinkServiceInput is the input for the UnlinkService function
@@ -283,6 +350,10 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 	// triggers are skipped too: they are handed an app name, and firing them
 	// for an app that is gone asks other plugins to act on nothing.
 	if !service.AppExists(input.AppName) {
+		if err := service.RemoveLinkConfigKeys(input.Datastore, input.ServiceName, input.AppName); err != nil {
+			return err
+		}
+
 		return service.RemoveLinkedApp(ctx, service.LinkedAppsInput{
 			Datastore:   input.Datastore,
 			ServiceName: input.ServiceName,
@@ -295,7 +366,7 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 	}
 
 	serviceURL := input.Datastore.URL(input.ServiceName, SchemeForApp(input.Datastore, environment))
-	linkedKeys := ConfigKeysForURL(environment, serviceURL)
+	linkedKeys := LinkedConfigKeys(environment, service.LinkConfigKeys(input.Datastore, input.ServiceName, input.AppName), serviceURL)
 
 	// the links file is what destroy, linked and links read, so it is what
 	// decides whether the app is linked. An app whose url was repointed at
@@ -317,6 +388,10 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	}, input.AppName); err != nil {
+		return err
+	}
+
+	if err := service.RemoveLinkConfigKeys(input.Datastore, input.ServiceName, input.AppName); err != nil {
 		return err
 	}
 
