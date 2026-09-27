@@ -667,6 +667,198 @@ func TestVariantsAreOrderedByNumber(t *testing.T) {
 	}
 }
 
+// A flavor is its own line of majors, sorted after the datastore's own. A
+// flavor's name does not end in a bare number, and reading it as version zero
+// would sort pg18 before pg17 whenever the names happened to.
+func TestFlavorsAreOrderedAfterTheDatastoresOwn(t *testing.T) {
+	names := []string{
+		"postgres-timescaledb-pg18",
+		"postgres-pgvector-pg18",
+		"postgres-18",
+		"postgres-pgvector-pg17",
+		"postgres-timescaledb-pg17",
+		"postgres-17",
+	}
+	sortVariants(names)
+
+	expected := []string{
+		"postgres-17",
+		"postgres-18",
+		"postgres-pgvector-pg17",
+		"postgres-pgvector-pg18",
+		"postgres-timescaledb-pg17",
+		"postgres-timescaledb-pg18",
+	}
+	if strings.Join(names, " ") != strings.Join(expected, " ") {
+		t.Errorf("expected %v, got %v", expected, names)
+	}
+}
+
+func TestParseVariant(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected variant
+	}{
+		{name: "redis", expected: variant{}},
+		{name: "postgres-18", expected: variant{major: 18}},
+		{name: "solr-10", expected: variant{major: 10}},
+		{name: "postgres-pgvector-pg17", expected: variant{flavor: "pgvector", prefix: "pg", major: 17}},
+		{name: "postgres-postgis-pg18", expected: variant{flavor: "postgis", prefix: "pg", major: 18}},
+		{name: "postgres-pgvector", expected: variant{flavor: "pgvector"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if actual := parseVariant(test.name); actual != test.expected {
+				t.Errorf("expected %+v, got %+v", test.expected, actual)
+			}
+		})
+	}
+}
+
+// Each flavor writes its tags its own way, and the major has to come out of
+// all of them: pgvector and timescaledb lead with their own version and carry
+// postgres's as pg17, and postgis leads with postgres's.
+func TestTagMajor(t *testing.T) {
+	tests := []struct {
+		version  string
+		prefix   string
+		expected int
+		ok       bool
+	}{
+		{version: "18.4", prefix: "", expected: 18, ok: true},
+		{version: "17-3.5", prefix: "pg", expected: 17, ok: true},
+		{version: "pg17", prefix: "pg", expected: 17, ok: true},
+		{version: "0.8.6-pg18", prefix: "pg", expected: 18, ok: true},
+		{version: "0.8.6-pg17-trixie", prefix: "pg", expected: 17, ok: true},
+		{version: "2.30.1-pg17", prefix: "pg", expected: 17, ok: true},
+		{version: "latest-pg18", prefix: "pg", expected: 18, ok: true},
+		// the leading number is the extension's own version, which is what
+		// used to be read as the major
+		{version: "0.8.6", prefix: "pg", expected: 0, ok: true},
+		{version: "latest", prefix: "pg", ok: false},
+		{version: "", prefix: "", ok: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.prefix+"/"+test.version, func(t *testing.T) {
+			actual, ok := tagMajor(test.version, test.prefix)
+			if ok != test.ok || actual != test.expected {
+				t.Errorf("expected (%d, %t), got (%d, %t)", test.expected, test.ok, actual, ok)
+			}
+		})
+	}
+}
+
+// The image picks the flavor, and a flavor is never picked for an image it does
+// not ship: the datastore's own image, one no definition ships, and no image at
+// all each land on the datastore's own definitions, which is where they ran
+// before flavors existed.
+func TestForImagePicksTheFlavor(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	tests := []struct {
+		image    string
+		version  string
+		expected string
+	}{
+		{image: "", version: "", expected: "postgres-18"},
+		{image: "", version: "pg17", expected: "postgres-18"},
+		{image: "postgres", version: "17.11", expected: "postgres-17"},
+		{image: "ghcr.io/example/postgres", version: "17.11", expected: "postgres-17"},
+		{image: "pgvector/pgvector", version: "pg17", expected: "postgres-pgvector-pg17"},
+		{image: "pgvector/pgvector", version: "", expected: "postgres-pgvector-pg18"},
+		{image: "postgis/postgis", version: "17-3.5", expected: "postgres-postgis-pg17"},
+		{image: "timescale/timescaledb", version: "2.30.1-pg17", expected: "postgres-timescaledb-pg17"},
+		{image: "timescale/timescaledb", version: "2.30.1-pg18", expected: "postgres-timescaledb-pg18"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.image+":"+test.version, func(t *testing.T) {
+			found, err := loaded.ForImage("postgres", test.image, test.version)
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			if found.Name != test.expected {
+				t.Errorf("expected %s, got %s", test.expected, found.Name)
+			}
+		})
+	}
+}
+
+// Every flavor is postgres on another image, so it has to stay postgres in
+// everything but the image: the same plugin, and its data mounted where the
+// datastore's own definition of the same major mounts it, since a service moved
+// between the two by an upgrade keeps its data directory.
+func TestFlavorsMountTheirDataWhereTheirMajorDoes(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	checked := 0
+	for _, name := range loaded.NamesFor("postgres") {
+		found := parseVariant(name)
+		if found.flavor == "" {
+			continue
+		}
+
+		checked++
+		t.Run(name, func(t *testing.T) {
+			flavor, _ := loaded.Definition(name)
+			own, ok := loaded.Definition(fmt.Sprintf("postgres-%d", found.major))
+			if !ok {
+				t.Fatalf("expected a postgres-%d definition beside it", found.major)
+			}
+
+			if flavor.Dokku.Plugin != "postgres" {
+				t.Errorf("expected plugin postgres, got %q", flavor.Dokku.Plugin)
+			}
+
+			if flavor.Service.Volumes[0] != own.Service.Volumes[0] {
+				t.Errorf("mounts its data as %+v, but %s mounts it as %+v",
+					flavor.Service.Volumes[0], own.Name, own.Service.Volumes[0])
+			}
+		})
+	}
+
+	if checked == 0 {
+		t.Error("expected at least one flavor to check")
+	}
+}
+
+// timescaledb ships no openssl, so its certificate is made in the plain postgres
+// image of the same major. It is held to the tag that definition pins, so that a
+// host running both pulls one image rather than two; a dependabot bump of the
+// postgres Dockerfile fails here until the hook is moved with it.
+func TestTimescaledbMakesItsCertificateInThePostgresImage(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	for _, major := range []int{17, 18} {
+		name := fmt.Sprintf("postgres-timescaledb-pg%d", major)
+		t.Run(name, func(t *testing.T) {
+			timescaledb, ok := loaded.Definition(name)
+			if !ok {
+				t.Fatalf("expected a %s definition", name)
+			}
+
+			own, _ := loaded.Definition(fmt.Sprintf("postgres-%d", major))
+			expected := own.DefaultImage + ":" + own.DefaultImageVersion
+			if actual := timescaledb.Dokku.Hooks.PreCreate.Image; actual != expected {
+				t.Errorf("expected the pre_create hook to run in %s, got %q; update %s/docker-compose.yml",
+					expected, actual, name)
+			}
+		})
+	}
+}
+
 // Solr's default image is a tenth major version, and there is no definition
 // named for it, so it takes the newest line rather than erroring or taking the
 // oldest.
@@ -1408,7 +1600,8 @@ func TestAnOverrideCannotTakeAnotherDatastoresName(t *testing.T) {
 //
 // The newest of each is deliberately not checked. It is the one a new service
 // gets, it is free to move ahead, and solr-8 already runs solr 10 for that
-// reason.
+// reason. A flavor is its own line of majors, so postgres-pgvector-pg17 is
+// checked for staying on pg17 while postgres-pgvector-pg18 is its newest.
 func TestAnOlderVariantStaysInsideItsMajor(t *testing.T) {
 	loaded, err := Load(LoadInput{})
 	if err != nil {
@@ -1417,23 +1610,31 @@ func TestAnOlderVariantStaysInsideItsMajor(t *testing.T) {
 
 	checked := 0
 	for _, plugin := range loaded.Plugins() {
-		names := loaded.NamesFor(plugin)
-		if len(names) < 2 {
-			continue
+		byFlavor := map[string][]string{}
+		for _, name := range loaded.NamesFor(plugin) {
+			flavor := parseVariant(name).flavor
+			byFlavor[flavor] = append(byFlavor[flavor], name)
 		}
 
-		// sorted oldest first, so everything but the last is an older variant
-		for _, name := range names[:len(names)-1] {
-			checked++
-			t.Run(name, func(t *testing.T) {
-				found, _ := loaded.Definition(name)
+		for _, names := range byFlavor {
+			if len(names) < 2 {
+				continue
+			}
 
-				expected := name[strings.LastIndex(name, "-")+1:]
-				if actual := majorVersion(found.DefaultImageVersion); actual != expected {
-					t.Errorf("is pinned to %s, which is major %s rather than %s",
-						found.DefaultImageVersion, actual, expected)
-				}
-			})
+			// sorted oldest first, so everything but the last is an older variant
+			for _, name := range names[:len(names)-1] {
+				checked++
+				t.Run(name, func(t *testing.T) {
+					found, _ := loaded.Definition(name)
+					expected := parseVariant(name)
+
+					actual, ok := tagMajor(found.DefaultImageVersion, expected.prefix)
+					if !ok || actual != expected.major {
+						t.Errorf("is pinned to %s, which is major %d rather than %d",
+							found.DefaultImageVersion, actual, expected.major)
+					}
+				})
+			}
 		}
 	}
 
@@ -1457,6 +1658,13 @@ func TestExtraArgsAreDeclaredWhereTheToolReadsThem(t *testing.T) {
 		"mysql":       true,
 		"postgres-17": true,
 		"postgres-18": true,
+		// the flavors run the same pg_dump and pg_restore
+		"postgres-pgvector-pg17":    true,
+		"postgres-pgvector-pg18":    true,
+		"postgres-postgis-pg17":     true,
+		"postgres-postgis-pg18":     true,
+		"postgres-timescaledb-pg17": true,
+		"postgres-timescaledb-pg18": true,
 	}
 
 	for _, name := range loaded.Names() {

@@ -28,7 +28,7 @@ func postgresDatastore(t *testing.T) *Datastore {
 // bug this exists to close: every service used to be handed the newest one, so a
 // postgres 17 service was run by postgres-18 and mounted its data one directory
 // up from where postgres 17 keeps it.
-func TestForImageVersionSelectsTheMajor(t *testing.T) {
+func TestForImageSelectsTheMajor(t *testing.T) {
 	postgres := postgresDatastore(t)
 
 	tests := []struct {
@@ -45,10 +45,86 @@ func TestForImageVersionSelectsTheMajor(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.imageVersion, func(t *testing.T) {
-			if name := postgres.ForImageVersion(test.imageVersion).DefinitionName(); name != test.expected {
+			if name := postgres.ForImage("", test.imageVersion).DefinitionName(); name != test.expected {
 				t.Errorf("expected %s for %q, got %s", test.expected, test.imageVersion, name)
 			}
 		})
+	}
+}
+
+// A flavor's image selects the flavor's definitions, and its tag the major
+// among them, however that image writes its tags. pgvector's pg17 carries no
+// leading number at all, which is how a postgres 17 service used to be handed
+// postgres-18 and its data directory.
+func TestForImageSelectsTheFlavor(t *testing.T) {
+	postgres := postgresDatastore(t)
+
+	tests := []struct {
+		image        string
+		imageVersion string
+		expected     string
+	}{
+		{image: "pgvector/pgvector", imageVersion: "pg17", expected: "postgres-pgvector-pg17"},
+		{image: "pgvector/pgvector", imageVersion: "pg18", expected: "postgres-pgvector-pg18"},
+		{image: "pgvector/pgvector", imageVersion: "0.8.1-pg17", expected: "postgres-pgvector-pg17"},
+		{image: "pgvector/pgvector", imageVersion: "0.8.1-pg17-trixie", expected: "postgres-pgvector-pg17"},
+		{image: "docker.io/pgvector/pgvector", imageVersion: "pg17", expected: "postgres-pgvector-pg17"},
+		{image: "timescale/timescaledb", imageVersion: "2.30.1-pg17", expected: "postgres-timescaledb-pg17"},
+		{image: "timescale/timescaledb", imageVersion: "latest-pg18", expected: "postgres-timescaledb-pg18"},
+		{image: "postgis/postgis", imageVersion: "17-3.5", expected: "postgres-postgis-pg17"},
+		{image: "postgis/postgis", imageVersion: "18-3.6", expected: "postgres-postgis-pg18"},
+		// the newest of the flavor, whose own version then applies
+		{image: "pgvector/pgvector", imageVersion: "", expected: "postgres-pgvector-pg18"},
+		{image: "pgvector/pgvector", imageVersion: "pg12", expected: "postgres-pgvector-pg18"},
+		// an image no definition ships runs on the datastore's own, as it did
+		{image: "registry.example.com/postgres", imageVersion: "17.8", expected: "postgres-17"},
+		{image: "postgres", imageVersion: "17.8", expected: "postgres-17"},
+		{image: "library/postgres", imageVersion: "18.4", expected: "postgres-18"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.image+":"+test.imageVersion, func(t *testing.T) {
+			if name := postgres.ForImage(test.image, test.imageVersion).DefinitionName(); name != test.expected {
+				t.Errorf("expected %s for %s:%s, got %s", test.expected, test.image, test.imageVersion, name)
+			}
+		})
+	}
+}
+
+// A service created before the pin existed is placed by the image as well as
+// the version it recorded, since the image is what names the flavor.
+func TestForServiceDerivesTheFlavorFromTheImage(t *testing.T) {
+	postgres := postgresDatastore(t)
+	serviceRoot := withServiceRoot(t, postgres, "vectors")
+	writeServiceFile(t, filepath.Join(serviceRoot, "IMAGE"), "pgvector/pgvector")
+	writeServiceFile(t, filepath.Join(serviceRoot, "IMAGE_VERSION"), "pg17")
+
+	resolved, err := postgres.ForService("vectors")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if name := resolved.DefinitionName(); name != "postgres-pgvector-pg17" {
+		t.Errorf("expected postgres-pgvector-pg17 derived from pgvector/pgvector:pg17, got %s", name)
+	}
+}
+
+// A service pinned before flavors existed keeps its pin: a pgvector 17 service
+// that was handed postgres-18 has its data where postgres-18 mounts it.
+func TestForServiceKeepsAPinOlderThanItsFlavor(t *testing.T) {
+	postgres := postgresDatastore(t)
+	serviceRoot := withServiceRoot(t, postgres, "vectors")
+	writeServiceFile(t, filepath.Join(serviceRoot, "DEFINITION"), "postgres-18")
+	writeServiceFile(t, filepath.Join(serviceRoot, "IMAGE"), "pgvector/pgvector")
+	writeServiceFile(t, filepath.Join(serviceRoot, "IMAGE_VERSION"), "pg17")
+
+	resolved, err := postgres.ForService("vectors")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if name := resolved.DefinitionName(); name != "postgres-18" {
+		t.Errorf("expected the pinned postgres-18, got %s", name)
 	}
 }
 
@@ -163,8 +239,19 @@ func TestDefinitionsSpansTheMajors(t *testing.T) {
 		names = append(names, found.Name)
 	}
 
-	if len(names) != 2 || names[0] != "postgres-17" || names[1] != "postgres-18" {
-		t.Errorf("expected postgres-17 and postgres-18 oldest first, got %v", names)
+	// the datastore's own first, then each flavor, every one oldest first
+	expected := []string{
+		"postgres-17",
+		"postgres-18",
+		"postgres-pgvector-pg17",
+		"postgres-pgvector-pg18",
+		"postgres-postgis-pg17",
+		"postgres-postgis-pg18",
+		"postgres-timescaledb-pg17",
+		"postgres-timescaledb-pg18",
+	}
+	if strings.Join(names, " ") != strings.Join(expected, " ") {
+		t.Errorf("expected %v, got %v", expected, names)
 	}
 }
 

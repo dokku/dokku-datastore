@@ -20,7 +20,7 @@ setup_file() {
   # service whose passwords came from the flags
   local flags
   mapfile -t flags < <(password_flags "$GIVEN_PASSWORD" "$GIVEN_ROOT_PASSWORD")
-  "$BIN" create "$PLUGIN" "$SERVICE" --image-version "$IMAGE_VERSION" "${flags[@]}"
+  "$BIN" create "$PLUGIN" "$SERVICE" --image "$IMAGE" --image-version "$IMAGE_VERSION" "${flags[@]}"
 }
 
 teardown_file() {
@@ -47,7 +47,7 @@ teardown_file() {
 @test "($DEFINITION) a create naming an invalid service is refused with the characters it may use" {
   # the dash is accepted, so the message has to say so, or someone with a
   # refused name is told a name like this file's own service is not allowed
-  run --separate-stderr "$BIN" create "$PLUGIN" "not.valid" --image-version "$IMAGE_VERSION"
+  run --separate-stderr "$BIN" create "$PLUGIN" "not.valid" --image "$IMAGE" --image-version "$IMAGE_VERSION"
   assert_failure
   assert_stderr --partial "Valid characters are: [A-Za-z0-9_-]+"
   [[ ! -d "$(service_root "not.valid")" ]] || fail "a refused create left $(service_root "not.valid") behind"
@@ -61,7 +61,7 @@ teardown_file() {
   # the database is named after the service, so the app would be handed one the
   # datastore keeps for itself. Refused before the pull and before the service
   # root is made, so this costs the daemon nothing
-  run --separate-stderr "$BIN" create "$PLUGIN" "$reserved" --image-version "$IMAGE_VERSION"
+  run --separate-stderr "$BIN" create "$PLUGIN" "$reserved" --image "$IMAGE" --image-version "$IMAGE_VERSION"
   assert_failure
   assert_stderr --partial "service name $reserved is reserved"
   [[ ! -d "$(service_root "$reserved")" ]] || fail "a refused create left $(service_root "$reserved") behind"
@@ -73,7 +73,7 @@ teardown_file() {
   # docker would otherwise create it, empty and owned by root, and the service
   # would start on that. Refused before the pull and before the service root is
   # made, so this costs the daemon nothing
-  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-nomount" --image-version "$IMAGE_VERSION" --volume "$DOKKU_LIB_ROOT/not-there:/opt/dokku-mount"
+  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-nomount" --image "$IMAGE" --image-version "$IMAGE_VERSION" --volume "$DOKKU_LIB_ROOT/not-there:/opt/dokku-mount"
   assert_failure
   assert_stderr --partial "does not exist"
   [[ ! -d "$(service_root "$SERVICE-nomount")" ]] || fail "a refused create left $(service_root "$SERVICE-nomount") behind"
@@ -84,7 +84,7 @@ teardown_file() {
 
   # the flag would otherwise be dropped and the service started on a password
   # nobody was told. Refused before the pull, so this costs the daemon nothing
-  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-noroot" --image-version "$IMAGE_VERSION" --root-password "$GIVEN_ROOT_PASSWORD"
+  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-noroot" --image "$IMAGE" --image-version "$IMAGE_VERSION" --root-password "$GIVEN_ROOT_PASSWORD"
   assert_failure
   assert_stderr --partial -- "--root-password"
   [[ ! -d "$(service_root "$SERVICE-noroot")" ]] || fail "a refused create left $(service_root "$SERVICE-noroot") behind"
@@ -93,7 +93,7 @@ teardown_file() {
 @test "($DEFINITION) a create with a password the definition has no secret for is refused" {
   declares_secret SERVICE_PASSWORD && skip "$DEFINITION has a password"
 
-  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-nopassword" --image-version "$IMAGE_VERSION" --password "$GIVEN_PASSWORD"
+  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-nopassword" --image "$IMAGE" --image-version "$IMAGE_VERSION" --password "$GIVEN_PASSWORD"
   assert_failure
   assert_stderr --partial -- "--password"
   [[ ! -d "$(service_root "$SERVICE-nopassword")" ]] || fail "a refused create left $(service_root "$SERVICE-nopassword") behind"
@@ -125,7 +125,8 @@ teardown_file() {
   # the probe logs in with the credentials on disk, so a round trip through it
   # proves the datastore was started with the given passwords rather than only
   # that they were written down
-  local probe="$REPO_ROOT/tests/probes/$DEFINITION.sh"
+  local probe
+  probe="$(probe_path)"
   [[ -x "$probe" ]] || skip "$DEFINITION has no probe"
 
   run "$probe" write "$SERVICE"
@@ -134,6 +135,22 @@ teardown_file() {
   run --separate-stderr "$probe" read "$SERVICE"
   assert_success
   assert_output "known"
+}
+
+@test "($DEFINITION) a postgres flavor ships its extension" {
+  # a flavor is postgres on another image, and that image is the whole point of
+  # it: the extension is only there if the service runs the flavor's image
+  local extension
+  case "$DEFINITION" in
+  postgres-pgvector-*) extension=vector ;;
+  postgres-postgis-*) extension=postgis ;;
+  postgres-timescaledb-*) extension=timescaledb ;;
+  *) skip "$DEFINITION is not a postgres flavor" ;;
+  esac
+
+  run --separate-stderr "$(probe_path)" extension "$SERVICE" "$extension"
+  assert_success
+  assert_output "$extension"
 }
 
 @test "($DEFINITION) the service is running and reports a connection string" {
@@ -167,7 +184,7 @@ teardown_file() {
   # left behind by a run that never reached its teardown
   docker network inspect "$network" >/dev/null 2>/dev/null || docker network create "$network" >/dev/null
 
-  run "$BIN" create "$PLUGIN" "$SERVICE-network" --image-version "$IMAGE_VERSION" --initial-network "$network"
+  run "$BIN" create "$PLUGIN" "$SERVICE-network" --image "$IMAGE" --image-version "$IMAGE_VERSION" --initial-network "$network"
   assert_success
 
   expected="$(container_inspect "$(service_container "$SERVICE-network")" "{{ (index .NetworkSettings.Networks \"$network\").IPAddress }}")"
@@ -277,7 +294,7 @@ teardown_file() {
 @test "($DEFINITION) a create asked for json prints one json document" {
   # what it says on the way, and what the triggers it fires print, go to
   # stderr, so that stdout can be handed straight to a json reader
-  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-json" --image-version "$IMAGE_VERSION" --format json
+  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-json" --image "$IMAGE" --image-version "$IMAGE_VERSION" --format json
   assert_success
 
   run jq -e --slurp 'length == 1' <<<"$output"

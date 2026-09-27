@@ -104,7 +104,8 @@ teardown_file() {
   # a probe writes and reads back a known record, so the round trip proves the
   # data survived rather than only that the service came back up. A definition
   # without one still gets every other check
-  local probe="$REPO_ROOT/tests/probes/$DEFINITION.sh"
+  local probe
+  probe="$(probe_path)"
   if [[ -x "$probe" ]]; then
     run "$probe" write "$SERVICE"
     assert_success
@@ -244,7 +245,8 @@ teardown_file() {
 }
 
 @test "($DEFINITION) import of a missing file leaves the data alone" {
-  local probe="$REPO_ROOT/tests/probes/$DEFINITION.sh"
+  local probe
+  probe="$(probe_path)"
   if [[ -x "$probe" ]]; then
     run "$probe" write "$SERVICE"
     assert_success
@@ -265,7 +267,8 @@ teardown_file() {
 }
 
 @test "($DEFINITION) extra arguments reach the export and import tools" {
-  local probe="$REPO_ROOT/tests/probes/$DEFINITION.sh"
+  local probe
+  probe="$(probe_path)"
   if [[ -x "$probe" ]]; then
     run "$probe" write "$SERVICE"
     assert_success
@@ -338,7 +341,8 @@ teardown_file() {
     skip "$PLUGIN does not take extra arguments"
   fi
 
-  local probe="$REPO_ROOT/tests/probes/$DEFINITION.sh"
+  local probe
+  probe="$(probe_path)"
   if [[ -x "$probe" ]]; then
     run "$probe" write "$SERVICE"
     assert_success

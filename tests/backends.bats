@@ -11,8 +11,8 @@ load test_helper
 
 setup_file() {
   datastore_setup_file
-  DOKKU_DATASTORE_BACKEND=docker "$BIN" create "$PLUGIN" viadocker --image-version "$IMAGE_VERSION" >/dev/null
-  DOKKU_DATASTORE_BACKEND=compose "$BIN" create "$PLUGIN" viacompose --image-version "$IMAGE_VERSION" >/dev/null
+  DOKKU_DATASTORE_BACKEND=docker "$BIN" create "$PLUGIN" viadocker --image "$IMAGE" --image-version "$IMAGE_VERSION" >/dev/null
+  DOKKU_DATASTORE_BACKEND=compose "$BIN" create "$PLUGIN" viacompose --image "$IMAGE" --image-version "$IMAGE_VERSION" >/dev/null
 }
 
 teardown_file() {

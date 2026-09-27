@@ -44,25 +44,26 @@ func (s *Datastore) ForService(serviceName string) (*Datastore, error) {
 			return s.withDefinition(found), nil
 		}
 
-		return s.ForImageVersion(common.ReadFirstLine(serviceFiles.ImageVersion)),
+		return s.ForImage(common.ReadFirstLine(serviceFiles.Image), common.ReadFirstLine(serviceFiles.ImageVersion)),
 			fmt.Errorf("service %s runs the %s definition, which this %s plugin does not ship",
 				serviceName, pinned, s.Definition.Dokku.Plugin)
 	}
 
 	// a service created before the pin existed is placed by the image it
 	// recorded, which is what the pin would have held
-	return s.ForImageVersion(common.ReadFirstLine(serviceFiles.ImageVersion)), nil
+	return s.ForImage(common.ReadFirstLine(serviceFiles.Image), common.ReadFirstLine(serviceFiles.ImageVersion)), nil
 }
 
-// ForImageVersion returns the datastore as a service on a given image version
-// runs it. Create has no service to read a pin from yet, and upgrade is moving
-// one from under its old pin.
-func (s *Datastore) ForImageVersion(imageVersion string) *Datastore {
-	if s == nil || s.registry == nil || imageVersion == "" {
+// ForImage returns the datastore as a service on a given image and version runs
+// it: the image picks the flavor, such as pgvector/pgvector, and the version the
+// major within it. Create has no service to read a pin from yet, and upgrade is
+// moving one from under its old pin.
+func (s *Datastore) ForImage(image string, imageVersion string) *Datastore {
+	if s == nil || s.registry == nil || (image == "" && imageVersion == "") {
 		return s
 	}
 
-	found, err := s.registry.For(s.Definition.Dokku.Plugin, imageVersion)
+	found, err := s.registry.ForImage(s.Definition.Dokku.Plugin, image, imageVersion)
 	if err != nil {
 		return s
 	}

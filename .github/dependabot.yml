@@ -95,6 +95,48 @@ updates:
     schedule:
       interval: "daily"
 
+  # pgvector writes the postgres major as a -pg17 suffix, and dependabot only
+  # moves a tag to one with the same suffix, so neither of these can cross a
+  # postgres major. A major of pgvector itself is not one of postgres's and is
+  # left free to land.
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/postgres-pgvector-pg17"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/postgres-pgvector-pg18"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/postgres-postgis-pg17"
+    schedule:
+      interval: "daily"
+    # postgis leads its tags with the postgres major, which dependabot reads as
+    # the semver major of 17-3.5, so this is held inside it the way postgres-17
+    # is
+    ignore:
+      - dependency-name: "postgis/postgis"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/postgres-postgis-pg18"
+    schedule:
+      interval: "daily"
+
+  # the same -pg17 suffix as pgvector, so held inside its postgres major by the
+  # suffix rather than by an ignore
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/postgres-timescaledb-pg17"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/postgres-timescaledb-pg18"
+    schedule:
+      interval: "daily"
+
   - package-ecosystem: "docker"
     directory: "/internal/registry/definitions/pushpin"
     schedule:

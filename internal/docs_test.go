@@ -117,6 +117,44 @@ func TestNewDocumentationDataIgnoresAPluginDockerfile(t *testing.T) {
 	}
 }
 
+// A flavor is documented at the version a create naming only its image lands
+// on, which is its newest definition's, and a datastore with none documents
+// none.
+func TestNewDocumentationDataFlavors(t *testing.T) {
+	postgres := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["postgres"]})
+
+	// taken from the definitions rather than written out, because the version
+	// each pins is changed by every image bump
+	newest := map[string]string{}
+	for _, name := range []string{"postgres-pgvector-pg18", "postgres-postgis-pg18", "postgres-timescaledb-pg18"} {
+		for _, found := range service.Datastores["postgres"].Definitions() {
+			if found.Name == name {
+				newest[found.DefaultImage] = found.DefaultImageVersion
+			}
+		}
+	}
+
+	expected := []string{"pgvector/pgvector", "postgis/postgis", "timescale/timescaledb"}
+	if len(postgres.Flavors) != len(expected) {
+		t.Fatalf("expected %d flavors, got %+v", len(expected), postgres.Flavors)
+	}
+
+	for index, image := range expected {
+		flavor := postgres.Flavors[index]
+		if flavor.Image != image {
+			t.Errorf("expected flavor %d to be %s, got %s", index, image, flavor.Image)
+		}
+
+		if flavor.ImageVersion != newest[image] {
+			t.Errorf("expected %s at %s, got %s", image, newest[image], flavor.ImageVersion)
+		}
+	}
+
+	if redis := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["redis"]}); len(redis.Flavors) != 0 {
+		t.Errorf("expected redis to document no flavors, got %+v", redis.Flavors)
+	}
+}
+
 func TestClassifyDocLine(t *testing.T) {
 	tests := []struct {
 		name     string

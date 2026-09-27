@@ -45,8 +45,9 @@ func TestGeneratedDefinitionsLoadBack(t *testing.T) {
 		t.Fatalf("the generated tree does not load: %s", err)
 	}
 
-	if names := loaded.NamesFor("postgres"); len(names) != 2 || names[0] != "postgres-17" || names[1] != "postgres-18" {
-		t.Fatalf("expected both majors to come back, got %v", names)
+	// every major of the datastore's own and of each flavor
+	if names, expected := loaded.NamesFor("postgres"), postgresDefinitionNames(); !slices.Equal(names, expected) {
+		t.Fatalf("expected %v to come back, got %v", expected, names)
 	}
 
 	for _, name := range loaded.NamesFor("postgres") {
@@ -74,8 +75,25 @@ func TestGenerateWritesEveryVariant(t *testing.T) {
 	}
 	sort.Strings(names)
 
-	if len(names) != 2 || names[0] != "postgres-17" || names[1] != "postgres-18" {
-		t.Errorf("expected postgres-17 and postgres-18, got %v", names)
+	expected := postgresDefinitionNames()
+	sort.Strings(expected)
+	if !slices.Equal(names, expected) {
+		t.Errorf("expected %v, got %v", expected, names)
+	}
+}
+
+// postgresDefinitionNames is every postgres definition, in the order the
+// registry keeps them: the datastore's own majors, then each flavor's.
+func postgresDefinitionNames() []string {
+	return []string{
+		"postgres-17",
+		"postgres-18",
+		"postgres-pgvector-pg17",
+		"postgres-pgvector-pg18",
+		"postgres-postgis-pg17",
+		"postgres-postgis-pg18",
+		"postgres-timescaledb-pg17",
+		"postgres-timescaledb-pg18",
 	}
 }
 
@@ -90,7 +108,7 @@ func TestGenerateCopiesTheComposeFileVerbatim(t *testing.T) {
 		t.Fatalf("unable to read the generated compose file: %s", err)
 	}
 
-	source := service.Datastores["postgres"].ForImageVersion("17.8").Definition
+	source := service.Datastores["postgres"].ForImage("", "17.8").Definition
 	if string(written) != string(source.Compose) {
 		t.Error("expected the compose file to be copied byte for byte")
 	}

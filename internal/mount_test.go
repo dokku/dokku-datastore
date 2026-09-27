@@ -415,20 +415,20 @@ func TestCheckUpgradeMounts(t *testing.T) {
 	datastore, source := mountedService(t, gone)
 
 	input := UpgradeServiceInput{Datastore: datastore, ServiceName: "lollipop"}
-	err := checkUpgradeMounts(t.Context(), input, "redis:8.4.2")
+	err := checkUpgradeMounts(t.Context(), input, datastore)
 	if err == nil || !strings.Contains(err.Error(), "Host path /does/not/exist does not exist") {
 		t.Errorf("expected the stored mount to be refused, got %v", err)
 	}
 
 	replacement := []service.Mount{{Source: source, ContainerPath: "/opt/a"}}
 	input.Mounts = &replacement
-	if err := checkUpgradeMounts(t.Context(), input, "redis:8.4.2"); err != nil {
+	if err := checkUpgradeMounts(t.Context(), input, datastore); err != nil {
 		t.Errorf("expected the mounts asked for to be checked instead, got %v", err)
 	}
 
 	clash := []service.Mount{{Source: source, ContainerPath: "/data"}}
 	input.Mounts = &clash
-	if err := checkUpgradeMounts(t.Context(), input, "redis:8.4.2"); err == nil {
+	if err := checkUpgradeMounts(t.Context(), input, datastore); err == nil {
 		t.Error("expected a directory the definition mounts to be refused")
 	}
 }

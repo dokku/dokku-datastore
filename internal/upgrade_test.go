@@ -75,7 +75,7 @@ func TestUpgradeVersion(t *testing.T) {
 		t.Fatal("expected postgres to be registered")
 	}
 	// the definition a 17.x service runs, which is not the newest postgres
-	postgres17 = postgres17.ForImageVersion("17.0")
+	postgres17 = postgres17.ForImage("", "17.0")
 
 	definition17 := postgres17.Definition
 	if definition17.Name != "postgres-17" {
@@ -163,6 +163,101 @@ func TestUpgradeVersion(t *testing.T) {
 
 			if actual != test.expected {
 				t.Errorf("expected %q, got %q", test.expected, actual)
+			}
+		})
+	}
+}
+
+// A flavor ships its own image, so a bare upgrade of a service on it has a
+// newest to move to, and it is the newest of the service's own major.
+func TestUpgradeVersionOfAFlavor(t *testing.T) {
+	pgvector17 := service.Datastores["postgres"].ForImage("pgvector/pgvector", "pg17").Definition
+	if pgvector17.Name != "postgres-pgvector-pg17" {
+		t.Fatalf("expected the postgres-pgvector-pg17 definition, got %s", pgvector17.Name)
+	}
+
+	recorded := service.RecordedImage{Image: "pgvector/pgvector", ImageVersion: "pg17"}
+	actual, err := upgradeVersion(pgvector17, recorded, "", "")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if actual != pgvector17.DefaultImageVersion {
+		t.Errorf("expected %q, got %q", pgvector17.DefaultImageVersion, actual)
+	}
+}
+
+// Which definition an upgrade leaves a service on. It moves only when the image
+// the service ran and the one it is moved to resolve to different definitions,
+// so a service pinned before its flavor had definitions keeps the directory its
+// data is in.
+func TestUpgradeTarget(t *testing.T) {
+	postgres := service.Datastores["postgres"]
+
+	tests := []struct {
+		name     string
+		pinned   *service.Datastore
+		recorded service.RecordedImage
+		image    string
+		version  string
+		expected string
+	}{
+		{
+			name:     "inside a major the pin stays",
+			pinned:   postgres.ForImage("", "17.0"),
+			recorded: service.RecordedImage{Image: "postgres", ImageVersion: "17.0"},
+			image:    "postgres",
+			version:  "17.11",
+			expected: "postgres-17",
+		},
+		{
+			name:     "across a major the pin moves",
+			pinned:   postgres.ForImage("", "17.0"),
+			recorded: service.RecordedImage{Image: "postgres", ImageVersion: "17.0"},
+			image:    "postgres",
+			version:  "18.6",
+			expected: "postgres-18",
+		},
+		{
+			name:     "onto a flavor the pin moves",
+			pinned:   postgres.ForImage("", "17.0"),
+			recorded: service.RecordedImage{Image: "postgres", ImageVersion: "17.0"},
+			image:    "pgvector/pgvector",
+			version:  "0.8.6-pg17",
+			expected: "postgres-pgvector-pg17",
+		},
+		{
+			// created with pgvector/pgvector:pg17 before pgvector had
+			// definitions, which placed it on postgres-18 and its data with it
+			name:     "a pin older than its flavor stays",
+			pinned:   postgres.ForImage("", "18.4"),
+			recorded: service.RecordedImage{Image: "pgvector/pgvector", ImageVersion: "pg17"},
+			image:    "pgvector/pgvector",
+			version:  "0.8.6-pg17",
+			expected: "postgres-18",
+		},
+		{
+			name:     "a pin older than its flavor moves across a major",
+			pinned:   postgres.ForImage("", "18.4"),
+			recorded: service.RecordedImage{Image: "pgvector/pgvector", ImageVersion: "pg17"},
+			image:    "pgvector/pgvector",
+			version:  "0.8.6-pg18",
+			expected: "postgres-pgvector-pg18",
+		},
+		{
+			name:     "no record takes what the image resolves to",
+			pinned:   postgres.ForImage("", "18.4"),
+			image:    "postgres",
+			version:  "17.11",
+			expected: "postgres-17",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual := upgradeTarget(test.pinned, test.recorded, test.image, test.version)
+			if name := actual.DefinitionName(); name != test.expected {
+				t.Errorf("expected %s, got %s", test.expected, name)
 			}
 		})
 	}

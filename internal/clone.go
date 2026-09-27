@@ -233,7 +233,7 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 
 	// create refuses it too, but checked here as well so that a refused clone is
 	// never announced as though it had started
-	if err := service.CheckReservedServiceName(input.Datastore.ForImageVersion(imageVersion).Definition, input.NewServiceName); err != nil {
+	if err := service.CheckReservedServiceName(input.Datastore.ForImage(image, imageVersion).Definition, input.NewServiceName); err != nil {
 		return err
 	}
 
