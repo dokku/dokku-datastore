@@ -562,6 +562,7 @@ dokku {{.CommandPrefix}}:info lollipop --format json
 you can also retrieve a specific piece of service info via a flag, which prints it on its own:
 dokku {{.CommandPrefix}}:info lollipop --dsn
 dokku {{.CommandPrefix}}:info lollipop --status
+dokku {{.CommandPrefix}}:info lollipop --internal-ip
 dokku {{.CommandPrefix}}:info lollipop --initial-network
 > NOTE: a flag cannot be combined with --format, and only one may be given
 the properties {{.CommandPrefix}}:set writes are reported under the names it takes, so a value read here can be written back:

@@ -82,7 +82,7 @@ func ContainerIP(ctx context.Context, input ContainerIPInput) string {
 		})
 	}
 
-	return backend.IP(ctx, input.ContainerID)
+	return backend.IP(ctx, input.ContainerID, InitialNetwork(input.Datastore, input.ServiceName))
 }
 
 // ContainerName gets the name of a service

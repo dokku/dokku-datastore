@@ -7,7 +7,9 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/dokku/dokku-datastore/internal/execx"
 
@@ -75,10 +77,57 @@ func Exists(ctx context.Context, containerID string) bool {
 	return result.ExitCode == 0
 }
 
-// IP returns a container's address on the default bridge.
-func IP(ctx context.Context, containerID string) string {
-	address, _ := common.DockerInspect(containerID, "{{ .NetworkSettings.IPAddress }}")
-	return address
+// IP returns a container's address, preferring the one on the network it was
+// created on. network is empty for a container created without one, which puts
+// it on the default bridge under either execution backend.
+//
+// The addresses are read per network because the top level IPAddress docker
+// once reported is gone from newer daemons, and only ever held the default
+// bridge address when it was there.
+func IP(ctx context.Context, containerID string, network string) string {
+	if containerID == "" {
+		return ""
+	}
+
+	networks, _ := common.DockerInspect(containerID, "{{ json .NetworkSettings.Networks }}")
+	return NetworkIP(networks, network)
+}
+
+// NetworkIP picks an address out of the json docker reports for a container's
+// networks. The named network wins, then the default bridge, and failing both
+// the first network by name that has one, so that a container attached to
+// several networks after creation reports the same address every time.
+func NetworkIP(networksJSON string, network string) string {
+	var networks map[string]struct {
+		IPAddress string
+	}
+	if err := json.Unmarshal([]byte(networksJSON), &networks); err != nil {
+		return ""
+	}
+
+	for _, name := range []string{network, "bridge"} {
+		if name == "" {
+			continue
+		}
+
+		if address := networks[name].IPAddress; address != "" {
+			return address
+		}
+	}
+
+	names := make([]string, 0, len(networks))
+	for name := range networks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		if address := networks[name].IPAddress; address != "" {
+			return address
+		}
+	}
+
+	return ""
 }
 
 // Status returns a container's state, or "missing" when there is no such
