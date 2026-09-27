@@ -92,8 +92,8 @@ func (c *LinkCommand) ParsedArguments(args []string) (map[string]command.Argumen
 func (c *LinkCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
-	f.StringVarP(&c.alias, "alias", "a", "", "an alternative alias to use for the config url exported to the app")
-	f.StringVarP(&c.querystring, "querystring", "q", "", "ampersand delimited querystring arguments to append to the service url")
+	f.StringVarP(&c.alias, "alias", "a", "", "the prefix of the config variable the service url is set as on the app, which is suffixed with _URL")
+	f.StringVarP(&c.querystring, "querystring", "q", "", "ampersand delimited querystring arguments to append to the service url after a ?")
 	f.BoolVarP(&c.noRestart, "no-restart", "n", false, "whether to skip restarting the app")
 	return f
 }

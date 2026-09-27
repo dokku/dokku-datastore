@@ -52,6 +52,7 @@ var globalFlags = map[string]bool{
 // flattens the datastore's properties into the names the bash annotations used,
 // so the migrated prose reads the same way.
 type DocumentationData struct {
+	AltAlias       string
 	CommandPrefix  string
 	DefaultAlias   string
 	Image          string
@@ -96,6 +97,7 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 	image, imageVersion := documentedImage(properties)
 
 	return DocumentationData{
+		AltAlias:       properties.AltAlias,
 		CommandPrefix:  properties.CommandPrefix,
 		DefaultAlias:   properties.DefaultAlias,
 		Image:          image,

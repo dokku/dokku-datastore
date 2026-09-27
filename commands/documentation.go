@@ -616,6 +616,21 @@ the host exposed here only works internally in docker containers.
 if you want your container to be reachable from outside, you should
 use the 'expose' subcommand. another service can be linked to your app:
 dokku {{.CommandPrefix}}:link other_service playground
+the url can be set under another name with the '--alias' flag. the value given is
+the prefix of the config variable, which is suffixed with _URL and holds the same url
+dokku {{.CommandPrefix}}:link lollipop playground --alias BLUE_{{.DefaultAlias}}
+this will set the following on the linked application instead of {{.DefaultAlias}}_URL:
+
+    BLUE_{{.DefaultAlias}}_URL={{.Scheme}}://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}
+
+an alias whose variable is already set on the app is refused, and unlink removes
+the variable whatever alias it was set under. arguments can be appended to the url as a
+querystring with the '--querystring' flag:
+dokku {{.CommandPrefix}}:link lollipop playground --querystring "foo=bar&baz=qux"
+this will cause {{.DefaultAlias}}_URL to be set as:
+
+    {{.Scheme}}://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}?foo=bar&baz=qux
+
 it is possible to change the protocol for {{.DefaultAlias}}_URL by setting the
 environment variable {{.PluginVariable}}_DATABASE_SCHEME on the app. doing so
 after linking means unlink no longer finds the variable it set, and leaves it
@@ -803,7 +818,7 @@ func (c *PromoteCommand) Documentation() string {
 	return `if you have a {{.CommandPrefix}} service linked to an app and try to link another {{.CommandPrefix}} service
 another link environment variable will be generated automatically:
 
-    DOKKU_{{.DefaultAlias}}_BLUE_URL={{.Scheme}}://:ANOTHER_PASSWORD@dokku-{{.CommandPrefix}}-other-service:{{.Port}}/other_service
+    {{.AltAlias}}_AQUA_URL={{.Scheme}}://:ANOTHER_PASSWORD@dokku-{{.CommandPrefix}}-other-service:{{.Port}}/other_service
 
 you can promote the new service to be the primary one
 > NOTE: this will restart your app
@@ -813,8 +828,8 @@ another environment variable to hold the previous value if necessary.
 you could end up with the following for example:
 
     {{.DefaultAlias}}_URL={{.Scheme}}://:ANOTHER_PASSWORD@dokku-{{.CommandPrefix}}-other-service:{{.Port}}/other_service
-    DOKKU_{{.DefaultAlias}}_BLUE_URL={{.Scheme}}://:ANOTHER_PASSWORD@dokku-{{.CommandPrefix}}-other-service:{{.Port}}/other_service
-    DOKKU_{{.DefaultAlias}}_SILVER_URL={{.Scheme}}://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}/lollipop`
+    {{.AltAlias}}_AQUA_URL={{.Scheme}}://:ANOTHER_PASSWORD@dokku-{{.CommandPrefix}}-other-service:{{.Port}}/other_service
+    {{.AltAlias}}_BLACK_URL={{.Scheme}}://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}/lollipop`
 }
 
 // Group is the readme usage section the command is documented under

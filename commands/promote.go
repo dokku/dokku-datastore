@@ -43,8 +43,7 @@ func (c *PromoteCommand) Help() string {
 func (c *PromoteCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Links a redis service named test to the app test-app": fmt.Sprintf("%s %s redis test test-app", appName, c.Name()),
-		"Links it as BLUE_URL instead of the default alias":    fmt.Sprintf("%s %s redis test test-app --alias BLUE", appName, c.Name()),
+		"Promotes a redis service named test to the default alias on the app test-app": fmt.Sprintf("%s %s redis test test-app", appName, c.Name()),
 	}
 }
 
