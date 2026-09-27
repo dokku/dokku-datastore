@@ -286,6 +286,114 @@ func TestRedisImplementsTheDumpFamily(t *testing.T) {
 	}
 }
 
+// clickhouseInput is a verb against a clickhouse service named lollipop.
+func clickhouseInput(t *testing.T, name string) RunInput {
+	t.Helper()
+
+	scope := redisScope()
+	scope.ContainerName = "dokku.clickhouse.lollipop"
+	scope.Host = "dokku-clickhouse-lollipop"
+	scope.Plugin = "clickhouse"
+	scope.Title = "Clickhouse"
+	scope.Variable = "CLICKHOUSE"
+	scope.Image = "clickhouse/clickhouse-server"
+	scope.ImageVersion = "26.9.1.1629"
+	scope.TaggedImage = "clickhouse/clickhouse-server:26.9.1.1629"
+	scope.ServiceRoot = "/var/lib/dokku/services/clickhouse/lollipop"
+	scope.HostRoot = "/var/lib/dokku/services/clickhouse/lollipop"
+	scope.Scheme = "clickhouse"
+	scope.Port = map[string]int{"native": 9000, "http": 8123}
+
+	return RunInput{
+		Definition: definitionFor(t, "clickhouse"),
+		Scope:      scope,
+		Name:       name,
+		Image:      scope.TaggedImage,
+		Volumes: []string{
+			"/var/lib/dokku/services/clickhouse/lollipop/config:/etc/clickhouse-server",
+			"/var/lib/dokku/services/clickhouse/lollipop/data:/var/lib/clickhouse",
+		},
+		Names: backend.Names{Container: "dokku.clickhouse.lollipop", Ambassador: "dokku.clickhouse.lollipop.ambassador"},
+	}
+}
+
+// clickhouseSidecarArgs renders a clickhouse verb as the sidecar it runs in.
+func clickhouseSidecarArgs(t *testing.T, input RunInput) string {
+	t.Helper()
+
+	resolved, err := Resolve(input)
+	if err != nil {
+		t.Fatalf("unable to resolve %s: %s", input.Name, err)
+	}
+
+	return strings.Join(backend.RunArgs(backend.RunInput{
+		Image:   input.Image,
+		Argv:    resolved.Argv,
+		Env:     resolved.Env,
+		Volumes: input.Volumes,
+		Network: "container:" + input.Names.Container,
+	}), " ")
+}
+
+// Clickhouse's BACKUP and RESTORE read and write the archive on the server's
+// own filesystem, so both dump verbs run beside the service with its volumes
+// rather than inside it. The credentials stay out of the CLICKHOUSE_ variables
+// the image's entrypoint and the client read for themselves.
+func TestResolveClickhouseDumpVerbsRunInASidecar(t *testing.T) {
+	tests := []struct {
+		name     string
+		stdin    bool
+		expected string
+	}{
+		{
+			name:     "export",
+			expected: "container run --rm --env=DOKKU_CLICKHOUSE_DATABASE=lollipop --env=DOKKU_CLICKHOUSE_PASSWORD=hunter2 --env=DOKKU_CLICKHOUSE_USER=lollipop --network=container:dokku.clickhouse.lollipop --volume=/var/lib/dokku/services/clickhouse/lollipop/config:/etc/clickhouse-server --volume=/var/lib/dokku/services/clickhouse/lollipop/data:/var/lib/clickhouse -i clickhouse/clickhouse-server:26.9.1.1629 dokku-clickhouse-export",
+		},
+		{
+			name:     "import",
+			stdin:    true,
+			expected: "container run --rm --env=DOKKU_CLICKHOUSE_DATABASE=lollipop --env=DOKKU_CLICKHOUSE_PASSWORD=hunter2 --env=DOKKU_CLICKHOUSE_USER=lollipop --network=container:dokku.clickhouse.lollipop --volume=/var/lib/dokku/services/clickhouse/lollipop/config:/etc/clickhouse-server --volume=/var/lib/dokku/services/clickhouse/lollipop/data:/var/lib/clickhouse -i clickhouse/clickhouse-server:26.9.1.1629 dokku-clickhouse-import",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := clickhouseInput(t, test.name)
+
+			command, ok := input.Definition.Dokku.Commands[test.name]
+			if !ok {
+				t.Fatalf("expected clickhouse to declare %s", test.name)
+			}
+
+			if command.Mode != definition.ModeSidecar {
+				t.Errorf("expected %s to run in a sidecar, got mode %q", test.name, command.Mode)
+			}
+
+			if command.Stdin != test.stdin {
+				t.Errorf("expected %s to have stdin %t, got %t", test.name, test.stdin, command.Stdin)
+			}
+
+			if command.ExtraArgs {
+				t.Errorf("expected %s to refuse extra arguments, since the scripts take none", test.name)
+			}
+
+			if actual := clickhouseSidecarArgs(t, input); actual != test.expected {
+				t.Errorf("expected:\n%s\ngot:\n%s", test.expected, actual)
+			}
+		})
+	}
+}
+
+func TestClickhouseImplementsTheDumpFamily(t *testing.T) {
+	clickhouse := definitionFor(t, "clickhouse")
+
+	for _, subcommand := range []string{"export", "import", "clone", "backup", "backup-schedule"} {
+		if !clickhouse.Implements(subcommand) {
+			t.Errorf("expected clickhouse to implement %s", subcommand)
+		}
+	}
+}
+
 func TestResolveRendersTemplates(t *testing.T) {
 	input := RunInput{
 		Definition: definition.Definition{
