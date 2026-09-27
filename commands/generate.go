@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"os"
@@ -28,6 +29,9 @@ type GenerateCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+
+	// CommandFunc is the registry of every command this binary implements
+	CommandFunc command.CommandFunc
 
 	// pluginDir is the plugin checkout to write into
 	pluginDir string
@@ -316,12 +320,51 @@ func writeDefinitionFile(path string, contents []byte, mode os.FileMode) error {
 	return nil
 }
 
-// writeSubcommands writes one script per command the datastore adds for itself.
+// writeSubcommands writes one script per command the plugin exposes: every one
+// this binary implements, and every one the datastore adds for itself.
+//
+// The scripts for the binary's own commands used to be kept by hand in each
+// plugin, so a command added here never reached a plugin until someone copied
+// its script in, and a change to how one is dispatched had to be made in every
+// plugin. They are written for every datastore alike, as the plugins kept
+// them: one a datastore does not implement exits the way dokku expects of a
+// command a plugin does not handle.
 func (c *GenerateCommand) writeSubcommands(datastore *service.Datastore, data internal.DocumentationData) ([]string, error) {
-	custom := datastore.CustomCommands()
-	if len(custom) == 0 {
+	type subcommand struct {
+		command internal.PluginCommand
+		custom  bool
+	}
+
+	subcommands := []subcommand{}
+	builtin := map[string]bool{}
+	for _, pluginCommand := range pluginCommands(context.Background(), c.Meta, c.CommandFunc) {
+		// invoke is how a datastore's own commands are reached, not a command a
+		// plugin exposes: each of those gets a script of its own below
+		if pluginCommand.Name() == "invoke" {
+			continue
+		}
+
+		builtin[pluginCommand.Name()] = true
+		subcommands = append(subcommands, subcommand{command: pluginCommand})
+	}
+
+	for _, pluginCommand := range internal.CustomCommands(datastore) {
+		// both would be written to the same script, and whichever came second
+		// would take the other's place without a word
+		if builtin[pluginCommand.Name()] {
+			return nil, fmt.Errorf("custom command %s has the name of a command the tool implements", pluginCommand.Name())
+		}
+
+		subcommands = append(subcommands, subcommand{command: pluginCommand, custom: true})
+	}
+
+	if len(subcommands) == 0 {
 		return nil, nil
 	}
+
+	sort.Slice(subcommands, func(i, j int) bool {
+		return subcommands[i].command.Name() < subcommands[j].command.Name()
+	})
 
 	root := filepath.Join(c.pluginDir, "subcommands")
 	if err := os.MkdirAll(root, 0755); err != nil {
@@ -329,9 +372,13 @@ func (c *GenerateCommand) writeSubcommands(datastore *service.Datastore, data in
 	}
 
 	written := []string{}
-	for _, pluginCommand := range internal.CustomCommands(datastore) {
-		name := pluginCommand.Name()
-		contents, err := internal.PluginSubcommand(name, custom[name], data)
+	for _, s := range subcommands {
+		name := s.command.Name()
+		contents, err := internal.PluginSubcommand(internal.PluginSubcommandInput{
+			Command: s.command,
+			Custom:  s.custom,
+			Data:    data,
+		})
 		if err != nil {
 			return nil, err
 		}

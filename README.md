@@ -93,8 +93,10 @@ A plugin may carry the definitions for its own datastore, in `datastore/<name>/`
 
 `generate` also writes the file dokku runs for each trigger at the plugin root: the ones this binary implements for every datastore, such as `pre-start`, `pre-build` and `cron-entries`, and the ones a definition declares for itself, such as solr's `post-extract`. A trigger this binary starts implementing reaches a plugin the next time it is regenerated. `install` and `update` are not written, as a plugin's own files for those do more than dispatch, and a definition may not declare a trigger under the name of one this binary implements.
 
+It writes the script dokku runs for each of the plugin's commands in `subcommands/` too: every command this binary implements, such as `create`, `expose` and `enter`, and every one a definition declares for itself, such as mongo's `connect-admin`. These are the scripts the plugins used to keep by hand, so a command this binary starts implementing reaches a plugin the next time it is regenerated, as a trigger does. Every datastore gets a script for every command, as the plugins had, and one its datastore does not implement exits the way dokku expects of a command a plugin does not handle. The `enter` script passes the command to run in the container after a `--`, so a flag of its own, such as `mariabackup --backup`, is not read as one of the binary's. A definition may not declare a command under the name of one this binary implements, which `generate` refuses rather than writing one over the other.
+
 ```shell
-# writes datastore/postgres-17/ and datastore/postgres-18/
+# writes datastore/postgres-17/, datastore/postgres-18/ and subcommands/
 dokku-datastore generate --plugin-dir . postgres
 ```
 

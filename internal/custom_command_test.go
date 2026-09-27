@@ -74,9 +74,13 @@ func TestCustomCommandsForADatastoreWithNone(t *testing.T) {
 
 func TestPluginSubcommandDispatchesThroughInvoke(t *testing.T) {
 	mongo := mongoDatastore(t)
-	script, err := PluginSubcommand("connect-admin", mongo.CustomCommands()["connect-admin"], DocumentationData{
-		CommandPrefix: "mongo",
-		Title:         "MongoDB",
+	script, err := PluginSubcommand(PluginSubcommandInput{
+		Command: CustomCommand{CommandName: "connect-admin", Declared: mongo.CustomCommands()["connect-admin"]},
+		Custom:  true,
+		Data: DocumentationData{
+			CommandPrefix: "mongo",
+			Title:         "MongoDB",
+		},
 	})
 	if err != nil {
 		t.Fatalf("unable to render the subcommand: %s", err)
@@ -85,7 +89,8 @@ func TestPluginSubcommandDispatchesThroughInvoke(t *testing.T) {
 	for _, expected := range []string{
 		// the one entry point, named with the command it dispatches
 		`dokku-datastore" invoke "$PLUGIN_COMMAND_PREFIX" connect-admin "$@"`,
-		`declare desc="connect to the MongoDB service as the admin user"`,
+		// the title is the plugin's own, read from its config at runtime
+		`declare desc="connect to the $PLUGIN_SERVICE service as the admin user"`,
 		`local cmd="$PLUGIN_COMMAND_PREFIX:connect-admin"`,
 	} {
 		if !strings.Contains(script, expected) {

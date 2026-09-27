@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -234,5 +236,39 @@ func TestEverySectionOrderNamesARealCommand(t *testing.T) {
 				t.Errorf("%s names %q, which no command implements", group, name)
 			}
 		}
+	}
+}
+
+// generate writes a script for every command a plugin exposes, so a command
+// added to the binary reaches a plugin the next time it is regenerated rather
+// than when someone remembers to copy a script into it.
+func TestGenerateWritesAScriptForEveryPluginCommand(t *testing.T) {
+	pluginDir := t.TempDir()
+	t.Setenv("DOKKU_NO_COLOR", "1")
+	if actual := Run([]string{"generate", "--plugin-dir", pluginDir, "mongo"}); actual != 0 {
+		t.Fatalf("expected generate to succeed, got exit code %d", actual)
+	}
+
+	expected := []string{}
+	for _, c := range registeredPluginCommands(t) {
+		expected = append(expected, c.Name())
+	}
+	for _, c := range internal.CustomCommands(service.Datastores["mongo"]) {
+		expected = append(expected, c.Name())
+	}
+	slices.Sort(expected)
+
+	entries, err := os.ReadDir(filepath.Join(pluginDir, "subcommands"))
+	if err != nil {
+		t.Fatalf("unable to read the generated subcommands: %s", err)
+	}
+
+	written := []string{}
+	for _, entry := range entries {
+		written = append(written, entry.Name())
+	}
+
+	if !slices.Equal(written, expected) {
+		t.Errorf("expected a script for each of %v, got %v", expected, written)
 	}
 }
