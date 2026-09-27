@@ -528,7 +528,7 @@ dokku postgres:unlink lollipop playground
 dokku postgres:destroy lollipop
 ```
 
-`link` goes by the same list. An app whose config already held the service's url, set by hand rather than by `link`, was refused with `Already linked as DATABASE_URL`, and was left without its container link and off the list, so it could not reach the service and `destroy` did not know it was in use. Such an app is now added to the list and given its container link. Its config is left as it is, so `--alias` and `--querystring` do not apply and the app is not restarted, and a warning says it has no container link until it is. An app already on the list is still refused, including one whose url was repointed, which used to be linked a second time under a `DOKKU_POSTGRES_AQUA_URL`-style alias.
+`link` goes by the same list. An app whose config already held the service's url, set by hand rather than by `link`, was refused with `Already linked as DATABASE_URL`, and was left without its container link and off the list, so it could not reach the service and `destroy` did not know it was in use. Such an app is now added to the list and given its container link. Its config is left as it is, so `--alias`, `--env-var` and `--querystring` do not apply and the app is not restarted, and a warning says it has no container link until it is. An app already on the list is still refused, including one whose url was repointed, which used to be linked a second time under a `DOKKU_POSTGRES_AQUA_URL`-style alias.
 
 The bash plugins also took a key that merely contained the alias, such as `EXTERNAL_DATABASE_URL`, for the alias itself, and linked the app under a `DOKKU_POSTGRES_AQUA_URL`-style alias instead, or refused `--alias DATABASE` as already in use. Only a key named exactly `DATABASE_URL` counts.
 
@@ -539,6 +539,21 @@ dokku config:set playground DATABASE_URL=postgres://postgres:password@dokku-post
 # warning that the app is not restarted
 dokku postgres:link lollipop playground
 dokku ps:restart playground
+```
+
+### The variable a link sets
+
+`link` always appended `_URL` to the variable it set, so an app that reads its url from a name like `MB_DB_CONNECTION_URI` had to have it copied over by hand with `config:set`. `--env-var` names the variable in full, and cannot be combined with `--alias`, which is still suffixed with `_URL`. A name already set on the app is refused.
+
+The variable holding the url used to be found only by the url it held, so once the scheme on it changed, through `POSTGRES_DATABASE_SCHEME` or by hand, `unlink` no longer found it and left it in place. `link` now records the variables it sets on each app in the service's `link-config-keys` property, and `unlink` and `promote` find a recorded variable as long as it still names the service's credentials, host, port and database, whatever its scheme or querystring. A variable pointed at another datastore is still left alone. A link made by an earlier version has nothing recorded and is found by its exact url, as before, until `link` or `promote` next runs for it and records it. A `link-config-keys` property that cannot be parsed is read as recording nothing, and the next write replaces it with a warning, so the other apps it recorded fall back to their exact url in the same way. A cloned service starts with no record, as it starts with no linked apps.
+
+```shell
+# sets MB_DB_CONNECTION_URI rather than DATABASE_URL
+dokku postgres:link lollipop metabase --env-var MB_DB_CONNECTION_URI
+
+# still unsets MB_DB_CONNECTION_URI, though the scheme on it changed
+dokku config:set metabase MB_DB_CONNECTION_URI=postgresql://postgres:password@dokku-postgres-lollipop:5432/lollipop
+dokku postgres:unlink lollipop metabase
 ```
 
 ## Hiding services from users

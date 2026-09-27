@@ -34,6 +34,10 @@ func withDataRoot(t *testing.T) {
 	service.DokkuLibRoot = root
 	service.PluginDataRoot = filepath.Join(root, "services")
 
+	// properties are found through the environment rather than the package
+	// variable, so both have to point at the same place
+	t.Setenv("DOKKU_LIB_ROOT", root)
+
 	t.Cleanup(func() {
 		service.DokkuLibRoot = previousLib
 		service.PluginDataRoot = previousData

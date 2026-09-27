@@ -50,6 +50,14 @@ func assertLinkedApps(t *testing.T, datastore *service.Datastore, serviceName st
 	}
 }
 
+func assertRecordedKeys(t *testing.T, datastore *service.Datastore, serviceName string, appName string, expected []string) {
+	t.Helper()
+
+	if actual := service.LinkConfigKeys(datastore, serviceName, appName); !slices.Equal(actual, expected) {
+		t.Errorf("expected %s to record %v for %s, got %v", serviceName, expected, appName, actual)
+	}
+}
+
 func TestCopyAppLinks(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -106,6 +114,14 @@ func TestRemoveAppLinks(t *testing.T) {
 		"gobstopper":  {"my-app"},
 		"everlasting": {"other-app"},
 	})
+	for _, serviceName := range []string{"lollipop", "gobstopper"} {
+		if err := service.SetLinkConfigKeys(datastore, serviceName, "my-app", []string{"REDIS_URL"}); err != nil {
+			t.Fatalf("failed to record the keys: %s", err)
+		}
+	}
+	if err := service.SetLinkConfigKeys(datastore, "lollipop", "other-app", []string{"REDIS_URL"}); err != nil {
+		t.Fatalf("failed to record the keys: %s", err)
+	}
 
 	if err := RemoveAppLinks(t.Context(), triggerInput(datastore), "my-app"); err != nil {
 		t.Fatalf("failed to remove the app links: %s", err)
@@ -114,6 +130,11 @@ func TestRemoveAppLinks(t *testing.T) {
 	assertLinkedApps(t, datastore, "lollipop", []string{"other-app"})
 	assertLinkedApps(t, datastore, "gobstopper", []string{})
 	assertLinkedApps(t, datastore, "everlasting", []string{"other-app"})
+
+	// the keys go with the app, and another app's are kept
+	assertRecordedKeys(t, datastore, "lollipop", "my-app", nil)
+	assertRecordedKeys(t, datastore, "gobstopper", "my-app", nil)
+	assertRecordedKeys(t, datastore, "lollipop", "other-app", []string{"REDIS_URL"})
 }
 
 // The two halves of a rename, in the order dokku runs them: this trigger, and
@@ -123,6 +144,9 @@ func TestRemoveAppLinks(t *testing.T) {
 func TestARenameLeavesOnlyTheNewName(t *testing.T) {
 	datastore := linkedServices(t, map[string][]string{"lollipop": {"my-app"}})
 	input := triggerInput(datastore)
+	if err := service.SetLinkConfigKeys(datastore, "lollipop", "my-app", []string{"MB_DB_CONNECTION_URI"}); err != nil {
+		t.Fatalf("failed to record the keys: %s", err)
+	}
 
 	if err := CopyAppLinks(t.Context(), input, "my-app", "renamed-app"); err != nil {
 		t.Fatalf("failed to copy the app links: %s", err)
@@ -133,18 +157,40 @@ func TestARenameLeavesOnlyTheNewName(t *testing.T) {
 	}
 
 	assertLinkedApps(t, datastore, "lollipop", []string{"renamed-app"})
+	assertRecordedKeys(t, datastore, "lollipop", "renamed-app", []string{"MB_DB_CONNECTION_URI"})
+	assertRecordedKeys(t, datastore, "lollipop", "my-app", nil)
+}
+
+// A link made before the keys were recorded has none to copy, and copying
+// nothing must not forget the keys the new name already has
+func TestCopyAppLinksWithNothingRecorded(t *testing.T) {
+	datastore := linkedServices(t, map[string][]string{"lollipop": {"my-app", "renamed-app"}})
+	if err := service.SetLinkConfigKeys(datastore, "lollipop", "renamed-app", []string{"REDIS_URL"}); err != nil {
+		t.Fatalf("failed to record the keys: %s", err)
+	}
+
+	if err := CopyAppLinks(t.Context(), triggerInput(datastore), "my-app", "renamed-app"); err != nil {
+		t.Fatalf("failed to copy the app links: %s", err)
+	}
+
+	assertRecordedKeys(t, datastore, "lollipop", "renamed-app", []string{"REDIS_URL"})
 }
 
 // A clone keeps both, because both apps are still there afterwards and both are
 // using the service
 func TestACloneLeavesBothNames(t *testing.T) {
 	datastore := linkedServices(t, map[string][]string{"lollipop": {"my-app"}})
+	if err := service.SetLinkConfigKeys(datastore, "lollipop", "my-app", []string{"MB_DB_CONNECTION_URI"}); err != nil {
+		t.Fatalf("failed to record the keys: %s", err)
+	}
 
 	if err := CopyAppLinks(t.Context(), triggerInput(datastore), "my-app", "cloned-app"); err != nil {
 		t.Fatalf("failed to copy the app links: %s", err)
 	}
 
 	assertLinkedApps(t, datastore, "lollipop", []string{"cloned-app", "my-app"})
+	assertRecordedKeys(t, datastore, "lollipop", "cloned-app", []string{"MB_DB_CONNECTION_URI"})
+	assertRecordedKeys(t, datastore, "lollipop", "my-app", []string{"MB_DB_CONNECTION_URI"})
 }
 
 func TestServicesWithLinks(t *testing.T) {

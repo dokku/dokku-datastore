@@ -43,12 +43,23 @@ func CopyAppLinks(ctx context.Context, input TriggerInput, oldAppName string, ne
 		if err := service.AddLinkedApp(ctx, linkedAppsInput(input.Datastore, serviceName), newAppName); err != nil {
 			return err
 		}
+
+		// dokku copies the config along with the app, so the new app holds the
+		// url under the same keys. A link made before the keys were recorded
+		// has none to copy, and recording none would forget any the new name
+		// already had.
+		if keys := service.LinkConfigKeys(input.Datastore, serviceName, oldAppName); len(keys) > 0 {
+			if err := recordLinkConfigKeys(input.Logger, input.Datastore, serviceName, newAppName, keys); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
 }
 
-// RemoveAppLinks drops an app from every service's links file
+// RemoveAppLinks drops an app from every service's links file, along with the
+// config keys recorded for it
 func RemoveAppLinks(ctx context.Context, input TriggerInput, appName string) error {
 	services, err := ListServices(ctx, ListServicesInput{Datastore: input.Datastore})
 	if err != nil {
@@ -58,6 +69,10 @@ func RemoveAppLinks(ctx context.Context, input TriggerInput, appName string) err
 	for _, serviceName := range services {
 		input.Logger.Info(fmt.Sprintf("Unlinking from %s", serviceName))
 		if err := service.RemoveLinkedApp(ctx, linkedAppsInput(input.Datastore, serviceName), appName); err != nil {
+			return err
+		}
+
+		if err := forgetLinkConfigKeys(input.Logger, input.Datastore, serviceName, appName); err != nil {
 			return err
 		}
 	}

@@ -179,23 +179,17 @@ func TestPromoteHelpNamesTheGeneratedAliases(t *testing.T) {
 			linkedKey := internal.AlternateAlias(datastore, environment) + "_URL"
 			environment[linkedKey] = otherURL
 
-			entries, err := internal.PromotionEntries(internal.PromoteServiceInput{
+			_, displacedKey, err := internal.PromotionEntries(internal.PromoteServiceInput{
 				AppName:     "playground",
 				Datastore:   datastore,
 				ServiceName: "other_service",
-			}, environment, otherURL)
+			}, environment, internal.ConfigKeysForURL(environment, otherURL))
 			if err != nil {
 				t.Fatalf("unexpected error: %s", err)
 			}
 
-			displacedKey := ""
-			for key, value := range entries {
-				if value == lollipopURL {
-					displacedKey = key
-				}
-			}
 			if displacedKey == "" {
-				t.Fatalf("expected promote to keep the displaced url, got %v", entries)
+				t.Fatal("expected promote to keep the displaced url")
 			}
 
 			help, err := internal.PluginCommandHelp(promote, data)

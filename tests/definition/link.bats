@@ -102,6 +102,74 @@ teardown_file() {
   assert_success
 }
 
+@test "($DEFINITION) link --env-var sets the variable without a _URL suffix" {
+  echo '{}' >"$FAKE_CONFIG_ROOT/$APP.json"
+
+  run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart --env-var MB_DB_CONNECTION_URI
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --dsn
+  assert_success
+  local dsn="$output"
+
+  run jq -r '.MB_DB_CONNECTION_URI' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output "$dsn"
+
+  run jq -r --arg key "$ALIAS" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output "null"
+
+  # linking again finds the variable it set, rather than adding the default
+  run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart
+  assert_failure
+  assert_output --partial "Already linked as MB_DB_CONNECTION_URI"
+
+  run jq -r --arg key "$ALIAS" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output "null"
+
+  run "$BIN" unlink "$PLUGIN" "$SERVICE" "$APP" --no-restart
+  assert_success
+
+  run jq -r '.MB_DB_CONNECTION_URI' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output "null"
+}
+
+@test "($DEFINITION) link refuses --alias with --env-var" {
+  echo '{}' >"$FAKE_CONFIG_ROOT/$APP.json"
+
+  run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart --alias BLUE --env-var MB_DB_CONNECTION_URI
+  assert_failure
+  assert_output --partial "--alias and --env-var cannot be used together"
+
+  run "$BIN" linked "$PLUGIN" "$SERVICE" "$APP"
+  assert_failure
+}
+
+@test "($DEFINITION) unlink removes a linked variable after its scheme changes" {
+  echo '{}' >"$FAKE_CONFIG_ROOT/$APP.json"
+
+  run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --dsn
+  assert_success
+
+  # the bug this closes: unlink looked for the exact url, and left the
+  # variable behind once its scheme no longer matched
+  dokku config:set --no-restart "$APP" "$ALIAS=changed://${output#*://}"
+
+  run "$BIN" unlink "$PLUGIN" "$SERVICE" "$APP" --no-restart
+  assert_success
+  refute_output --partial "none was unset"
+
+  run jq -r --arg key "$ALIAS" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output "null"
+}
+
 @test "($DEFINITION) unlink and destroy agree once the app's url is repointed" {
   run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart
   assert_success
