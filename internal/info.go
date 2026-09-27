@@ -51,6 +51,8 @@ var InfoKeys = []InfoKey{
 	{Name: "database-name", Description: "show the name of the database inside the service"},
 	{Name: "definition", Description: "show the definition the service was created with"},
 	{Name: "dsn", Description: "show the service DSN"},
+	{Name: "expose-address", Description: "show the address exposed ports without one of their own are published on"},
+	{Name: "expose-source-range", Description: "show the only range of client addresses the exposed ports accept"},
 	{Name: "exposed-ports", Description: "show service exposed ports"},
 	{Name: "id", Description: "show the service container id"},
 	{Name: "image", Description: "show the image the service runs"},
@@ -131,6 +133,8 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info[service.LogOptProperty] = common.PropertyGet(commandPrefix, input.ServiceName, service.LogOptProperty)
 	info[service.RestartPolicyProperty] = service.ServiceRestartPolicy(input.Datastore, input.ServiceName)
 	info[service.WaitTimeoutProperty] = service.ServiceWaitTimeout(input.Datastore, input.ServiceName)
+	info[service.ExposeAddressProperty] = service.ServiceExposeAddress(input.Datastore, input.ServiceName)
+	info[service.ExposeSourceRangeProperty] = service.ServiceExposeSourceRange(input.Datastore, input.ServiceName)
 	info["memory"] = common.ReadFirstLine(serviceFiles.Memory)
 	// every field, in the grammar the mount command reads, rather than only the
 	// ones docker is handed. A property that cannot be read reports as empty,

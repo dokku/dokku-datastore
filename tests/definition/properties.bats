@@ -205,6 +205,60 @@ skip_unless_log_is_capped() {
   assert_output ""
 }
 
+@test "($DEFINITION) the expose settings are set, read back and unset" {
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-address 10.0.0.5
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range 203.0.113.7
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-address
+  assert_success
+  assert_output "10.0.0.5"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-source-range
+  assert_success
+  assert_output "203.0.113.7"
+
+  # and back to what every other check expects of this service
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-address
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-address
+  assert_success
+  assert_output ""
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-source-range
+  assert_success
+  assert_output ""
+}
+
+@test "($DEFINITION) an expose setting docker or socat would refuse is refused first" {
+  local value
+  # docker publishes on an address, not a name, and without a port's brackets
+  for value in localhost "[::1]" 10.0.0.5:6379; do
+    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" expose-address "$value"
+    assert_failure
+    assert_stderr --partial "expose-address"
+  done
+
+  # socat honors a single range for each port it listens on
+  for value in 10.0.0.0/33 "10.0.0.0/8,192.168.0.0/16" example.com; do
+    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range "$value"
+    assert_failure
+    assert_stderr --partial "expose-source-range"
+  done
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-address
+  assert_success
+  assert_output ""
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-source-range
+  assert_success
+  assert_output ""
+}
+
 @test "($DEFINITION) a mount reaches the container it is rebuilt with" {
   local source target="/opt/dokku-mount"
   source="$(mount_source properties)"

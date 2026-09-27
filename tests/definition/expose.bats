@@ -72,6 +72,31 @@ assert_no_ambassador() {
   fi
 }
 
+# the ambassador's id, which changes only when it is replaced
+ambassador_id() {
+  container_inspect "$AMBASSADOR" '{{ .Id }}'
+}
+
+# the service container's id, which a reexpose leaves alone
+service_id() {
+  container_inspect "$(service_container)" '{{ .Id }}'
+}
+
+# the ambassador's range of client addresses, both as it records the property
+# and as the socat command it runs enforces it; empty when it has none
+assert_source_range() {
+  local step="$1" expected="$2" label command
+  label="$(container_inspect "$AMBASSADOR" '{{ index .Config.Labels "dokku.ambassador.source-range" }}')"
+  [[ "$label" == "$expected" ]] || fail "$step: expected the ambassador to record source range '$expected', got '$label'"
+
+  command="$(container_inspect "$AMBASSADOR" '{{ index .Config.Cmd 0 }}')"
+  if [[ -z "$expected" ]]; then
+    [[ "$command" != *"range="* ]] || fail "$step: expected no source range in '$command'"
+  else
+    [[ "$command" == *",range=$expected "* ]] || fail "$step: expected source range $expected in '$command'"
+  fi
+}
+
 @test "($DEFINITION) expose publishes the service" {
   run "$BIN" expose "$PLUGIN" "$SERVICE"
   assert_success
@@ -170,6 +195,107 @@ assert_no_ambassador() {
   assert_ambassador "an unset restart policy"
 }
 
+@test "($DEFINITION) reexpose publishes on the expose-address without restarting the service" {
+  local service_before ambassador_before ports_before
+  service_before="$(service_id)"
+  ambassador_before="$(ambassador_id)"
+  ports_before="$(cat "$PORT_FILE")"
+
+  # setting it changes nothing until it is applied
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-address 127.0.0.1
+  assert_success
+  [[ "$(ambassador_id)" == "$ambassador_before" ]] || fail "expected set to leave the ambassador alone"
+
+  run "$BIN" reexpose "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_output --partial "reexposed on port(s)"
+  assert_ambassador "reexpose on the expose-address"
+  assert_bound_on "reexpose on the expose-address" "127.0.0.1"
+  [[ "$(ambassador_id)" != "$ambassador_before" ]] || fail "expected reexpose to replace the ambassador"
+  [[ "$(service_id)" == "$service_before" ]] || fail "expected reexpose to leave the service container alone"
+  [[ "$(cat "$PORT_FILE")" == "$ports_before" ]] || fail "expected reexpose to keep the ports the service was exposed on"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --exposed-ports
+  assert_success
+  assert_output --partial "->127.0.0.1:"
+
+  # and back to every interface
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-address
+  assert_success
+  run "$BIN" reexpose "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_ambassador "reexpose with no expose-address"
+  assert_bound_on "reexpose with no expose-address" ""
+  [[ "$(service_id)" == "$service_before" ]] || fail "expected reexpose to leave the service container alone"
+}
+
+@test "($DEFINITION) reexpose limits the service to the expose-source-range" {
+  local service_before
+  service_before="$(service_id)"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range 192.0.2.0/24
+  assert_success
+  run "$BIN" reexpose "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_ambassador "reexpose with a source range"
+  assert_source_range "reexpose with a source range" "192.0.2.0/24"
+  [[ "$(service_id)" == "$service_before" ]] || fail "expected reexpose to leave the service container alone"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-source-range
+  assert_success
+  assert_output "192.0.2.0/24"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range
+  assert_success
+  run "$BIN" reexpose "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_ambassador "reexpose with no source range"
+  assert_source_range "reexpose with no source range" ""
+}
+
+@test "($DEFINITION) reexpose replaces the ambassador even when nothing changed" {
+  local ambassador_before
+  ambassador_before="$(ambassador_id)"
+
+  run "$BIN" reexpose "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_ambassador "reexpose with nothing changed"
+  [[ "$(ambassador_id)" != "$ambassador_before" ]] || fail "expected reexpose to replace the ambassador"
+}
+
+@test "($DEFINITION) start applies a changed expose setting to a running service" {
+  local service_before
+  service_before="$(service_id)"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range 192.0.2.0/24
+  assert_success
+  run "$BIN" start "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_ambassador "start with a changed source range"
+  assert_source_range "start with a changed source range" "192.0.2.0/24"
+  [[ "$(service_id)" == "$service_before" ]] || fail "expected start to leave the running service container alone"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range
+  assert_success
+  run "$BIN" start "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_source_range "start with the source range unset" ""
+}
+
+@test "($DEFINITION) reexpose refuses a stopped service" {
+  run "$BIN" stop "$PLUGIN" "$SERVICE"
+  assert_success
+
+  run "$BIN" reexpose "$PLUGIN" "$SERVICE"
+  assert_failure
+  assert_output --partial "its container is not running"
+  assert_no_ambassador "reexpose of a stopped service"
+
+  run "$BIN" start "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_ambassador "start after a refused reexpose"
+}
+
 @test "($DEFINITION) unexpose takes the ambassador away" {
   run "$BIN" unexpose "$PLUGIN" "$SERVICE"
   assert_success
@@ -178,6 +304,13 @@ assert_no_ambassador() {
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --exposed-ports
   assert_success
   assert_output -- "-"
+}
+
+@test "($DEFINITION) reexpose refuses a service that is not exposed" {
+  run "$BIN" reexpose "$PLUGIN" "$SERVICE"
+  assert_failure
+  assert_output --partial "Service $SERVICE is not exposed"
+  assert_no_ambassador "reexpose of a service that is not exposed"
 }
 
 @test "($DEFINITION) expose on an address publishes on it alone" {
@@ -196,6 +329,24 @@ assert_no_ambassador() {
   run "$BIN" unexpose "$PLUGIN" "$SERVICE"
   assert_success
   assert_no_ambassador "unexpose after an expose on an address"
+}
+
+@test "($DEFINITION) expose picks random ports on the expose-address" {
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-address 127.0.0.1
+  assert_success
+
+  run "$BIN" expose "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_ambassador "a random expose on the expose-address"
+  assert_bound_on "a random expose on the expose-address" "127.0.0.1"
+
+  # written without the address, so a later expose-address moves them
+  [[ "$(cat "$PORT_FILE")" != *":"* ]] || fail "expected the port file to hold bare ports, got '$(cat "$PORT_FILE")'"
+
+  run "$BIN" unexpose "$PLUGIN" "$SERVICE"
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-address
+  assert_success
 }
 
 @test "($DEFINITION) expose refuses a port it cannot publish" {

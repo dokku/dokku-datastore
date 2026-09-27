@@ -410,36 +410,43 @@ func GenerateRandomHexString(length int) (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
-// GenerateRandomPorts generates random ports
-func GenerateRandomPorts(iterations int) ([]int, error) {
+// GenerateRandomPorts generates random ports that are free on an address, or
+// on localhost when it is empty. A port free on localhost may already be taken
+// on another address, so a service exposed on one is given ports checked there.
+func GenerateRandomPorts(address string, iterations int) ([]int, error) {
 	var ports []int
 	for i := 0; i < iterations; i++ {
-		port := GetAvailablePort()
-		if port == 0 {
-			return nil, fmt.Errorf("failed to get available port")
+		port, err := GetAvailablePort(address)
+		if err != nil {
+			return nil, err
 		}
 		ports = append(ports, port)
 	}
 	return ports, nil
 }
 
-// GetAvailablePort gets an available port
-func GetAvailablePort() int {
-	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
+// GetAvailablePort gets a port that is free on an address, or on localhost
+// when it is empty
+func GetAvailablePort(address string) (int, error) {
+	if address == "" {
+		address = "localhost"
+	}
+
+	addr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(address, "0"))
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("failed to get an available port on %s: %w", address, err)
 	}
 
 	for {
 		l, err := net.ListenTCP("tcp", addr)
 		if err != nil {
-			return 0
+			return 0, fmt.Errorf("failed to get an available port on %s: %w", address, err)
 		}
 		defer l.Close()
 
 		port := l.Addr().(*net.TCPAddr).Port
 		if port >= 1025 && port <= 65535 {
-			return port
+			return port, nil
 		}
 	}
 }
@@ -808,11 +815,50 @@ type ServicePortReconcileStatusInput struct {
 
 	// ServiceName is the name of the service to reconcile the port for
 	ServiceName string
+
+	// Force replaces an exposed service's ambassador even when the one it has
+	// could be kept. It has no effect on a service that is not exposed
+	Force bool
 }
 
 // AmbassadorContainerIDLabel is the label an ambassador carries naming the
 // service container it was made to front.
 const AmbassadorContainerIDLabel = "dokku.ambassador.container-id"
+
+// AmbassadorAddressLabel is the label an ambassador carries naming the
+// expose-address it was made with. Unset when it was made with none.
+const AmbassadorAddressLabel = "dokku.ambassador.address"
+
+// AmbassadorSourceRangeLabel is the label an ambassador carries naming the
+// expose-source-range it was made with. Unset when it was made with none.
+const AmbassadorSourceRangeLabel = "dokku.ambassador.source-range"
+
+// ambassadorSettings are the service properties an ambassador is made from
+// that a running one cannot take on: a change to either only reaches the
+// service through a new ambassador.
+type ambassadorSettings struct {
+	// Address is the expose-address, empty for every interface
+	Address string
+
+	// SourceRange is the expose-source-range, empty for every client
+	SourceRange string
+}
+
+// serviceAmbassadorSettings are the settings a service's ambassador should be
+// made with.
+func serviceAmbassadorSettings(s *Datastore, serviceName string) ambassadorSettings {
+	return ambassadorSettings{
+		Address:     ServiceExposeAddress(s, serviceName),
+		SourceRange: ServiceExposeSourceRange(s, serviceName),
+	}
+}
+
+// ambassadorLabel reads one of an ambassador's labels, empty when it has none
+// by that name.
+func ambassadorLabel(ambassadorName string, label string) string {
+	value, _ := common.DockerInspect(ambassadorName, fmt.Sprintf("{{ index .Config.Labels %q }}", label))
+	return value
+}
 
 // AmbassadorHalfCloseTimeout is how long an ambassador keeps a connection open
 // after one side stops sending. It is the value the ambassador image used to
@@ -868,6 +914,15 @@ type ambassadorState struct {
 
 	// ServiceID is the service container there is now
 	ServiceID string
+
+	// FrontedSettings are the settings the ambassador says it was made with
+	FrontedSettings ambassadorSettings
+
+	// Settings are the settings the service has now
+	Settings ambassadorSettings
+
+	// Force is whether an ambassador that could be kept is replaced anyway
+	Force bool
 }
 
 // actionForAmbassador maps the state of a service's ambassador onto what
@@ -882,6 +937,12 @@ type ambassadorState struct {
 // 29, which no longer hands a linked container the environment it reads its
 // target from. And one that dials the service by an address the service no
 // longer has publishes nothing.
+//
+// Nor is one kept that was made with an expose-address or expose-source-range
+// the service no longer has, since it would go on publishing the service where
+// or to whom it was told not to. One made before those labels existed carries
+// neither, which is what a service that has set neither expects. A forced
+// reconcile replaces even one that could be kept.
 func actionForAmbassador(state ambassadorState) ambassadorAction {
 	if !state.Exposed {
 		if state.Status == "missing" {
@@ -895,7 +956,7 @@ func actionForAmbassador(state ambassadorState) ambassadorAction {
 		return ambassadorCreate
 	}
 
-	if state.Status == "running" && state.Managed && !state.Stale && state.FrontedID != "" && state.FrontedID == state.ServiceID {
+	if !state.Force && state.Status == "running" && state.Managed && !state.Stale && state.FrontedID != "" && state.FrontedID == state.ServiceID && state.FrontedSettings == state.Settings {
 		return ambassadorKeep
 	}
 
@@ -933,6 +994,9 @@ type ambassadorForwardOptionsInput struct {
 	// it. The default is applied rather than passed on empty, because
 	// docker-port-forward reads an empty policy as unless-stopped
 	RestartPolicy string
+
+	// Settings are the service's expose-address and expose-source-range
+	Settings ambassadorSettings
 }
 
 // ambassadorForwardOptions builds the docker-port-forward options that run a
@@ -940,16 +1004,38 @@ type ambassadorForwardOptionsInput struct {
 func ambassadorForwardOptions(input ambassadorForwardOptionsInput) portforward.Options {
 	// the port file holds either a port or an ip:port, both of which are the
 	// front half of a docker style port spec. A port with no address of its own
-	// is published on every interface, as a plain --publish was
+	// is published on the service's expose-address, or on every interface, as
+	// a plain --publish was, when it has none
 	ports := make([]string, 0, len(input.HostPorts))
 	for i, hostPort := range input.HostPorts {
 		ports = append(ports, fmt.Sprintf("%s:%d", hostPort, input.ContainerPorts[i]))
 	}
 
+	addresses := []string{portforward.AllInterfaces}
+	if input.Settings.Address != "" {
+		addresses = []string{input.Settings.Address}
+	}
+
+	labels := map[string]string{
+		"dokku":                    "ambassador",
+		"dokku.ambassador":         input.CommandPrefix,
+		AmbassadorContainerIDLabel: input.ContainerID,
+	}
+	// recorded as the service had them rather than read back from what
+	// docker-port-forward records, so a change to either property is seen as
+	// one however the two write the same range
+	if input.Settings.Address != "" {
+		labels[AmbassadorAddressLabel] = input.Settings.Address
+	}
+	if input.Settings.SourceRange != "" {
+		labels[AmbassadorSourceRangeLabel] = input.Settings.SourceRange
+	}
+
 	return portforward.Options{
 		Target:              "container/" + input.ContainerID,
 		Ports:               ports,
-		Addresses:           []string{portforward.AllInterfaces},
+		Addresses:           addresses,
+		SourceRange:         input.Settings.SourceRange,
 		Detach:              true,
 		RestartPolicy:       render.RestartPolicy(input.RestartPolicy),
 		Name:                input.AmbassadorName,
@@ -968,11 +1054,7 @@ func ambassadorForwardOptions(input ambassadorForwardOptionsInput) portforward.O
 		LogDriver: input.LogConfig.Driver,
 		LogOpts:   input.LogConfig.Options,
 
-		Labels: map[string]string{
-			"dokku":                    "ambassador",
-			"dokku.ambassador":         input.CommandPrefix,
-			AmbassadorContainerIDLabel: input.ContainerID,
-		},
+		Labels: labels,
 	}
 }
 
@@ -1008,9 +1090,15 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 			Datastore:   input.Datastore,
 			ServiceName: input.ServiceName,
 		}),
+		Settings: serviceAmbassadorSettings(input.Datastore, input.ServiceName),
+		Force:    input.Force,
 	}
 	if state.Exposed && state.Status != "missing" {
-		state.FrontedID, _ = common.DockerInspect(ambassadorName, fmt.Sprintf("{{ index .Config.Labels %q }}", AmbassadorContainerIDLabel))
+		state.FrontedID = ambassadorLabel(ambassadorName, AmbassadorContainerIDLabel)
+		state.FrontedSettings = ambassadorSettings{
+			Address:     ambassadorLabel(ambassadorName, AmbassadorAddressLabel),
+			SourceRange: ambassadorLabel(ambassadorName, AmbassadorSourceRangeLabel),
+		}
 
 		var err error
 		state.Managed, state.Stale, err = inspectAmbassador(ctx, ambassadorName)
@@ -1071,6 +1159,7 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		Image:          hostenv.AmbassadorImage,
 		LogConfig:      logConfig,
 		RestartPolicy:  ServiceRestartPolicy(input.Datastore, input.ServiceName),
+		Settings:       state.Settings,
 	}))
 	if err != nil {
 		return fmt.Errorf("failed to run container %s: %w", ambassadorName, err)

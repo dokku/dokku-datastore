@@ -49,7 +49,10 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 	portFile := serviceFiles.Port
 
 	if len(input.Ports) == 0 {
-		ports, err := service.GenerateRandomPorts(len(input.Datastore.Properties().Ports))
+		// picked where they will be published, and written without the address,
+		// so a later expose-address moves them rather than leaving them behind
+		address := service.ServiceExposeAddress(input.Datastore, input.ServiceName)
+		ports, err := service.GenerateRandomPorts(address, len(input.Datastore.Properties().Ports))
 		if err != nil {
 			return fmt.Errorf("failed to generate random ports: %w", err)
 		}

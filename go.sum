@@ -36,8 +36,8 @@ github.com/docker/go-connections v0.8.1 h1:JibmG5hULs5qXSr/cp/w3Pw5fZuStt4MOHMUE
 github.com/docker/go-connections v0.8.1/go.mod h1:no1qkHdjq7kLMGUXYAduOhYPSJxxvgWBh7ogVvptn3Q=
 github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4=
 github.com/docker/go-units v0.5.0/go.mod h1:fgPhTUdO+D/Jk86RDLlptpiXQzgHJF7gydDDbaIK4Dk=
-github.com/dokku/docker-port-forward v0.0.0-20260923171123-1ce6fc73e1ba h1:xenHvJnW+7YFY2VX4dJSVCXy9jXMEm+N8xVM253H47M=
-github.com/dokku/docker-port-forward v0.0.0-20260923171123-1ce6fc73e1ba/go.mod h1:RFL0Qy08FjSqhCJECTTLhUIPDjBnQCHCWX9+NNegNIg=
+github.com/dokku/docker-port-forward v0.0.0-20260927082313-8cbfc680c944 h1:3CQ4ktARNTVKDuzT19ZWmAD2VQ1W1GVJ7oMfyrUg/FI=
+github.com/dokku/docker-port-forward v0.0.0-20260927082313-8cbfc680c944/go.mod h1:RFL0Qy08FjSqhCJECTTLhUIPDjBnQCHCWX9+NNegNIg=
 github.com/dokku/dokku/plugins/common v0.0.0-20260914154134-61ff696e0012 h1:4nEHqS29/Fqr52zgfeYs06fljCAXaC6REm7/i75FjzI=
 github.com/dokku/dokku/plugins/common v0.0.0-20260914154134-61ff696e0012/go.mod h1:by3oIePRybQlwfaNIln3ig7WGDOQjK0UDg5mfdWc3tw=
 github.com/fatih/color v1.7.0/go.mod h1:Zm6kSWBoL9eyXnKyktHP6abPY2pDugNf5KwzbycvMj4=

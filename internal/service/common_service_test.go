@@ -174,6 +174,7 @@ func TestExposedPorts(t *testing.T) {
 		name      string
 		datastore *Datastore
 		portFile  *string
+		address   string
 		expected  string
 	}{
 		{
@@ -206,14 +207,42 @@ func TestExposedPorts(t *testing.T) {
 			portFile:  ptr("33201 33202\n"),
 			expected:  "6379->33201",
 		},
+		{
+			name:      "a port on the expose-address",
+			datastore: Datastores["redis"],
+			portFile:  ptr("33201\n"),
+			address:   "10.0.0.5",
+			expected:  "6379->10.0.0.5:33201",
+		},
+		{
+			name:      "a port on an IPv6 expose-address",
+			datastore: Datastores["redis"],
+			portFile:  ptr("33201\n"),
+			address:   "::1",
+			expected:  "6379->[::1]:33201",
+		},
+		{
+			name:      "a port with an address of its own keeps it",
+			datastore: multiPortDatastore(t),
+			portFile:  ptr("127.0.0.1:33201 33202\n"),
+			address:   "10.0.0.5",
+			expected:  "6379->127.0.0.1:33201 6380->10.0.0.5:33202",
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			serviceRoot := withServiceRoot(t, test.datastore, "lollipop")
+			t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
 			if test.portFile != nil {
 				if err := os.WriteFile(filepath.Join(serviceRoot, "PORT"), []byte(*test.portFile), 0644); err != nil {
 					t.Fatalf("failed to write port file: %v", err)
+				}
+			}
+
+			if test.address != "" {
+				if err := common.PropertyWrite(test.datastore.Properties().CommandPrefix, "lollipop", ExposeAddressProperty, test.address); err != nil {
+					t.Fatalf("failed to write the property: %v", err)
 				}
 			}
 
