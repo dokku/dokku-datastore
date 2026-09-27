@@ -262,7 +262,7 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 	if linked && len(linkedKeys) > 0 {
 		// a link made before the keys were recorded is recorded now, so that
 		// the keys are still found once the url on the app has changed
-		if err := service.SetLinkConfigKeys(input.Datastore, input.ServiceName, input.AppName, linkedKeys); err != nil {
+		if err := recordLinkConfigKeys(input.Logger, input.Datastore, input.ServiceName, input.AppName, linkedKeys); err != nil {
 			return err
 		}
 
@@ -281,7 +281,7 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 			return err
 		}
 
-		if err := service.SetLinkConfigKeys(input.Datastore, input.ServiceName, input.AppName, linkedKeys); err != nil {
+		if err := recordLinkConfigKeys(input.Logger, input.Datastore, input.ServiceName, input.AppName, linkedKeys); err != nil {
 			return err
 		}
 
@@ -307,7 +307,7 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 
 	// recorded before the config is set, so a link whose config:set fails
 	// part way is still unlinked by the key it was meant to have
-	if err := service.SetLinkConfigKeys(input.Datastore, input.ServiceName, input.AppName, []string{key}); err != nil {
+	if err := recordLinkConfigKeys(input.Logger, input.Datastore, input.ServiceName, input.AppName, []string{key}); err != nil {
 		return err
 	}
 
@@ -375,7 +375,7 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 	// triggers are skipped too: they are handed an app name, and firing them
 	// for an app that is gone asks other plugins to act on nothing.
 	if !service.AppExists(input.AppName) {
-		if err := service.RemoveLinkConfigKeys(input.Datastore, input.ServiceName, input.AppName); err != nil {
+		if err := forgetLinkConfigKeys(input.Logger, input.Datastore, input.ServiceName, input.AppName); err != nil {
 			return err
 		}
 
@@ -416,7 +416,7 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 		return err
 	}
 
-	if err := service.RemoveLinkConfigKeys(input.Datastore, input.ServiceName, input.AppName); err != nil {
+	if err := forgetLinkConfigKeys(input.Logger, input.Datastore, input.ServiceName, input.AppName); err != nil {
 		return err
 	}
 
@@ -439,6 +439,34 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 	}
 
 	return callServiceAction(ctx, input.Datastore, "post-unlink-complete", input.ServiceName, input.AppName)
+}
+
+// recordLinkConfigKeys records the config keys holding the service url on an
+// app, warning when a corrupt record had to be replaced to do so
+func recordLinkConfigKeys(logger Ui, s *service.Datastore, serviceName string, appName string, keys []string) error {
+	return warnOnCorruptLinkConfigKeys(logger, serviceName, service.SetLinkConfigKeys(s, serviceName, appName, keys))
+}
+
+// forgetLinkConfigKeys forgets the config keys recorded for an app, warning
+// when a corrupt record had to be replaced to do so
+func forgetLinkConfigKeys(logger Ui, s *service.Datastore, serviceName string, appName string) error {
+	return warnOnCorruptLinkConfigKeys(logger, serviceName, service.RemoveLinkConfigKeys(s, serviceName, appName))
+}
+
+// warnOnCorruptLinkConfigKeys turns the report of a corrupt record that was
+// replaced into a warning, since the write itself succeeded. The other apps
+// linked to the service lose their record, and are found by their exact url
+// as links made before the keys were recorded are.
+func warnOnCorruptLinkConfigKeys(logger Ui, serviceName string, err error) error {
+	if !errors.Is(err, service.ErrCorruptLinkConfigKeys) {
+		return err
+	}
+
+	logger.Warn(WarnInput{
+		Warning: fmt.Sprintf("The %s property of service %s could not be parsed, and was replaced. The config keys it recorded for other linked apps were lost, so those apps are found by their exact url until they are linked or promoted again", service.LinkConfigKeysProperty, serviceName),
+	})
+
+	return nil
 }
 
 // addLink records an app as linked to a service and gives it the container link,

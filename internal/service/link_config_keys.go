@@ -1,6 +1,8 @@
 package service
 
 import (
+	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 
@@ -40,8 +42,50 @@ func LinkConfigKeys(s *Datastore, serviceName string, appName string) []string {
 	return keys
 }
 
+// ErrCorruptLinkConfigKeys reports that the recorded config keys of a service
+// could not be parsed. A write replaces them rather than failing, since a record
+// that cannot be read would otherwise stop every app on the service from being
+// linked or unlinked. It is returned alongside a successful write, so the caller
+// can warn that the keys recorded for the other apps were lost.
+var ErrCorruptLinkConfigKeys = errors.New("the recorded config keys could not be parsed, and were replaced")
+
+// linkConfigKeysEntries reads every app's recorded config keys for a service.
+// A record that is not valid json is reported as corrupt alongside an empty
+// set of entries to write over it, while one that cannot be read at all, such
+// as for its permissions, is an error, as writing over it would fail too.
+func linkConfigKeysEntries(s *Datastore, serviceName string) (map[string]string, bool, error) {
+	entries, err := common.PropertyMapGet(s.Properties().CommandPrefix, serviceName, LinkConfigKeysProperty)
+	if err == nil {
+		return entries, false, nil
+	}
+
+	var syntaxErr *json.SyntaxError
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &syntaxErr) || errors.As(err, &typeErr) {
+		return map[string]string{}, true, nil
+	}
+
+	return nil, false, err
+}
+
+// writeLinkConfigKeys writes every app's recorded config keys for a service,
+// reporting whether a corrupt record was replaced
+func writeLinkConfigKeys(s *Datastore, serviceName string, entries map[string]string, corrupt bool) error {
+	if err := common.PropertyMapWrite(s.Properties().CommandPrefix, serviceName, LinkConfigKeysProperty, entries); err != nil {
+		return err
+	}
+
+	if corrupt {
+		return ErrCorruptLinkConfigKeys
+	}
+
+	return nil
+}
+
 // SetLinkConfigKeys records the config keys holding the service url on an app,
 // replacing whatever was recorded before. Recording no keys removes the entry.
+// A corrupt record is replaced, and ErrCorruptLinkConfigKeys returned once the
+// write has succeeded.
 func SetLinkConfigKeys(s *Datastore, serviceName string, appName string, keys []string) error {
 	keys = slices.DeleteFunc(slices.Clone(keys), func(key string) bool {
 		return strings.TrimSpace(key) == ""
@@ -53,10 +97,34 @@ func SetLinkConfigKeys(s *Datastore, serviceName string, appName string, keys []
 	slices.Sort(keys)
 	keys = slices.Compact(keys)
 
-	return common.PropertyMapSet(s.Properties().CommandPrefix, serviceName, LinkConfigKeysProperty, appName, strings.Join(keys, ","))
+	entries, corrupt, err := linkConfigKeysEntries(s, serviceName)
+	if err != nil {
+		return err
+	}
+
+	entries[appName] = strings.Join(keys, ",")
+
+	return writeLinkConfigKeys(s, serviceName, entries, corrupt)
 }
 
-// RemoveLinkConfigKeys forgets the config keys recorded for an app
+// RemoveLinkConfigKeys forgets the config keys recorded for an app. A corrupt
+// record is replaced, and ErrCorruptLinkConfigKeys returned once the write has
+// succeeded.
 func RemoveLinkConfigKeys(s *Datastore, serviceName string, appName string) error {
-	return common.PropertyMapDelete(s.Properties().CommandPrefix, serviceName, LinkConfigKeysProperty, appName)
+	if !common.PropertyExists(s.Properties().CommandPrefix, serviceName, LinkConfigKeysProperty) {
+		return nil
+	}
+
+	entries, corrupt, err := linkConfigKeysEntries(s, serviceName)
+	if err != nil {
+		return err
+	}
+
+	if _, ok := entries[appName]; !ok && !corrupt {
+		return nil
+	}
+
+	delete(entries, appName)
+
+	return writeLinkConfigKeys(s, serviceName, entries, corrupt)
 }

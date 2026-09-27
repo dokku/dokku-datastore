@@ -49,7 +49,7 @@ func CopyAppLinks(ctx context.Context, input TriggerInput, oldAppName string, ne
 		// has none to copy, and recording none would forget any the new name
 		// already had.
 		if keys := service.LinkConfigKeys(input.Datastore, serviceName, oldAppName); len(keys) > 0 {
-			if err := service.SetLinkConfigKeys(input.Datastore, serviceName, newAppName, keys); err != nil {
+			if err := recordLinkConfigKeys(input.Logger, input.Datastore, serviceName, newAppName, keys); err != nil {
 				return err
 			}
 		}
@@ -72,7 +72,7 @@ func RemoveAppLinks(ctx context.Context, input TriggerInput, appName string) err
 			return err
 		}
 
-		if err := service.RemoveLinkConfigKeys(input.Datastore, serviceName, appName); err != nil {
+		if err := forgetLinkConfigKeys(input.Logger, input.Datastore, serviceName, appName); err != nil {
 			return err
 		}
 	}

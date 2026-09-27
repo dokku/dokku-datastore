@@ -1,6 +1,9 @@
 package service
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -75,5 +78,74 @@ func TestRemoveLinkConfigKeysWithNothingRecorded(t *testing.T) {
 
 	if err := RemoveLinkConfigKeys(redis, "lollipop", "my-app"); err != nil {
 		t.Errorf("expected no error, got %s", err)
+	}
+}
+
+// corruptLinkConfigKeys leaves a record for a service that is not valid json,
+// as a write cut short or an edit by hand would
+func corruptLinkConfigKeys(t *testing.T, s *Datastore, serviceName string) {
+	t.Helper()
+
+	path := filepath.Join(os.Getenv("DOKKU_LIB_ROOT"), "config", s.Properties().CommandPrefix, serviceName, LinkConfigKeysProperty)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("failed to create the property directory: %s", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"other-app": "REDIS_URL"`), 0600); err != nil {
+		t.Fatalf("failed to write the corrupt record: %s", err)
+	}
+}
+
+// A record that cannot be parsed is read as recording nothing, and replaced by
+// the next write rather than stopping every app on the service from being
+// linked or unlinked. The write reports the replacement, so it can be warned
+// about.
+func TestSetLinkConfigKeysReplacesACorruptRecord(t *testing.T) {
+	redis := redisDatastore(t)
+	withServiceRoot(t, redis, "lollipop")
+	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
+	corruptLinkConfigKeys(t, redis, "lollipop")
+
+	if actual := LinkConfigKeys(redis, "lollipop", "other-app"); actual != nil {
+		t.Errorf("expected a corrupt record to record nothing, got %v", actual)
+	}
+
+	err := SetLinkConfigKeys(redis, "lollipop", "my-app", []string{"MB_DB_CONNECTION_URI"})
+	if !errors.Is(err, ErrCorruptLinkConfigKeys) {
+		t.Fatalf("expected the replacement to be reported, got %v", err)
+	}
+
+	entries, err := common.PropertyMapGet(redis.Properties().CommandPrefix, "lollipop", LinkConfigKeysProperty)
+	if err != nil {
+		t.Fatalf("expected the record to be readable once replaced, got %s", err)
+	}
+	if len(entries) != 1 || entries["my-app"] != "MB_DB_CONNECTION_URI" {
+		t.Errorf("expected only the key just recorded, got %v", entries)
+	}
+
+	// and once replaced, writes go back to reporting nothing
+	if err := SetLinkConfigKeys(redis, "lollipop", "other-app", []string{"REDIS_URL"}); err != nil {
+		t.Errorf("expected no error once replaced, got %s", err)
+	}
+}
+
+func TestRemoveLinkConfigKeysReplacesACorruptRecord(t *testing.T) {
+	redis := redisDatastore(t)
+	withServiceRoot(t, redis, "lollipop")
+	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
+	corruptLinkConfigKeys(t, redis, "lollipop")
+
+	// the app has no entry to remove, but the record is replaced all the same,
+	// so the next write does not trip over it
+	err := RemoveLinkConfigKeys(redis, "lollipop", "my-app")
+	if !errors.Is(err, ErrCorruptLinkConfigKeys) {
+		t.Fatalf("expected the replacement to be reported, got %v", err)
+	}
+
+	entries, err := common.PropertyMapGet(redis.Properties().CommandPrefix, "lollipop", LinkConfigKeysProperty)
+	if err != nil {
+		t.Fatalf("expected the record to be readable once replaced, got %s", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected an empty record, got %v", entries)
 	}
 }

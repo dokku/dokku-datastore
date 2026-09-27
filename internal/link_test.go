@@ -874,3 +874,50 @@ func TestSchemeForApp(t *testing.T) {
 		t.Errorf("expected nothing without an override, got %q", actual)
 	}
 }
+
+// A record that cannot be parsed stops nothing: the link goes through, the
+// record is replaced, and a warning says the keys recorded for the service's
+// other apps were lost.
+func TestLinkServiceReplacesACorruptRecord(t *testing.T) {
+	datastore := linkedServices(t, map[string][]string{"lollipop": {}})
+
+	path := filepath.Join(os.Getenv("DOKKU_LIB_ROOT"), "config", datastore.Properties().CommandPrefix, "lollipop", service.LinkConfigKeysProperty)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("failed to create the property directory: %s", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"other-app": "REDIS_URL"`), 0600); err != nil {
+		t.Fatalf("failed to write the corrupt record: %s", err)
+	}
+
+	serviceURL := datastore.URL("lollipop", "")
+	calls := fakeDokku(t, map[string]string{})
+	ui := cli.NewMockUi()
+
+	if err := LinkService(t.Context(), LinkServiceInput{
+		AppName:     "my-app",
+		Datastore:   datastore,
+		EnvVar:      "MB_DB_CONNECTION_URI",
+		Logger:      Ui{Ui: ui},
+		NoRestart:   true,
+		ServiceName: "lollipop",
+	}); err != nil {
+		t.Fatalf("expected no error, got %s", err)
+	}
+
+	option := fmt.Sprintf("--link %s:%s", service.ContainerName(datastore, "lollipop"), service.DNSHostname(datastore, "lollipop"))
+	expectedCalls := []string{
+		"docker-options:add my-app build,deploy,run " + option,
+		"config:set --no-restart my-app MB_DB_CONNECTION_URI=" + serviceURL,
+	}
+	if actual := recordedCalls(t, calls); !slices.Equal(actual, expectedCalls) {
+		t.Errorf("expected the calls %q, got %q", expectedCalls, actual)
+	}
+
+	if actual := service.LinkConfigKeys(datastore, "lollipop", "my-app"); !slices.Equal(actual, []string{"MB_DB_CONNECTION_URI"}) {
+		t.Errorf("expected the key to be recorded, got %v", actual)
+	}
+
+	if !strings.Contains(ui.ErrorWriter.String(), "could not be parsed, and was replaced") {
+		t.Errorf("expected a warning about the replaced record, got %q", ui.ErrorWriter.String())
+	}
+}

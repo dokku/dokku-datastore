@@ -201,6 +201,7 @@ func (c *PromoteCommand) Run(args []string) int {
 	if err := internal.PromoteService(ctx, internal.PromoteServiceInput{
 		AppName:     appName,
 		Datastore:   datastore,
+		Logger:      logger,
 		ServiceName: serviceName,
 	}); err != nil {
 		logger.Error(internal.ErrorInput{

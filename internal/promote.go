@@ -18,6 +18,9 @@ type PromoteServiceInput struct {
 	// Datastore is the datastore the service belongs to
 	Datastore *service.Datastore
 
+	// Logger reports progress
+	Logger Ui
+
 	// ServiceName is the name of the service to promote
 	ServiceName string
 }
@@ -84,7 +87,7 @@ func PromoteService(ctx context.Context, input PromoteServiceInput) error {
 	}
 
 	defaultKey := fmt.Sprintf("%s_URL", input.Datastore.Properties().DefaultAlias)
-	if err := service.SetLinkConfigKeys(input.Datastore, input.ServiceName, input.AppName, append(linkedKeys, defaultKey)); err != nil {
+	if err := recordLinkConfigKeys(input.Logger, input.Datastore, input.ServiceName, input.AppName, append(linkedKeys, defaultKey)); err != nil {
 		return err
 	}
 
@@ -121,7 +124,7 @@ func releaseDefaultKey(ctx context.Context, input PromoteServiceInput, environme
 			}
 		}
 
-		if err := service.SetLinkConfigKeys(input.Datastore, serviceName, input.AppName, keys); err != nil {
+		if err := recordLinkConfigKeys(input.Logger, input.Datastore, serviceName, input.AppName, keys); err != nil {
 			return err
 		}
 	}
