@@ -35,6 +35,22 @@ clone_or_skip() {
   assert_success
 }
 
+@test "($DEFINITION) a clone onto a reserved service name is refused" {
+  local reserved
+  reserved="$(reserved_name)"
+  [[ -n "$reserved" ]] || skip "$DEFINITION reserves no names"
+
+  # refused before the clone is announced, so nothing reads as though it started
+  run --separate-stderr "$BIN" clone "$PLUGIN" "$SERVICE" "$reserved"
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement clone"
+  fi
+  assert_failure
+  assert_stderr --partial "service name $reserved is reserved"
+  refute_output --partial "Cloning"
+  [[ ! -d "$(service_root "$reserved")" ]] || fail "a refused clone left $(service_root "$reserved") behind"
+}
+
 @test "($DEFINITION) a volume given at create is mounted from the start" {
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --mounts
   assert_success

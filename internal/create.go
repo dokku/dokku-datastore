@@ -129,6 +129,12 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	// each, and the requirements checked below are the definition's own
 	input.Datastore = input.Datastore.ForImageVersion(input.ImageVersion)
 
+	// the name decides the database, so one the datastore keeps for itself is
+	// refused before anything is made for it
+	if err := service.CheckReservedServiceName(input.Datastore.Definition, input.ServiceName); err != nil {
+		return err
+	}
+
 	// before anything is made, so that a host which cannot run this datastore
 	// says so rather than leaving a half made service behind
 	if err := CheckRequirements(input.Datastore.Definition.Dokku.Requirements); err != nil {

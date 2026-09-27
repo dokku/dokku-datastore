@@ -287,6 +287,7 @@ func readmeUsage(input ReadmeInput) ([]string, error) {
 	sections = append(sections, readmeExposeLimits(input.Data)...)
 	sections = append(sections, readmeExtraArgs(input.Data)...)
 	sections = append(sections, readmeWaitTimeout(input.Data)...)
+	sections = append(sections, readmeReservedNames(input.Data)...)
 	sections = append(sections, readmeDockerPull(input.Data)...)
 	return sections, nil
 }
@@ -441,6 +442,27 @@ func readmeWaitTimeout(data DocumentationData) []string {
 		fmt.Sprintf("To wait longer for every %s service on the host, set the `%s_WAIT_TIMEOUT` environment variable to a number of seconds. "+
 			"To wait longer for a single service, set its `wait-timeout` property with `dokku %s:set` or pass `--wait-timeout` to `create`, `clone` or `upgrade`. "+
 			"The service's own setting is used first, then the environment variable, then the datastore's default.", data.CommandPrefix, data.PluginVariable, data.CommandPrefix),
+	}
+}
+
+// readmeReservedNames lists the service names create and clone refuse, for a
+// datastore that keeps databases of its own
+func readmeReservedNames(data DocumentationData) []string {
+	if len(data.ReservedNames) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(data.ReservedNames))
+	for _, name := range data.ReservedNames {
+		names = append(names, "`"+name+"`")
+	}
+	sort.Strings(names)
+
+	return []string{
+		"### Reserved service names",
+		fmt.Sprintf("A service's database is named after the service, with hyphens replaced by underscores. "+
+			"So that an app is never handed a database %s keeps for itself, `dokku %s:create` and `dokku %s:clone` refuse a name that is, or whose database would be, one of %s, in any case. "+
+			"A service that already has such a name is not affected.", data.Title, data.CommandPrefix, data.CommandPrefix, strings.Join(names, ", ")),
 	}
 }
 

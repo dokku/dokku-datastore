@@ -129,6 +129,12 @@ EOS
   export PATH="$BATS_FILE_TMPDIR/bin:$PATH"
 }
 
+# the first name this definition reserves for a database of its own, or nothing
+# when it reserves none. Definitions write the list on one line for this
+reserved_name() {
+  awk -F'[][]' '/^  reserved_names:/ { split($2, names, ","); gsub(/ /, "", names[1]); print names[1]; exit }' "$DEFINITION_ROOT/docker-compose.yml"
+}
+
 # creates a service on the version this definition pins
 create_service() {
   "$BIN" create "$PLUGIN" "$1" --image-version "$IMAGE_VERSION"

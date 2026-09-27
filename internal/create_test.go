@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"errors"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -183,5 +184,30 @@ func TestCreateServiceRefusesAPasswordWithNowhereToGo(t *testing.T) {
 
 	if root := service.Folders(datastore, "lollipop").Root; common.DirectoryExists(root) {
 		t.Errorf("a refused create left %s behind", root)
+	}
+}
+
+// A name the datastore keeps a database under is refused before anything is
+// made, since the service's database is named after it and the app would be
+// handed the datastore's own. Hyphens become underscores in a database name, so
+// the hyphenated spelling is refused as well.
+func TestCreateServiceRefusesAReservedName(t *testing.T) {
+	datastore := service.Datastores["mysql"]
+	withDataRoot(t)
+
+	for _, name := range []string{"mysql", "Information-Schema"} {
+		t.Run(name, func(t *testing.T) {
+			err := CreateService(t.Context(), CreateServiceInput{
+				Datastore:   datastore,
+				ServiceName: name,
+			})
+			if !errors.Is(err, service.ErrReservedServiceName) {
+				t.Fatalf("expected %s to be refused as reserved, got %v", name, err)
+			}
+
+			if root := service.Folders(datastore, name).Root; common.DirectoryExists(root) {
+				t.Errorf("a refused create left %s behind", root)
+			}
+		})
 	}
 }

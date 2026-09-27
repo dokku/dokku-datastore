@@ -244,6 +244,13 @@ type Dokku struct {
 	// run it says so rather than leaving a container to fail obscurely.
 	Requirements []Requirement `yaml:"requirements"`
 
+	// ReservedNames are the databases the datastore keeps for itself. A service's
+	// database is named after the service, so a service named after one of these
+	// would hand the app the datastore's own database rather than one of its own.
+	// Only a new service is refused one: a service that already has such a name
+	// keeps working as it always has.
+	ReservedNames []string `yaml:"reserved_names"`
+
 	// Hooks are the steps a datastore needs run around a service's lifecycle,
 	// which are commands in every respect except that they are not subcommands:
 	// a user does not invoke them, the tool does.

@@ -209,6 +209,11 @@ func TestParseRejects(t *testing.T) {
 			expected: "neither tcp nor udp",
 		},
 		{
+			name:     "an empty reserved name",
+			compose:  validCompose + `  reserved_names: [thing, ""]` + "\n",
+			expected: "x-dokku.reserved_names has an empty entry",
+		},
+		{
 			name: "readiness on a port that speaks udp",
 			// the shape a definition falls into by declaring a udp port primary
 			// and naming nothing to wait on
@@ -228,6 +233,18 @@ func TestParseRejects(t *testing.T) {
 				t.Errorf("expected an error mentioning %q, got: %s", test.expected, err)
 			}
 		})
+	}
+}
+
+func TestParseReadsReservedNames(t *testing.T) {
+	parsed, err := parseCompose(t, validCompose+"  reserved_names: [thing, thing_schema]\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	expected := []string{"thing", "thing_schema"}
+	if strings.Join(parsed.Dokku.ReservedNames, ",") != strings.Join(expected, ",") {
+		t.Errorf("expected %v, got %v", expected, parsed.Dokku.ReservedNames)
 	}
 }
 

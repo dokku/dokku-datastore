@@ -258,3 +258,30 @@ func TestReadmeExtraArgs(t *testing.T) {
 		})
 	}
 }
+
+// The section is only written for a datastore that reserves names, and lists
+// every one of them.
+func TestReadmeReservedNames(t *testing.T) {
+	t.Setenv("DOKKU_NO_COLOR", "1")
+	clearImageEnv(t)
+
+	for name, expected := range map[string]bool{"mysql": true, "redis": false} {
+		t.Run(name, func(t *testing.T) {
+			readme, err := Readme(ReadmeInput{
+				Commands: helpTestCommands(),
+				Data:     NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores[name]}),
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			if actual := strings.Contains(readme, "### Reserved service names"); actual != expected {
+				t.Errorf("expected the reserved names section to be present to be %t, got %t", expected, actual)
+			}
+
+			if expected && !strings.Contains(readme, "`information_schema`, `mysql`, `performance_schema`, `sys`") {
+				t.Error("expected the section to list every reserved name")
+			}
+		})
+	}
+}

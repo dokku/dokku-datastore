@@ -1479,3 +1479,49 @@ func TestExtraArgsAreDeclaredWhereTheToolReadsThem(t *testing.T) {
 		})
 	}
 }
+
+// The case the issue was opened for: a service named mysql was handed the
+// server's own mysql database. Postgres is the other side of the line: its
+// postgres database is only the default one, and a service named after it works.
+func TestReservedNamesAreTheDatastoresOwnDatabases(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load: %s", err)
+	}
+
+	tests := []struct {
+		definition string
+		name       string
+		reserved   bool
+	}{
+		{definition: "mysql", name: "mysql", reserved: true},
+		{definition: "mariadb", name: "mysql", reserved: true},
+		{definition: "postgres-17", name: "template1", reserved: true},
+		{definition: "postgres-18", name: "template1", reserved: true},
+		{definition: "postgres-17", name: "postgres", reserved: false},
+		{definition: "postgres-18", name: "postgres", reserved: false},
+		{definition: "mongo", name: "admin", reserved: true},
+		{definition: "clickhouse", name: "default", reserved: false},
+		{definition: "redis", name: "redis", reserved: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.definition+"/"+test.name, func(t *testing.T) {
+			parsed, ok := loaded.Definition(test.definition)
+			if !ok {
+				t.Fatalf("expected an embedded %s definition", test.definition)
+			}
+
+			reserved := false
+			for _, name := range parsed.Dokku.ReservedNames {
+				if name == test.name {
+					reserved = true
+				}
+			}
+
+			if reserved != test.reserved {
+				t.Errorf("expected %s reserved to be %t, got %t (%v)", test.name, test.reserved, reserved, parsed.Dokku.ReservedNames)
+			}
+		})
+	}
+}

@@ -48,6 +48,20 @@ teardown_file() {
   [[ ! -d "$(service_root "not.valid")" ]] || fail "a refused create left $(service_root "not.valid") behind"
 }
 
+@test "($DEFINITION) a create naming a reserved service is refused" {
+  local reserved
+  reserved="$(reserved_name)"
+  [[ -n "$reserved" ]] || skip "$DEFINITION reserves no names"
+
+  # the database is named after the service, so the app would be handed one the
+  # datastore keeps for itself. Refused before the pull and before the service
+  # root is made, so this costs the daemon nothing
+  run --separate-stderr "$BIN" create "$PLUGIN" "$reserved" --image-version "$IMAGE_VERSION"
+  assert_failure
+  assert_stderr --partial "service name $reserved is reserved"
+  [[ ! -d "$(service_root "$reserved")" ]] || fail "a refused create left $(service_root "$reserved") behind"
+}
+
 @test "($DEFINITION) a create mounting a host path that does not exist is refused" {
   [[ "$DOKKU_LIB_HOST_ROOT" == "$DOKKU_LIB_ROOT" ]] || skip "dockerd sees another host root, so the host path is not checked"
 
