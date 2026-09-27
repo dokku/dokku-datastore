@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
@@ -35,6 +36,9 @@ type UpgradeServiceInput struct {
 
 	// ShmSize is the shared memory size for the container
 	ShmSize *string
+
+	// Memory is the container memory limit in megabytes, zero for unlimited
+	Memory *int
 
 	// LogDriver is the docker logging driver the service container is run with
 	LogDriver *string
@@ -78,6 +82,7 @@ func (i UpgradeServiceInput) changesSettings() bool {
 		i.PostCreateNetworks != nil ||
 		i.PostStartNetworks != nil ||
 		i.ShmSize != nil ||
+		i.Memory != nil ||
 		i.LogDriver != nil ||
 		i.LogOptions != nil ||
 		i.RestartPolicy != nil ||
@@ -292,6 +297,13 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 func applyUpgradeSettings(input UpgradeServiceInput) error {
 	serviceFiles := service.Files(input.Datastore, input.ServiceName)
 
+	// the memory file holds what create writes to it, zero for unlimited
+	var memory *string
+	if input.Memory != nil {
+		value := strconv.Itoa(*input.Memory)
+		memory = &value
+	}
+
 	// the config options can carry credentials, so they are kept private
 	files := []struct {
 		filename string
@@ -300,6 +312,7 @@ func applyUpgradeSettings(input UpgradeServiceInput) error {
 	}{
 		{filename: serviceFiles.ConfigOptions, value: input.ConfigOptions, mode: service.PrivateFileMode},
 		{filename: serviceFiles.ShmSize, value: input.ShmSize, mode: 0644},
+		{filename: serviceFiles.Memory, value: memory, mode: 0644},
 	}
 	for _, file := range files {
 		if file.value == nil {

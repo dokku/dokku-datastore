@@ -984,7 +984,9 @@ This is the only command that changes the version a service runs. With no versio
 dokku {{.CommandPrefix}}:upgrade lollipop --image-version 1.2.3
 Moving across a major version has to be asked for by name, because it is not a tag change: the data is mounted somewhere different under the new one, and pointing the version back does not undo it.
 A service keeps the mounts it has unless --volume is passed, which replaces them, and each one is checked against the new container before the old one is taken away.
-dokku {{.CommandPrefix}}:upgrade lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro`
+dokku {{.CommandPrefix}}:upgrade lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro
+A service keeps its memory limit unless --memory is passed, and --memory 0 removes it.
+dokku {{.CommandPrefix}}:upgrade lollipop --memory 512`
 }
 
 // Group is the readme usage section the command is documented under
