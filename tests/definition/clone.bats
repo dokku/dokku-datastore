@@ -70,7 +70,9 @@ clone_or_skip() {
 }
 
 @test "($DEFINITION) a flag passed to clone overrides that one setting" {
-  clone_or_skip "$OVERRIDE" --restart no --custom-env "" --volume ""
+  local flags
+  mapfile -t flags < <(password_flags "clonedpassword1234" "clonedrootpassword1234")
+  clone_or_skip "$OVERRIDE" --restart no --custom-env "" --volume "" "${flags[@]}"
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$OVERRIDE" --restart-policy
   assert_success
@@ -102,4 +104,17 @@ clone_or_skip() {
   run --separate-stderr "$BIN" info "$PLUGIN" "$OVERRIDE" --backup-keyserver
   assert_success
   assert_output "keys.example.com"
+
+  # the passwords are the clone's own, given rather than generated
+  if declares_secret SERVICE_PASSWORD; then
+    run cat "$(service_root "$OVERRIDE")/PASSWORD"
+    assert_success
+    assert_output "clonedpassword1234"
+  fi
+
+  if declares_secret SERVICE_ROOT_PASSWORD; then
+    run cat "$(service_root "$OVERRIDE")/ROOTPASSWORD"
+    assert_success
+    assert_output "clonedrootpassword1234"
+  fi
 }

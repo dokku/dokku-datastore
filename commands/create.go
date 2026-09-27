@@ -117,9 +117,9 @@ func (c *CreateCommand) FlagSet() *flag.FlagSet {
 	f.StringVarP(&c.imageVersion, "image-version", "I", "", "the image version to start the service with")
 	f.IntVarP(&c.memory, "memory", "m", 0, "container memory limit in megabytes (default: unlimited)")
 	f.StringVarP(&c.initialNetwork, "initial-network", "N", "", "the initial network to attach the service to")
-	f.StringVarP(&c.password, "password", "p", "", "override the user-level service password")
+	f.StringVarP(&c.password, "password", "p", "", "override the user-level service password, for datastores that have one")
 	f.StringSliceVarP(&c.postCreateNetwork, "post-create-network", "P", []string{}, "a comma-separated list of networks to attach the service container to after service creation")
-	f.StringVarP(&c.rootPassword, "root-password", "r", "", "override the root-level service password")
+	f.StringVarP(&c.rootPassword, "root-password", "r", "", "override the root-level service password, for datastores that have one")
 	f.StringSliceVarP(&c.postStartNetwork, "post-start-network", "S", []string{}, "a comma-separated list of networks to attach the service container to after service start")
 	f.StringVarP(&c.shmSize, "shm-size", "s", "", "override shared memory size for the service docker container")
 	f.StringVar(&c.logDriver, "log-driver", "", "the docker logging driver to run the service container with (default: the daemon's own)")
@@ -261,6 +261,7 @@ func (c *CreateCommand) Run(args []string) int {
 		Password:           c.password,
 		PostCreateNetworks: c.postCreateNetwork,
 		PostStartNetworks:  c.postStartNetwork,
+		RootPassword:       c.rootPassword,
 		ServiceName:        serviceName,
 		ShmSize:            c.shmSize,
 		Logger:             logger,

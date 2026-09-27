@@ -76,7 +76,7 @@ type CreateServiceInput struct {
 	// Memory is the memory limit to use for the service
 	Memory int
 
-	// Password is the password to use for the service
+	// Password overrides the generated service password
 	Password string
 
 	// PostCreateNetworks is the networks to attach the service container to after service creation
@@ -84,6 +84,10 @@ type CreateServiceInput struct {
 
 	// PostStartNetworks is the networks to attach the service container to after service start
 	PostStartNetworks []string
+
+	// RootPassword overrides the generated root password, for a datastore that
+	// has one
+	RootPassword string
 
 	// ServiceName is the name of the service to create
 	ServiceName string
@@ -93,6 +97,21 @@ type CreateServiceInput struct {
 
 	// Logger reports what is being waited on once the container exists
 	Logger Ui
+}
+
+// secretOverrides are the passwords the caller gave, keyed by the environment
+// variable a definition's secret names. A password left empty is generated.
+func (input CreateServiceInput) secretOverrides() map[string]string {
+	overrides := map[string]string{}
+	if input.Password != "" {
+		overrides[service.PasswordEnv] = input.Password
+	}
+
+	if input.RootPassword != "" {
+		overrides[service.RootPasswordEnv] = input.RootPassword
+	}
+
+	return overrides
 }
 
 // CreateService creates a new service
@@ -126,6 +145,13 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	// against the definition the version settled on, which is the one whose
 	// volumes a mount must not land on
 	if err := service.CheckMounts(input.Datastore.Definition, input.Mounts); err != nil {
+		return err
+	}
+
+	// a password the definition has no secret for would be dropped, and the
+	// service would start on one nobody was told
+	secrets := input.secretOverrides()
+	if err := service.CheckSecretOverrides(input.Datastore.Definition, secrets); err != nil {
 		return err
 	}
 
@@ -205,7 +231,7 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return fmt.Errorf("failed to write database name: %w", err)
 	}
 
-	err = input.Datastore.CreateService(ctx, input.ServiceName)
+	err = input.Datastore.CreateService(ctx, input.ServiceName, secrets)
 	if err != nil {
 		return fmt.Errorf("failed to create service: %w", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/backend"
@@ -39,10 +40,60 @@ type Datastore struct {
 	registry *registry.Registry
 }
 
+// PasswordEnv and RootPasswordEnv are the environment variables a definition's
+// secrets name to be overridden by --password and --root-password. The flags
+// are handed down under these names rather than set in the environment, so a
+// value given to one create never leaks into anything else the process runs.
+const (
+	PasswordEnv     = "SERVICE_PASSWORD"
+	RootPasswordEnv = "SERVICE_ROOT_PASSWORD"
+)
+
+// secretFlags are the flags that set each overridable secret, for the message
+// that refuses one a definition has no secret for.
+var secretFlags = map[string]string{
+	PasswordEnv:     "--password",
+	RootPasswordEnv: "--root-password",
+}
+
+// CheckSecretOverrides reports whether every override names a secret the
+// definition declares. A value with nowhere to go would otherwise be dropped,
+// and the service would start on a generated password its operator never saw.
+func CheckSecretOverrides(d definition.Definition, overrides map[string]string) error {
+	declared := map[string]bool{}
+	for _, secret := range d.Dokku.Secrets {
+		if secret.Env != "" {
+			declared[secret.Env] = true
+		}
+	}
+
+	envs := make([]string, 0, len(overrides))
+	for env := range overrides {
+		envs = append(envs, env)
+	}
+	sort.Strings(envs)
+
+	for _, env := range envs {
+		if overrides[env] == "" || declared[env] {
+			continue
+		}
+
+		flag, ok := secretFlags[env]
+		if !ok {
+			flag = env
+		}
+
+		return fmt.Errorf("the %s datastore has no secret for %s to set", d.Dokku.Plugin, flag)
+	}
+
+	return nil
+}
+
 // CreateService writes the credentials and config files a service needs before
-// its container exists.
-func (s *Datastore) CreateService(ctx context.Context, serviceName string) error {
-	if err := s.writeSecrets(serviceName); err != nil {
+// its container exists. Overrides are secret values keyed by the environment
+// variable a definition's secret names, and are used in place of generating one.
+func (s *Datastore) CreateService(ctx context.Context, serviceName string, overrides map[string]string) error {
+	if err := s.writeSecrets(serviceName, overrides); err != nil {
 		return err
 	}
 
@@ -64,7 +115,9 @@ func (s *Datastore) CreateService(ctx context.Context, serviceName string) error
 // writeSecrets generates and persists the credentials the definition declares.
 // They are generated once, in Go, and read off disk everywhere else: a value
 // four things read must not be produced by a template that runs again each time.
-func (s *Datastore) writeSecrets(serviceName string) error {
+// A value is taken from the overrides first, then from the environment, and is
+// only generated when neither has one.
+func (s *Datastore) writeSecrets(serviceName string, overrides map[string]string) error {
 	serviceFolders := Folders(s, serviceName)
 
 	for name, secret := range s.Definition.Dokku.Secrets {
@@ -75,7 +128,10 @@ func (s *Datastore) writeSecrets(serviceName string) error {
 
 		value := ""
 		if secret.Env != "" {
-			value = os.Getenv(secret.Env)
+			value = overrides[secret.Env]
+			if value == "" {
+				value = os.Getenv(secret.Env)
+			}
 		}
 
 		if value == "" {
