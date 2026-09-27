@@ -403,6 +403,22 @@ printf '%s\n%s' "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" | sha256sum
 printf '%s' "$PASSPHRASE" | sha256sum
 ```
 
+## Backup storage class
+
+Backups were always uploaded with the bucket's default storage class, which on AWS is `STANDARD`. A service may now name the class its backups are uploaded with through the `backup-storage-class` property, so backups that are rarely read can land on a cheaper class.
+
+```shell
+# upload backups to infrequent access storage
+dokku redis:set lollipop backup-storage-class STANDARD_IA
+
+# and back to the bucket's default
+dokku redis:set lollipop backup-storage-class
+```
+
+The accepted values are the ones `aws s3 cp --storage-class` takes in the backup image - `STANDARD`, `REDUCED_REDUNDANCY`, `STANDARD_IA`, `ONEZONE_IA`, `INTELLIGENT_TIERING`, `GLACIER`, `DEEP_ARCHIVE` and `GLACIER_IR` - and anything else is refused before it is written, since the backup image would refuse it only after the service had been exported. An S3 compatible service that does not support a class may reject the upload.
+
+It is read when a backup runs, so it applies to the next backup, scheduled ones included, without a rebuild. `info` reports it under `--backup-storage-class`, empty when nothing was set, and `clone` copies it. A backup stored as `GLACIER` or `DEEP_ARCHIVE` has to be restored in S3 before it can be downloaded and imported.
+
 ## Backups when dokku runs in a container
 
 `backup` exported a service into a temporary directory and mounted it into the container that ships it to s3. The mount is resolved by dockerd, and when dokku is installed in docker that directory is inside the dokku container, where dockerd cannot see it. Docker mounted an empty directory in its place, and an archive holding nothing but an empty `backup` directory was uploaded and reported as a success.
@@ -437,7 +453,7 @@ A datastore with no secret for a flag refuses it before anything is created, rat
 
 A clone was made on the source's image and given its data, but nothing else about the source carried over: every other setting came from the flags passed to `clone`, so a clone made without repeating all of them landed on the defaults rather than on what the source runs with.
 
-A clone now starts from the source's settings - its config options, custom env, memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, mounts, backup keyserver and export and import arguments. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
+A clone now starts from the source's settings - its config options, custom env, memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, mounts, backup keyserver, backup storage class and export and import arguments. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
 
 ```shell
 # the same settings as lollipop

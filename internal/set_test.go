@@ -18,7 +18,7 @@ func TestSetPropertyRejectsUnknownKeys(t *testing.T) {
 		t.Fatal("expected an error for an unknown key, got none")
 	}
 
-	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, log-driver, log-opt, restart-policy, wait-timeout, expose-address, expose-source-range, export-args, import-args"
+	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, log-driver, log-opt, restart-policy, wait-timeout, expose-address, expose-source-range, export-args, import-args"
 	if err.Error() != expected {
 		t.Errorf("expected %q, got %q", expected, err)
 	}
@@ -26,11 +26,12 @@ func TestSetPropertyRejectsUnknownKeys(t *testing.T) {
 
 func TestSettableProperties(t *testing.T) {
 	// the three the bash datastore plugins accept, the keyserver the backup image
-	// is told to fetch a public key from, which has nowhere else to be set, and
+	// is told to fetch a public key from and the storage class it uploads with,
+	// which have nowhere else to be set, and
 	// the two that bound a container's log, the policy docker restarts it by, how
 	// long it is waited on to become ready, where and to whom an exposed service
 	// is published, and the arguments its exports and imports are run with
-	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "log-driver", "log-opt", "restart-policy", "wait-timeout", "expose-address", "expose-source-range", "export-args", "import-args"}
+	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "log-driver", "log-opt", "restart-policy", "wait-timeout", "expose-address", "expose-source-range", "export-args", "import-args"}
 	if strings.Join(SettableProperties, ",") != strings.Join(expected, ",") {
 		t.Errorf("expected %v, got %v", expected, SettableProperties)
 	}
@@ -62,6 +63,25 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 		value    string
 		expected string
 	}{
+		{
+			// the aws cli in the backup image matches the name exactly
+			name:     "a storage class in lowercase",
+			key:      service.BackupStorageClassProperty,
+			value:    "standard_ia",
+			expected: `invalid backup-storage-class value "standard_ia"`,
+		},
+		{
+			name:     "a storage class s3 does not have",
+			key:      service.BackupStorageClassProperty,
+			value:    "NOT_A_CLASS",
+			expected: `invalid backup-storage-class value "NOT_A_CLASS"`,
+		},
+		{
+			name:     "a storage class with a space in it",
+			key:      service.BackupStorageClassProperty,
+			value:    "STANDARD IA",
+			expected: `invalid backup-storage-class value "STANDARD IA"`,
+		},
 		{
 			name:     "a driver that is not a name",
 			key:      service.LogDriverProperty,
@@ -183,7 +203,7 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 // Unsetting is how every other property is cleared, so an empty value has to
 // reach the delete rather than being refused as an unusable one.
 func TestSetPropertyAcceptsAnEmptyValue(t *testing.T) {
-	for _, key := range []string{service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.ExposeAddressProperty, service.ExposeSourceRangeProperty, service.ExportArgsProperty, service.ImportArgsProperty} {
+	for _, key := range []string{service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.ExposeAddressProperty, service.ExposeSourceRangeProperty, service.ExportArgsProperty, service.ImportArgsProperty} {
 		if err := ValidatePropertyValue(key, ""); err != nil {
 			t.Errorf("expected an empty %s to be accepted, got %q", key, err)
 		}

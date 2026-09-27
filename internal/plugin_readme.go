@@ -64,6 +64,7 @@ var readmeSections = []struct {
 			"Datastore backups are supported via AWS S3 and S3 compatible services like [minio](https://github.com/minio/minio).",
 			"You may skip the `backup-auth` step if your dokku install is running within EC2 and has access to the bucket via an IAM profile. In that case, use the `--use-iam` option with the `backup` command.",
 			"If both passphrase and public key forms of encryption are set, the public key encryption will take precedence.",
+			"Backups are uploaded with the bucket's default storage class unless the service sets the `backup-storage-class` property with the `set` command.",
 			"The underlying core backup script is present [here](https://github.com/dokku/docker-s3backup/blob/main/backup.sh).",
 			"Scheduled backups are added to the dokku crontab, and are listed by `dokku cron:list --global`.",
 			"Backups can be performed using the backup commands:",

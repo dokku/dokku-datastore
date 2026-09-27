@@ -46,6 +46,41 @@ skip_unless_log_is_capped() {
   assert_output ""
 }
 
+@test "($DEFINITION) a backup storage class is set, read back and unset" {
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-storage-class STANDARD_IA
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-storage-class
+  assert_success
+  assert_output "STANDARD_IA"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --format json
+  assert_success
+  assert_output --partial '"backup-storage-class":"STANDARD_IA"'
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-storage-class
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-storage-class
+  assert_success
+  assert_output ""
+}
+
+@test "($DEFINITION) a backup storage class the aws cli would refuse is refused first" {
+  local value
+  # the aws cli in the backup image matches the name exactly, and refuses it
+  # only once the service has already been exported
+  for value in standard_ia NOT_A_CLASS "STANDARD IA"; do
+    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" backup-storage-class "$value"
+    assert_failure
+    assert_stderr --partial "backup-storage-class"
+  done
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-storage-class
+  assert_success
+  assert_output ""
+}
+
 @test "($DEFINITION) the container log is bounded" {
   # the bug this closes: a container was made with nothing to say how large its log
   # was allowed to get, and on the default driver it grew until the host ran out of

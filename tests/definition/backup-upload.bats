@@ -111,6 +111,33 @@ setup() {
   fi
 }
 
+# issue 271: backups were always uploaded with the bucket's default storage
+# class, with nothing to say they should land on a cheaper one
+@test "($DEFINITION) backup uploads with the storage class the service sets" {
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-storage-class STANDARD_IA
+  assert_success
+
+  run "$BIN" backup "$PLUGIN" "$SERVICE" "$S3_BUCKET"
+  local backup_status="$status" backup_output="$output"
+
+  # cleared before anything is asserted, so the other tests upload as before
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-storage-class
+  assert_success
+
+  if [[ "$backup_status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup"
+  fi
+  [[ "$backup_status" -eq 0 ]] || fail "the backup failed: $backup_output"
+
+  local key
+  key="$(aws_cli s3 ls "s3://$S3_BUCKET/" | awk '{ print $4 }')"
+  [[ -n "$key" ]] || fail "no backup was uploaded"
+
+  run aws_cli s3api head-object --bucket "$S3_BUCKET" --key "$key" --query StorageClass --output text
+  assert_success
+  assert_output "STANDARD_IA"
+}
+
 # issue 18: with dokku installed in docker, the dump was written to a directory
 # dockerd could not see, and an empty backup was shipped as a success. The
 # binary is run in a container of its own here, with a /tmp of its own, talking

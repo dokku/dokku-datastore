@@ -378,6 +378,38 @@ func TestBackupArgsCarriesTheKeyserverOnlyWhenSet(t *testing.T) {
 	}
 }
 
+// The storage class reaches the backup image the same way, and only when a
+// service has one: the upload otherwise lands on the bucket's default, and an
+// empty value would be handed to the aws cli as a storage class of its own.
+func TestBackupArgsCarriesTheStorageClassOnlyWhenSet(t *testing.T) {
+	base := BackupArgsInput{
+		AccessKeyID:     "key",
+		SecretAccessKey: "secret",
+		BucketName:      "bucket",
+		BackupName:      "redis-lollipop",
+		Image:           "dokku/s3backup:0.19.1",
+	}
+
+	withStorageClass := base
+	withStorageClass.StorageClass = "STANDARD_IA"
+
+	args, env := BackupArgs(withStorageClass)
+	if joined := strings.Join(args, " "); !strings.Contains(joined, "-e S3_STORAGE_CLASS") {
+		t.Errorf("expected the storage class to be passed, got %s", joined)
+	}
+	if env["S3_STORAGE_CLASS"] != "STANDARD_IA" {
+		t.Errorf("expected the storage class in the environment, got %q", env["S3_STORAGE_CLASS"])
+	}
+
+	args, env = BackupArgs(base)
+	if joined := strings.Join(args, " "); strings.Contains(joined, "S3_STORAGE_CLASS") {
+		t.Errorf("expected no storage class when none is set, got %s", joined)
+	}
+	if _, ok := env["S3_STORAGE_CLASS"]; ok {
+		t.Errorf("expected no storage class in the environment when none is set")
+	}
+}
+
 // The settings are read from files named after the variables they become, and
 // the image is always last because everything after it would be its command.
 func TestBackupArgsPassesTheSettingsItIsGiven(t *testing.T) {
@@ -457,6 +489,7 @@ func TestBackupArgsKeepsValuesOutOfTheArgv(t *testing.T) {
 		BackupName:      "redis-lollipop",
 		Image:           "dokku/s3backup:0.19.1",
 		Keyserver:       "http://10.0.0.2:11371",
+		StorageClass:    "GLACIER_IR",
 		Settings: map[string]string{
 			"ENCRYPTION_KEY": "hunter2",
 		},
@@ -470,7 +503,7 @@ func TestBackupArgsKeepsValuesOutOfTheArgv(t *testing.T) {
 		}
 	}
 
-	if len(env) != 7 {
+	if len(env) != 8 {
 		t.Errorf("expected every variable to be in the environment, got %v", env)
 	}
 }
