@@ -355,6 +355,9 @@ by dokku's own default where it says nothing, which a service may override for i
 dokku {{.CommandPrefix}}:create lollipop --log-opt max-size=20m,max-file=3
 the container is restarted by docker whenever it stops, which a service may change for itself.
 dokku {{.CommandPrefix}}:create lollipop --restart unless-stopped
+the service is waited on until it answers, for as long as the datastore's own default,
+which a slow host may raise for every service with {{.PluginVariable}}_WAIT_TIMEOUT or a service may raise for itself.
+dokku {{.CommandPrefix}}:create lollipop --wait-timeout 120
 the config options are handed to the process the container runs, not to docker, so
 a host path or docker volume is mounted with --volume, which may be repeated.
 dokku {{.CommandPrefix}}:create lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro
@@ -851,6 +854,10 @@ restart the container unless it was stopped on purpose, including across a docke
 dokku {{.CommandPrefix}}:set lollipop restart-policy unless-stopped
 go back to always restarting the container
 dokku {{.CommandPrefix}}:set lollipop restart-policy
+wait up to two minutes for the service to answer, used the next time it is started
+dokku {{.CommandPrefix}}:set lollipop wait-timeout 120
+go back to the wait timeout the host or the datastore sets
+dokku {{.CommandPrefix}}:set lollipop wait-timeout
 > NOTE: a log setting or a restart policy reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.`
 }
 

@@ -129,6 +129,7 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		service.LogDriverProperty:     "json-file",
 		service.LogOptProperty:        "max-size=20m,max-file=3",
 		service.RestartPolicyProperty: "unless-stopped",
+		service.WaitTimeoutProperty:   "120",
 	} {
 		if err := SetProperty(datastore, "lollipop", key, value); err != nil {
 			t.Fatalf("failed to set the %s property: %s", key, err)
@@ -152,6 +153,7 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		"restart-policy":  "unless-stopped",
 		"service":         "lollipop",
 		"shm-size":        "128m",
+		"wait-timeout":    "120",
 	} {
 		if info[key] != expected {
 			t.Errorf("expected %s to be %q, got %q", key, expected, info[key])
@@ -288,5 +290,18 @@ func TestInfoReportsAnUnsetRestartPolicyAsEmpty(t *testing.T) {
 	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
 	if policy := info[service.RestartPolicyProperty]; policy != "" {
 		t.Errorf("expected an unset restart policy to be reported empty, got %q", policy)
+	}
+}
+
+// The same for the wait timeout: a service that names none reports none, even
+// when the host or the definition would wait for longer than the default.
+func TestInfoReportsAnUnsetWaitTimeoutAsEmpty(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withInfoService(t, datastore, "lollipop")
+	t.Setenv(datastore.Properties().WaitTimeoutVariable, "90")
+
+	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if timeout := info[service.WaitTimeoutProperty]; timeout != "" {
+		t.Errorf("expected an unset wait timeout to be reported empty, got %q", timeout)
 	}
 }

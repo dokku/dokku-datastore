@@ -94,6 +94,8 @@ func TestReadme(t *testing.T) {
 		{name: "prose from the documentation", expected: "Backup the `lollipop` service to the `my-s3-bucket` bucket on `AWS`:"},
 		{name: "a command from the documentation", expected: "```shell\ndokku redis:backup lollipop my-s3-bucket --use-iam\n```"},
 		{name: "the docker pull section", expected: "`REDIS_DISABLE_PULL` environment variable"},
+		{name: "the wait timeout section", expected: "`REDIS_WAIT_TIMEOUT` environment variable"},
+		{name: "the wait timeout property", expected: "`wait-timeout` property with `dokku redis:set`"},
 	}
 
 	for _, test := range tests {

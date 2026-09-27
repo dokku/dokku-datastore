@@ -55,6 +55,16 @@ func WaitArgs(input WaitArgsInput) []string {
 	return args
 }
 
+// WaitHeader is what is said while a service is waited on. The timeout is named
+// when one was resolved, so an operator who raised it can see that it took.
+func WaitHeader(serviceName string, timeout int) string {
+	if timeout > 0 {
+		return fmt.Sprintf("Waiting for %s container to be ready (timeout: %ds)", serviceName, timeout)
+	}
+
+	return fmt.Sprintf("Waiting for %s container to be ready", serviceName)
+}
+
 // RunningContainerTimeout bounds the wait for a container to report running.
 // It covers the gap between starting one and docker agreeing that it is up,
 // which is a question about docker rather than about the datastore inside, so
@@ -125,7 +135,7 @@ func WaitForService(ctx context.Context, input WaitForServiceInput) error {
 	}
 
 	// before the wait rather than after it, so a host that cannot get the probe
-	// says so at once instead of thirty seconds later
+	// says so at once instead of a whole timeout later
 	if err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
 		Action:      "readiness check",
 		Datastore:   input.Datastore,
@@ -143,17 +153,22 @@ func WaitForService(ctx context.Context, input WaitForServiceInput) error {
 		return err
 	}
 
+	timeout, err := service.WaitTimeout(input.Datastore, input.ServiceName)
+	if err != nil {
+		return err
+	}
+
 	arguments := WaitArgs(WaitArgsInput{
 		ContainerName:  service.ContainerName(input.Datastore, input.ServiceName),
 		NetworkAlias:   service.DNSHostname(input.Datastore, input.ServiceName),
 		InitialNetwork: service.InitialNetwork(input.Datastore, input.ServiceName),
 		Port:           properties.WaitPort,
-		Timeout:        input.Datastore.Definition.Dokku.WaitTimeout,
+		Timeout:        timeout,
 	})
 
-	input.Logger.Header1(fmt.Sprintf("Waiting for %s container to be ready", input.ServiceName)) //nolint:errcheck
+	input.Logger.Header1(WaitHeader(input.ServiceName, timeout)) //nolint:errcheck
 
-	_, err := execx.Run(ctx, common.ExecCommandInput{
+	_, err = execx.Run(ctx, common.ExecCommandInput{
 		Command: common.DockerBin(),
 		Args:    arguments,
 	})

@@ -93,6 +93,10 @@ type CommitServiceConfigInput struct {
 	// RestartPolicy is the docker restart policy for the service container
 	RestartPolicy string
 
+	// WaitTimeout is how long, in seconds, the service is waited on to become
+	// ready, empty for the default
+	WaitTimeout string
+
 	// Mounts are the mounts for the service container beyond the definition's
 	Mounts []Mount
 }
@@ -183,6 +187,11 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, RestartPolicyProperty, input.RestartPolicy)
 	if err != nil {
 		return fmt.Errorf("failed to write %s property: %w", RestartPolicyProperty, err)
+	}
+
+	err = common.PropertyWrite(properties.CommandPrefix, input.ServiceName, WaitTimeoutProperty, strings.TrimSpace(input.WaitTimeout))
+	if err != nil {
+		return fmt.Errorf("failed to write %s property: %w", WaitTimeoutProperty, err)
 	}
 
 	if err := WriteMounts(input.Datastore, input.ServiceName, input.Mounts); err != nil {

@@ -881,6 +881,8 @@ func (s *Datastore) Properties() ServiceStruct {
 		Ports:             ports,
 		Scheme:            dokku.Scheme,
 		WaitPort:          waitPort,
+		// derived from the variable, like the image and env variables beside it
+		WaitTimeoutVariable: dokku.Variable + "_WAIT_TIMEOUT",
 	}
 }
 

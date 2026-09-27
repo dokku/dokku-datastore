@@ -23,6 +23,7 @@ func cloneSource() serviceSettings {
 		PostStartNetworks:  []string{"started"},
 		RestartPolicy:      "unless-stopped",
 		ShmSize:            "128m",
+		WaitTimeout:        "120",
 	}
 }
 
@@ -38,6 +39,7 @@ func TestCloneKeepsTheSourceSettings(t *testing.T) {
 
 func TestCloneFlagOverridesOneSetting(t *testing.T) {
 	policy := "no"
+	timeout := "300"
 	networks := []string{"elsewhere"}
 	memory := 1024
 	mounts := []service.Mount{{Source: "other", ContainerPath: "/opt/other"}}
@@ -51,6 +53,11 @@ func TestCloneFlagOverridesOneSetting(t *testing.T) {
 			name:     "a string setting",
 			input:    CloneServiceInput{RestartPolicy: &policy},
 			expected: func(s *serviceSettings) { s.RestartPolicy = policy },
+		},
+		{
+			name:     "the wait timeout",
+			input:    CloneServiceInput{WaitTimeout: &timeout},
+			expected: func(s *serviceSettings) { s.WaitTimeout = timeout },
 		},
 		{
 			name:     "a list setting",
@@ -101,6 +108,7 @@ func TestCloneCanClearASetting(t *testing.T) {
 		PostStartNetworks:  &none,
 		RestartPolicy:      &empty,
 		ShmSize:            &empty,
+		WaitTimeout:        &empty,
 	})
 
 	// the keyserver has no flag, so it is the one setting that is always copied
@@ -138,6 +146,7 @@ func TestReadServiceSettings(t *testing.T) {
 		service.LogDriverProperty:     "json-file",
 		service.LogOptProperty:        "max-size=20m,max-file=3",
 		service.RestartPolicyProperty: "unless-stopped",
+		service.WaitTimeoutProperty:   "120",
 	} {
 		if err := SetProperty(datastore, "lollipop", key, value); err != nil {
 			t.Fatalf("failed to set the %s property: %s", key, err)

@@ -70,6 +70,7 @@ var InfoKeys = []InfoKey{
 	{Name: "shm-size", Description: "show the shared memory size the service container is run with"},
 	{Name: "status", Description: "show the service running status"},
 	{Name: "version", Description: "show the service image version"},
+	{Name: "wait-timeout", Description: "show the seconds the service is waited on to become ready"},
 }
 
 // InfoKeyNames returns the keys info answers, in the order they are declared
@@ -129,6 +130,7 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info[service.LogDriverProperty] = common.PropertyGet(commandPrefix, input.ServiceName, service.LogDriverProperty)
 	info[service.LogOptProperty] = common.PropertyGet(commandPrefix, input.ServiceName, service.LogOptProperty)
 	info[service.RestartPolicyProperty] = service.ServiceRestartPolicy(input.Datastore, input.ServiceName)
+	info[service.WaitTimeoutProperty] = service.ServiceWaitTimeout(input.Datastore, input.ServiceName)
 	info["memory"] = common.ReadFirstLine(serviceFiles.Memory)
 	// every field, in the grammar the mount command reads, rather than only the
 	// ones docker is handed. A property that cannot be read reports as empty,

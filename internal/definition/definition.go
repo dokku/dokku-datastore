@@ -226,7 +226,9 @@ type Dokku struct {
 
 	// WaitTimeout bounds the readiness probe, in seconds. A datastore that takes
 	// longer than the probe's own default to answer says so, rather than being
-	// reported as never having started.
+	// reported as never having started. It is the datastore's default: a
+	// service's wait-timeout property, or the host's <VARIABLE>_WAIT_TIMEOUT,
+	// overrides it.
 	WaitTimeout int `yaml:"wait_timeout"`
 
 	// Wait names the port to probe with the dokku/wait sidecar, for images with

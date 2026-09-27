@@ -54,6 +54,10 @@ type ServiceStruct struct {
 
 	// WaitPort is the port to wait for a service to be ready
 	WaitPort int
+
+	// WaitTimeoutVariable is the environment variable a host sets the readiness
+	// wait timeout for every service of a datastore with
+	WaitTimeoutVariable string
 }
 
 // CreateServiceContainerInput is the input for the CreateServiceContainer function

@@ -284,6 +284,7 @@ func readmeUsage(input ReadmeInput) ([]string, error) {
 		}
 	}
 
+	sections = append(sections, readmeWaitTimeout(input.Data)...)
 	sections = append(sections, readmeDockerPull(input.Data)...)
 	return sections, nil
 }
@@ -384,6 +385,19 @@ func readmeDockerPull(data DocumentationData) []string {
 			"environment variable to `true`. Once disabled, you will need to pull the service image you wish to deploy as shown in the "+
 			"`stderr` output.", strings.ToUpper(data.CommandPrefix)),
 		"Please ensure the proper images are in place when `docker image pull` is disabled.",
+	}
+}
+
+// readmeWaitTimeout explains how long a service is waited on to become ready,
+// and how to wait longer for one on a slow host
+func readmeWaitTimeout(data DocumentationData) []string {
+	return []string{
+		"### Waiting for a service to become ready",
+		"A service is waited on until it answers on its port after it is created, cloned, started, restarted, upgraded or exposed. " +
+			"If it takes longer than that to start - on a slow host, or with an image that does more on its first boot - the command fails with `ERROR: unable to connect`.",
+		fmt.Sprintf("To wait longer for every %s service on the host, set the `%s_WAIT_TIMEOUT` environment variable to a number of seconds. "+
+			"To wait longer for a single service, set its `wait-timeout` property with `dokku %s:set` or pass `--wait-timeout` to `create`, `clone` or `upgrade`. "+
+			"The service's own setting is used first, then the environment variable, then the datastore's default.", data.CommandPrefix, data.PluginVariable, data.CommandPrefix),
 	}
 }
 
