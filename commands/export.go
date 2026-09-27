@@ -53,6 +53,7 @@ func (c *ExportCommand) Examples() map[string]string {
 	return map[string]string{
 		"Exports a redis service named test":                             fmt.Sprintf("%s %s redis test", appName, c.Name()),
 		"Exports a redis service named test to a file on the dokku host": fmt.Sprintf("%s %s redis test --file /var/lib/dokku/data/storage/test.rdb", appName, c.Name()),
+		"Exports a mysql service named test with binary columns as hex":  fmt.Sprintf("%s %s mysql test -- --hex-blob", appName, c.Name()),
 	}
 }
 
@@ -133,7 +134,8 @@ func (c *ExportCommand) Run(args []string) int {
 
 	logger = c.Logger(c.Ui)
 
-	arguments, err := c.ParsedArguments(flags.Args())
+	positional, extraArgs := splitExtraArgs(flags.Args(), flags.ArgsLenAtDash())
+	arguments, err := c.ParsedArguments(positional)
 	if err != nil {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
@@ -220,6 +222,7 @@ func (c *ExportCommand) Run(args []string) int {
 		Datastore:   datastore,
 		ServiceName: serviceName,
 		Writer:      writer,
+		ExtraArgs:   extraArgs,
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1

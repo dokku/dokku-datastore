@@ -152,6 +152,24 @@ password_flags() {
   fi
 }
 
+# an argument this definition's export or import tool takes that leaves the dump
+# it makes or loads as usable as without it. Empty for a definition whose tools
+# take none, which refuses extra arguments rather than dropping them
+extra_arg() {
+  case "$DEFINITION:$1" in
+  mysql:export | mariadb:export) echo --hex-blob ;;
+  mysql:import | mariadb:import) echo --max-allowed-packet=64M ;;
+  postgres-*:export) echo --no-comments ;;
+  postgres-*:import) echo --single-transaction ;;
+  mongo:export | mongo:import) echo --numParallelCollections=1 ;;
+  esac
+}
+
+# a flag no export or import tool has, to prove extra arguments reach the tool
+# by having it refuse one
+# shellcheck disable=SC2034
+UNKNOWN_ARG="--dokku-datastore-not-a-flag"
+
 service_root() {
   echo "$DOKKU_LIB_ROOT/services/$DATA_DIR/${1:-$SERVICE}"
 }

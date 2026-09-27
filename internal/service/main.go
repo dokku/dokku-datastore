@@ -91,6 +91,10 @@ type ExportServiceInput struct {
 
 	// Writer receives the exported data
 	Writer io.Writer
+
+	// ExtraArgs are passed to the export command for this export alone, in
+	// place of the service's export-args. Empty uses the property.
+	ExtraArgs []string
 }
 
 // ImportServiceInput is the input for the ImportService function
@@ -103,6 +107,10 @@ type ImportServiceInput struct {
 
 	// ServiceName is the name of the service to import into
 	ServiceName string
+
+	// ExtraArgs are passed to the import command for this import alone, in
+	// place of the service's import-args. Empty uses the property.
+	ExtraArgs []string
 }
 
 var (

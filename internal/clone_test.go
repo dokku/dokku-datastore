@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/dokku/dokku/plugins/common"
 )
 
 // cloneSource is a service with every setting a clone copies given a value, so
@@ -13,6 +14,8 @@ func cloneSource() serviceSettings {
 	return serviceSettings{
 		ConfigOptions:      "--appendonly yes",
 		CustomEnv:          "ONE=1;TWO=2",
+		ExportArgs:         "--hex-blob",
+		ImportArgs:         "--force",
 		InitialNetwork:     "initial",
 		Keyserver:          "keys.example.com",
 		LogDriver:          "json-file",
@@ -111,8 +114,11 @@ func TestCloneCanClearASetting(t *testing.T) {
 		WaitTimeout:        &empty,
 	})
 
-	// the keyserver has no flag, so it is the one setting that is always copied
+	// the keyserver and the extra arguments have no flag, so they are the
+	// settings that are always copied
 	expected := serviceSettings{
+		ExportArgs:         "--hex-blob",
+		ImportArgs:         "--force",
 		Keyserver:          "keys.example.com",
 		LogOptions:         none,
 		Mounts:             unmounted,
@@ -150,6 +156,17 @@ func TestReadServiceSettings(t *testing.T) {
 	} {
 		if err := SetProperty(datastore, "lollipop", key, value); err != nil {
 			t.Fatalf("failed to set the %s property: %s", key, err)
+		}
+	}
+
+	// written directly, since set refuses them for redis, whose export and
+	// import ignore them: what is read back is what is under test
+	for key, value := range map[string]string{
+		service.ExportArgsProperty: "--hex-blob",
+		service.ImportArgsProperty: "--force",
+	} {
+		if err := common.PropertyWrite(datastore.Properties().CommandPrefix, "lollipop", key, value); err != nil {
+			t.Fatalf("failed to write the %s property: %s", key, err)
 		}
 	}
 

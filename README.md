@@ -336,6 +336,32 @@ dokku postgres:export lollipop --file /var/lib/dokku/data/storage/data.dump --fo
 ssh dokku@dokku.me postgres:export lollipop > data.dump
 ```
 
+## Passing extra arguments to export and import
+
+`export` and `import` ran each datastore's dump and load tools with a fixed set of arguments, so a dump could not be made any other way. A mysql table with binary columns was dumped as raw bytes, where `mysqldump --hex-blob` would have written it correctly, and there was nowhere to pass that. Scheduled backups and clones made their dumps the same way.
+
+`export` and `import` now pass whatever follows `--` to the tool, after its own arguments. Flags before the `--`, such as `--file`, are still read as the command's own.
+
+```shell
+# a dump with binary columns written as hex
+dokku mysql:export lollipop -- --hex-blob > data.dump
+
+# a dump with rows larger than the client allows by default
+dokku mysql:import lollipop --file /var/lib/dokku/data/storage/data.dump -- --max-allowed-packet=1G
+```
+
+Backups and clones are never run by hand, so a service can keep arguments for them in its `export-args` and `import-args` properties. Every export of the service uses `export-args`, including the ones `backup` and `clone` make, and every import into it uses `import-args`, including the one a `clone` makes. Arguments given after `--` replace the property for that run rather than adding to it, and a bare `--` leaves the property in place. A clone is given the source's properties. The value is given after `--`, since `set` would otherwise read its leading dash as one of its own flags. It is split the way a shell would split it, so an argument with a space in it is quoted, and a variable or command substitution in it is refused rather than expanded. `info --export-args` and `info --import-args` report them.
+
+```shell
+dokku mysql:set lollipop export-args -- "--hex-blob --routines"
+dokku mysql:set lollipop import-args -- "--max-allowed-packet=1G"
+
+# back to the datastore's own arguments
+dokku mysql:set lollipop export-args
+```
+
+A datastore declares that its tool takes them with `extra_args: true` on its `export` or `import` command. mysql, mariadb, postgres and mongo do. redis and couchdb dump and load with scripts that never read their arguments, so they refuse extra arguments, and the properties, rather than make a dump without them.
+
 ## Connecting without a terminal
 
 `ssh dokku@dokku.me mysql:connect lollipop` gives `connect` no terminal, since ssh only allocates one when asked with `-t`. Without one, the client shows no prompt and reads statements from stdin, and `mysql` also held every result until it exited. A statement typed into such a session ran, but nothing came back until the session ended, which looked like a blank screen that stopped responding.
@@ -384,7 +410,7 @@ A datastore with no secret for a flag refuses it before anything is created, rat
 
 A clone was made on the source's image and given its data, but nothing else about the source carried over: every other setting came from the flags passed to `clone`, so a clone made without repeating all of them landed on the defaults rather than on what the source runs with.
 
-A clone now starts from the source's settings - its config options, custom env, memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, mounts and backup keyserver. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
+A clone now starts from the source's settings - its config options, custom env, memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, mounts, backup keyserver and export and import arguments. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
 
 ```shell
 # the same settings as lollipop

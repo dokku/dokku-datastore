@@ -51,12 +51,14 @@ var InfoKeys = []InfoKey{
 	{Name: "database-name", Description: "show the name of the database inside the service"},
 	{Name: "definition", Description: "show the definition the service was created with"},
 	{Name: "dsn", Description: "show the service DSN"},
+	{Name: "export-args", Description: "show the extra arguments every export of the service is run with"},
 	{Name: "expose-address", Description: "show the address exposed ports without one of their own are published on"},
 	{Name: "expose-source-range", Description: "show the only range of client addresses the exposed ports accept"},
 	{Name: "exposed-ports", Description: "show service exposed ports"},
 	{Name: "id", Description: "show the service container id"},
 	{Name: "image", Description: "show the image the service runs"},
 	{Name: "image-version", Description: "show the image version the service was created with"},
+	{Name: "import-args", Description: "show the extra arguments every import into the service is run with"},
 	{Name: "initial-network", Description: "show the initial network being connected to"},
 	{Name: "internal-ip", Description: "show the service internal ip"},
 	{Name: "links", Description: "show the service app links"},
@@ -135,6 +137,8 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info[service.WaitTimeoutProperty] = service.ServiceWaitTimeout(input.Datastore, input.ServiceName)
 	info[service.ExposeAddressProperty] = service.ServiceExposeAddress(input.Datastore, input.ServiceName)
 	info[service.ExposeSourceRangeProperty] = service.ServiceExposeSourceRange(input.Datastore, input.ServiceName)
+	info[service.ExportArgsProperty] = service.ServiceExtraArgs(input.Datastore, input.ServiceName, service.ExportArgsProperty)
+	info[service.ImportArgsProperty] = service.ServiceExtraArgs(input.Datastore, input.ServiceName, service.ImportArgsProperty)
 	info["memory"] = common.ReadFirstLine(serviceFiles.Memory)
 	// every field, in the grammar the mount command reads, rather than only the
 	// ones docker is handed. A property that cannot be read reports as empty,

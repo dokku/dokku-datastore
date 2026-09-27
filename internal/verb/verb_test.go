@@ -498,3 +498,80 @@ func TestRunOfflineNeedsTheServiceImage(t *testing.T) {
 		t.Errorf("expected the error to mention the image, got %q", err)
 	}
 }
+
+// Extra arguments go after everything the definition renders, each as an
+// argument of its own, so one with a space in it reaches the tool whole.
+func TestResolveAppendsExtraArgs(t *testing.T) {
+	tests := []struct {
+		definition string
+		verb       string
+		extraArgs  []string
+		last       string
+	}{
+		{definition: "mysql", verb: "export", extraArgs: []string{"--hex-blob", "--where=id > 1"}, last: "lollipop"},
+		{definition: "mariadb", verb: "import", extraArgs: []string{"--max-allowed-packet=1G"}, last: "lollipop"},
+		{definition: "postgres-18", verb: "import", extraArgs: []string{"--single-transaction"}, last: "-w"},
+		{definition: "mongo", verb: "export", extraArgs: []string{"--numParallelCollections=1"}, last: "--archive"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.definition+" "+test.verb, func(t *testing.T) {
+			scope := redisScope()
+			scope.Plugin = test.definition
+			scope.Secret = map[string]string{"password": "hunter2", "root_password": "hunter3"}
+
+			resolved, err := Resolve(RunInput{
+				Definition: definitionFor(t, test.definition),
+				Scope:      scope,
+				Name:       test.verb,
+				Names:      backend.Names{Container: "dokku." + test.definition + ".lollipop"},
+				ExtraArgs:  test.extraArgs,
+			})
+			if err != nil {
+				t.Fatalf("unable to resolve %s: %s", test.verb, err)
+			}
+
+			rendered := len(resolved.Argv) - len(test.extraArgs)
+			if rendered < 1 || resolved.Argv[rendered-1] != test.last {
+				t.Fatalf("expected the extra arguments after %q, got %q", test.last, resolved.Argv)
+			}
+
+			if actual := resolved.Argv[rendered:]; !slices.Equal(actual, test.extraArgs) {
+				t.Errorf("expected %q appended, got %q", test.extraArgs, actual)
+			}
+		})
+	}
+}
+
+// Without any, the command is exactly what the definition renders.
+func TestResolveWithoutExtraArgs(t *testing.T) {
+	withNone, err := Resolve(redisInput(t, "export"))
+	if err != nil {
+		t.Fatalf("unable to resolve export: %s", err)
+	}
+
+	if !slices.Equal(withNone.Argv, []string{"dokku-redis-export"}) {
+		t.Errorf("expected the definition's own argv, got %q", withNone.Argv)
+	}
+}
+
+// redis dumps with a script that never reads its argv, so an argument handed to
+// it would be dropped without a word and the dump made without it.
+func TestResolveRefusesExtraArgsACommandIgnores(t *testing.T) {
+	for _, name := range []string{"export", "import"} {
+		t.Run(name, func(t *testing.T) {
+			input := redisInput(t, name)
+			input.ExtraArgs = []string{"--anything"}
+
+			_, err := Resolve(input)
+			var refused ErrExtraArgsRefused
+			if !errors.As(err, &refused) {
+				t.Fatalf("expected a refusal, got %v", err)
+			}
+
+			if expected := "redis " + name + " does not take extra arguments"; err.Error() != expected {
+				t.Errorf("expected %q, got %q", expected, err)
+			}
+		})
+	}
+}

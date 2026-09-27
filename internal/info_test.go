@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/dokku/dokku/plugins/common"
 )
 
 // withInfoService points the package at a temporary root and creates a service
@@ -138,6 +139,17 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		}
 	}
 
+	// written directly, since set refuses them for redis, whose export and
+	// import ignore them: what is read back is what is under test
+	for key, value := range map[string]string{
+		service.ExportArgsProperty: "--hex-blob",
+		service.ImportArgsProperty: "--force",
+	} {
+		if err := common.PropertyWrite(datastore.Properties().CommandPrefix, "lollipop", key, value); err != nil {
+			t.Fatalf("failed to write the %s property: %s", key, err)
+		}
+	}
+
 	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
 
 	for key, expected := range map[string]string{
@@ -146,10 +158,12 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		"custom-env":          "ONE=1;TWO=2",
 		"database-name":       "lollipop_db",
 		"definition":          "redis",
+		"export-args":         "--hex-blob",
 		"expose-address":      "10.0.0.5",
 		"expose-source-range": "10.0.0.0/8",
 		"image":               "redis",
 		"image-version":       "8.4.2",
+		"import-args":         "--force",
 		"initial-network":     "my-network",
 		"log-driver":          "json-file",
 		"log-opt":             "max-size=20m,max-file=3",

@@ -5,6 +5,7 @@ load ../test_helper
 
 COPY="$SERVICE-copy"
 OVERRIDE="$SERVICE-override"
+ARGS="$SERVICE-args"
 MOUNT_TARGET="/opt/dokku-mount"
 
 setup_file() {
@@ -21,7 +22,7 @@ setup_file() {
 }
 
 teardown_file() {
-  datastore_teardown_file "$COPY" "$OVERRIDE" "$SERVICE"
+  datastore_teardown_file "$COPY" "$OVERRIDE" "$ARGS" "$SERVICE"
 }
 
 # a clone copies the data through an export and an import, so a datastore
@@ -124,4 +125,29 @@ clone_or_skip() {
     assert_success
     assert_output "clonedrootpassword1234"
   fi
+}
+
+@test "($DEFINITION) a clone keeps the source's export and import arguments" {
+  if [[ -z "$(extra_arg export)" ]]; then
+    skip "$PLUGIN does not take extra arguments"
+  fi
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" export-args -- "$(extra_arg export)"
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" import-args -- "$(extra_arg import)"
+  assert_success
+
+  # the data is copied with them, the export with the source's and the import
+  # with the clone's, which it was given before the copy
+  clone_or_skip "$ARGS"
+
+  local key
+  for key in export-args import-args; do
+    run --separate-stderr "$BIN" info "$PLUGIN" "$ARGS" "--$key"
+    assert_success
+    assert_output "$(extra_arg "${key%-args}")"
+
+    run "$BIN" set "$PLUGIN" "$SERVICE" "$key"
+    assert_success
+  done
 }

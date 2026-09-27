@@ -83,6 +83,7 @@ x-dokku:
         LC_ALL: C.UTF-8
 
     export:
+      extra_args: true
       exec:
         - mysqldump
         - --default-character-set=utf8mb4
@@ -100,6 +101,7 @@ x-dokku:
         MYSQL_PWD: "{{ .Secret.root_password }}"
 
     import:
+      extra_args: true
       stdin: true
       exec: ["mysql", "--user=root", "{{ .Database }}"]
       env:

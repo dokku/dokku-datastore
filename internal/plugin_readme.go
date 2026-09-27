@@ -285,6 +285,7 @@ func readmeUsage(input ReadmeInput) ([]string, error) {
 	}
 
 	sections = append(sections, readmeExposeLimits(input.Data)...)
+	sections = append(sections, readmeExtraArgs(input.Data)...)
 	sections = append(sections, readmeWaitTimeout(input.Data)...)
 	sections = append(sections, readmeDockerPull(input.Data)...)
 	return sections, nil
@@ -399,6 +400,34 @@ func readmeExposeLimits(data DocumentationData) []string {
 			"Either reaches a running service with `dokku %s:reexpose`, which leaves the service running.", data.CommandPrefix, data.CommandPrefix),
 		"Only one source range can be given. The range is checked against the address a connection reaches the service from, which for a connection to the exposed port on the loopback interface, or an IPv6 connection to a service network without IPv6, is the docker network's gateway rather than the client, " +
 			"so with a range that leaves the gateway out, connecting to `127.0.0.1` from the dokku host itself is refused.",
+	}
+}
+
+// readmeExtraArgs explains how to pass the dump and load tools arguments of
+// their own, for a datastore whose tools take them
+func readmeExtraArgs(data DocumentationData) []string {
+	verbs := []string{}
+	properties := []string{}
+	if data.ExportArgs {
+		verbs = append(verbs, "`export`")
+		properties = append(properties, "`export-args`")
+	}
+	if data.ImportArgs {
+		verbs = append(verbs, "`import`")
+		properties = append(properties, "`import-args`")
+	}
+
+	if len(verbs) == 0 {
+		return nil
+	}
+
+	return []string{
+		"### Passing extra arguments to export and import",
+		fmt.Sprintf("Arguments given to %s after `--` are appended to the ones the datastore's own tool is run with, for that run alone. "+
+			"To use them every time, set the service's %s property with `dokku %s:set`, giving the value after `--` so that its leading dash is not read as a flag. "+
+			"The property is split the way a shell would split it, so an argument with a space in it is quoted, and a variable in it is refused rather than expanded.", strings.Join(verbs, " or "), strings.Join(properties, " or "), data.CommandPrefix),
+		"Arguments given after `--` replace the property rather than adding to it. " +
+			"Backups and clones are made with the property, and a clone is given the source's.",
 	}
 }
 

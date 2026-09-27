@@ -98,11 +98,13 @@ x-dokku:
         LC_ALL: C.UTF-8
 
     export:
+      extra_args: true
       exec: ["pg_dump", "-Fc", "--no-acl", "--no-owner", "-h", "localhost", "-U", "postgres", "-w", "{{ .Database }}"]
       env:
         PGPASSWORD: "{{ .Secret.password }}"
 
     import:
+      extra_args: true
       stdin: true
       exec: ["pg_restore", "-h", "localhost", "-cO", "--if-exists", "-d", "{{ .Database }}", "-U", "postgres", "-w"]
       env:

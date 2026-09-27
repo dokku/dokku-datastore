@@ -565,16 +565,18 @@ func (s *Datastore) ExportService(ctx context.Context, input ExportServiceInput)
 	// the dump is streamed to the writer rather than buffered into a string,
 	// which is what makes it safe for binary data of any size
 	return s.run(ctx, input.ServiceName, "export", runOptions{
-		Stdout: input.Writer,
-		Stderr: os.Stderr,
+		ExtraArgs: input.ExtraArgs,
+		Stdout:    input.Writer,
+		Stderr:    os.Stderr,
 	})
 }
 
 // ImportService replaces the service's data with what is read from a reader.
 func (s *Datastore) ImportService(ctx context.Context, input ImportServiceInput) error {
 	return s.run(ctx, input.ServiceName, "import", runOptions{
-		Stdin:  input.Reader,
-		Stderr: os.Stderr,
+		ExtraArgs: input.ExtraArgs,
+		Stdin:     input.Reader,
+		Stderr:    os.Stderr,
 	})
 }
 
@@ -695,6 +697,10 @@ type runOptions struct {
 	// a hook runs
 	Command *definition.Command
 
+	// ExtraArgs are appended to the command's argv, which only export and
+	// import take
+	ExtraArgs []string
+
 	TTY    bool
 	Stdin  io.Reader
 	Stdout io.Writer
@@ -722,6 +728,14 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 	// told rather than run at whatever the definition ships now
 	if _, err := resolveImage(s, serviceName, "", ""); err != nil {
 		return fmt.Errorf("unable to run %s against %s: %w", verbAction(name), serviceName, err)
+	}
+
+	// after the record is settled, so that a service that cannot say what it
+	// runs is told that first, and before anything is pulled, so that
+	// arguments the command would ignore are refused before any work is done
+	extraArgs, err := s.extraArgs(serviceName, name, options.ExtraArgs)
+	if err != nil {
+		return err
 	}
 
 	scope := s.scope(serviceName)
@@ -766,6 +780,7 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 		Stdin:      options.Stdin,
 		Stdout:     options.Stdout,
 		Stderr:     options.Stderr,
+		ExtraArgs:  extraArgs,
 	})
 }
 

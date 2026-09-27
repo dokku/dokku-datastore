@@ -487,3 +487,42 @@ skip_unless_log_is_capped() {
   assert_success
   assert_output ""
 }
+
+@test "($DEFINITION) the export and import arguments are set, read back and unset" {
+  local key verb
+  for verb in export import; do
+    key="$verb-args"
+
+    # refused for a definition whose tools would ignore them, and nothing kept
+    if [[ -z "$(extra_arg "$verb")" ]]; then
+      run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" "$key" -- --anything
+      assert_failure
+      assert_stderr --partial "does not take extra arguments"
+    else
+      # the value follows -- so that set does not read it as a flag of its own
+      run "$BIN" set "$PLUGIN" "$SERVICE" "$key" -- "$(extra_arg "$verb") --where=\"id > 1\""
+      assert_success
+
+      run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" "--$key"
+      assert_success
+      assert_output "$(extra_arg "$verb") --where=\"id > 1\""
+
+      # a value that does not split into arguments is refused before it is kept
+      run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" "$key" -- "--where=\"id > 1"
+      assert_failure
+      assert_stderr --partial "invalid $key value"
+
+      run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" "$key" -- "--where=\$ID"
+      assert_failure
+      assert_stderr --partial "invalid $key value"
+    fi
+
+    # clearing is always allowed
+    run "$BIN" set "$PLUGIN" "$SERVICE" "$key"
+    assert_success
+
+    run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" "--$key"
+    assert_success
+    assert_output ""
+  done
+}
