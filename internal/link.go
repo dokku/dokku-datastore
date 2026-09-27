@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -20,6 +21,10 @@ var alternateAliasColors = []string{
 	"AQUA", "BLACK", "BLUE", "FUCHSIA", "GRAY", "GREEN", "LIME", "MAROON",
 	"NAVY", "OLIVE", "PURPLE", "RED", "SILVER", "TEAL", "WHITE", "YELLOW",
 }
+
+// envVarPattern is what a config variable named in full with --env-var must look
+// like, so that it is a name the app's environment can hold
+var envVarPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // SkippingRestartMessage is logged when an app is not restarted after a link change
 const SkippingRestartMessage = "Skipping restart of linked app"
@@ -212,6 +217,10 @@ type LinkServiceInput struct {
 	// Datastore is the datastore the service belongs to
 	Datastore *service.Datastore
 
+	// EnvVar is the full name of the config variable to expose the service url
+	// as, used in place of an alias and not suffixed with _URL
+	EnvVar string
+
 	// Logger reports progress
 	Logger Ui
 
@@ -227,6 +236,14 @@ type LinkServiceInput struct {
 
 // LinkService links a service to an app
 func LinkService(ctx context.Context, input LinkServiceInput) error {
+	if input.Alias != "" && input.EnvVar != "" {
+		return errors.New("--alias and --env-var cannot be used together")
+	}
+
+	if input.EnvVar != "" && !envVarPattern.MatchString(input.EnvVar) {
+		return fmt.Errorf("Invalid env var %s", input.EnvVar) //nolint:staticcheck // matches the other link errors
+	}
+
 	environment, err := AppEnvironment(ctx, input.AppName)
 	if err != nil {
 		return err
@@ -257,8 +274,8 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 
 	// an app whose config already holds the url, set by hand or left over from
 	// a links file that lost its name, is missing everything but the config.
-	// That config is left as it is, so the alias and querystring do not apply
-	// and nothing changes that would restart the app.
+	// That config is left as it is, so the alias, env var and querystring do not
+	// apply and nothing changes that would restart the app.
 	if len(linkedKeys) > 0 {
 		if err := addLink(ctx, input.Datastore, input.ServiceName, input.AppName); err != nil {
 			return err
@@ -304,9 +321,17 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 }
 
 // linkConfigKey returns the config key a new link sets the service url as: the
-// alias asked for suffixed with _URL, or the default alias, falling back to a
-// generated one when the default is in use
+// env var asked for, the alias asked for suffixed with _URL, or the default
+// alias, falling back to a generated one when the default is in use
 func linkConfigKey(input LinkServiceInput, environment map[string]string) (string, error) {
+	if input.EnvVar != "" {
+		if _, ok := environment[input.EnvVar]; ok {
+			return "", fmt.Errorf("Specified env var %s already in use", input.EnvVar) //nolint:staticcheck // matches the bash datastore plugins
+		}
+
+		return input.EnvVar, nil
+	}
+
 	alias := input.Datastore.Properties().DefaultAlias
 	if input.Alias != "" {
 		alias = input.Alias

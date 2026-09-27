@@ -409,6 +409,7 @@ func TestLinkService(t *testing.T) {
 	tests := []struct {
 		name             string
 		alias            string
+		envVar           string
 		querystring      string
 		links            []string
 		recorded         []string
@@ -563,6 +564,108 @@ func TestLinkService(t *testing.T) {
 			expectedLinks: []string{},
 		},
 		{
+			name:   "the env var passed is the variable set, with no suffix",
+			envVar: "MB_DB_CONNECTION_URI",
+			links:  []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{}
+			},
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{
+					"docker-options:add my-app build,deploy,run " + option,
+					"config:set --no-restart my-app MB_DB_CONNECTION_URI=" + serviceURL,
+				}
+			},
+			expectedLinks:    []string{"my-app"},
+			expectedRecorded: []string{"MB_DB_CONNECTION_URI"},
+		},
+		{
+			name:        "the querystring passed is appended to the url set as the env var",
+			envVar:      "MB_DB_CONNECTION_URI",
+			querystring: "foo=bar",
+			links:       []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{}
+			},
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{
+					"docker-options:add my-app build,deploy,run " + option,
+					"config:set --no-restart my-app MB_DB_CONNECTION_URI=" + serviceURL + "?foo=bar",
+				}
+			},
+			expectedLinks:    []string{"my-app"},
+			expectedRecorded: []string{"MB_DB_CONNECTION_URI"},
+		},
+		{
+			name:   "the env var passed is set when the default alias holds another url",
+			envVar: "MB_DB_CONNECTION_URI",
+			links:  []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"REDIS_URL": "redis://:other@elsewhere:6379"}
+			},
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{
+					"docker-options:add my-app build,deploy,run " + option,
+					"config:set --no-restart my-app MB_DB_CONNECTION_URI=" + serviceURL,
+				}
+			},
+			expectedLinks:    []string{"my-app"},
+			expectedRecorded: []string{"MB_DB_CONNECTION_URI"},
+		},
+		{
+			name:   "the env var passed holding another value",
+			envVar: "MB_DB_CONNECTION_URI",
+			links:  []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"MB_DB_CONNECTION_URI": "something"}
+			},
+			expectedError: "Specified env var MB_DB_CONNECTION_URI already in use",
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{}
+			},
+			expectedLinks: []string{},
+		},
+		{
+			name:   "an alias and an env var together",
+			alias:  "BLUE",
+			envVar: "MB_DB_CONNECTION_URI",
+			links:  []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{}
+			},
+			expectedError: "--alias and --env-var cannot be used together",
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{}
+			},
+			expectedLinks: []string{},
+		},
+		{
+			name:   "an env var starting with a digit",
+			envVar: "1FOO",
+			links:  []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{}
+			},
+			expectedError: "Invalid env var 1FOO",
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{}
+			},
+			expectedLinks: []string{},
+		},
+		{
+			name:   "an env var with a character a variable cannot hold",
+			envVar: "FOO-BAR",
+			links:  []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{}
+			},
+			expectedError: "Invalid env var FOO-BAR",
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{}
+			},
+			expectedLinks: []string{},
+		},
+		{
 			name:     "linked, with the url under a recorded env var whose scheme changed",
 			links:    []string{"my-app"},
 			recorded: []string{"MB_DB_CONNECTION_URI"},
@@ -575,6 +678,20 @@ func TestLinkService(t *testing.T) {
 			},
 			expectedLinks:    []string{"my-app"},
 			expectedRecorded: []string{"MB_DB_CONNECTION_URI"},
+		},
+		{
+			name:   "not in the links file, with the url under the env var passed",
+			envVar: "MB_DB_CONNECTION_URI",
+			links:  []string{},
+			config: func(serviceURL string) map[string]string {
+				return map[string]string{"MB_DB_CONNECTION_URI": serviceURL}
+			},
+			expectedCalls: func(serviceURL string, option string) []string {
+				return []string{"docker-options:add my-app build,deploy,run " + option}
+			},
+			expectedLinks:    []string{"my-app"},
+			expectedRecorded: []string{"MB_DB_CONNECTION_URI"},
+			expectedWarn:     true,
 		},
 	}
 
@@ -595,6 +712,7 @@ func TestLinkService(t *testing.T) {
 				Alias:       test.alias,
 				AppName:     "my-app",
 				Datastore:   datastore,
+				EnvVar:      test.envVar,
 				Logger:      Ui{Ui: ui},
 				NoRestart:   true,
 				Querystring: test.querystring,

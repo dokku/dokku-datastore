@@ -624,7 +624,15 @@ this will set the following on the linked application instead of {{.DefaultAlias
     BLUE_{{.DefaultAlias}}_URL={{.Scheme}}://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}
 
 an alias whose variable is already set on the app is refused, and unlink removes
-the variable whatever alias it was set under. arguments can be appended to the url as a
+the variable whatever alias it was set under. an app that expects the url under a name
+that does not end in _URL can be given that name in full with the '--env-var' flag,
+which cannot be combined with '--alias':
+dokku {{.CommandPrefix}}:link lollipop playground --env-var MB_DB_CONNECTION_URI
+this will set the following on the linked application instead of {{.DefaultAlias}}_URL:
+
+    MB_DB_CONNECTION_URI={{.Scheme}}://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}
+
+a name already set on the app is refused. arguments can be appended to the url as a
 querystring with the '--querystring' flag:
 dokku {{.CommandPrefix}}:link lollipop playground --querystring "foo=bar&baz=qux"
 this will cause {{.DefaultAlias}}_URL to be set as:

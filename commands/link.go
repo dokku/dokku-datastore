@@ -24,6 +24,8 @@ type LinkCommand struct {
 	GlobalFlagCommand
 	// alias is an alternative alias to export the service url as
 	alias string
+	// envVar is the full name of the config variable to export the service url as
+	envVar string
 	// noRestart is whether to skip restarting the app
 	noRestart bool
 	// querystring is appended to the service url
@@ -49,8 +51,9 @@ func (c *LinkCommand) Help() string {
 func (c *LinkCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Links a redis service named test to the app test-app": fmt.Sprintf("%s %s redis test test-app", appName, c.Name()),
-		"Links it as BLUE_URL instead of the default alias":    fmt.Sprintf("%s %s redis test test-app --alias BLUE", appName, c.Name()),
+		"Links a redis service named test to the app test-app":  fmt.Sprintf("%s %s redis test test-app", appName, c.Name()),
+		"Links it as BLUE_URL instead of the default alias":     fmt.Sprintf("%s %s redis test test-app --alias BLUE", appName, c.Name()),
+		"Links it as MB_DB_CONNECTION_URI, with no _URL suffix": fmt.Sprintf("%s %s redis test test-app --env-var MB_DB_CONNECTION_URI", appName, c.Name()),
 	}
 }
 
@@ -93,6 +96,7 @@ func (c *LinkCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
 	f.StringVarP(&c.alias, "alias", "a", "", "the prefix of the config variable the service url is set as on the app, which is suffixed with _URL")
+	f.StringVarP(&c.envVar, "env-var", "e", "", "the full name of the config variable the service url is set as on the app, used instead of an alias and not suffixed with _URL")
 	f.StringVarP(&c.querystring, "querystring", "q", "", "ampersand delimited querystring arguments to append to the service url after a ?")
 	f.BoolVarP(&c.noRestart, "no-restart", "n", false, "whether to skip restarting the app")
 	return f
@@ -105,6 +109,7 @@ func (c *LinkCommand) AutocompleteFlags() complete.Flags {
 		c.AutocompleteGlobalFlags(),
 		complete.Flags{
 			"--alias":       complete.PredictAnything,
+			"--env-var":     complete.PredictAnything,
 			"--no-restart":  complete.PredictNothing,
 			"--querystring": complete.PredictAnything,
 		},
@@ -220,6 +225,7 @@ func (c *LinkCommand) Run(args []string) int {
 		Alias:       c.alias,
 		AppName:     appName,
 		Datastore:   datastore,
+		EnvVar:      c.envVar,
 		Logger:      logger,
 		NoRestart:   c.noRestart,
 		Querystring: c.querystring,
