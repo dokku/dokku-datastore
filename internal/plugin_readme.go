@@ -43,7 +43,7 @@ var readmeSections = []struct {
 		Group:    definition.GroupServiceLifecycle,
 		Title:    "Service Lifecycle",
 		Intro:    []string{"The lifecycle of each service can be managed through the following commands:"},
-		Commands: []string{"connect", "enter", "expose", "unexpose", "promote", "start", "stop", "pause", "restart", "upgrade"},
+		Commands: []string{"connect", "enter", "expose", "unexpose", "reexpose", "promote", "start", "stop", "pause", "restart", "upgrade"},
 	},
 	{
 		Group:    definition.GroupServiceAutomation,
@@ -284,6 +284,7 @@ func readmeUsage(input ReadmeInput) ([]string, error) {
 		}
 	}
 
+	sections = append(sections, readmeExposeLimits(input.Data)...)
 	sections = append(sections, readmeWaitTimeout(input.Data)...)
 	sections = append(sections, readmeDockerPull(input.Data)...)
 	return sections, nil
@@ -385,6 +386,19 @@ func readmeDockerPull(data DocumentationData) []string {
 			"environment variable to `true`. Once disabled, you will need to pull the service image you wish to deploy as shown in the "+
 			"`stderr` output.", strings.ToUpper(data.CommandPrefix)),
 		"Please ensure the proper images are in place when `docker image pull` is disabled.",
+	}
+}
+
+// readmeExposeLimits explains how to limit where an exposed service is
+// published and which clients reach it, and where the client limit falls short
+func readmeExposeLimits(data DocumentationData) []string {
+	return []string{
+		"### Limiting where and to whom a service is exposed",
+		fmt.Sprintf("An exposed service's ports are published on every interface unless they are given an address of their own. "+
+			"To publish them on one address instead, set the service's `expose-address` property with `dokku %s:set`, and to accept connections only from clients in one IP address or CIDR, set its `expose-source-range` property. "+
+			"Either reaches a running service with `dokku %s:reexpose`, which leaves the service running.", data.CommandPrefix, data.CommandPrefix),
+		"Only one source range can be given. The range is checked against the address a connection reaches the service from, which for a connection to the exposed port on the loopback interface, or an IPv6 connection to a service network without IPv6, is the docker network's gateway rather than the client, " +
+			"so with a range that leaves the gateway out, connecting to `127.0.0.1` from the dokku host itself is refused.",
 	}
 }
 

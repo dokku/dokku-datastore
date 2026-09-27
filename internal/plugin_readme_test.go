@@ -96,6 +96,8 @@ func TestReadme(t *testing.T) {
 		{name: "the docker pull section", expected: "`REDIS_DISABLE_PULL` environment variable"},
 		{name: "the wait timeout section", expected: "`REDIS_WAIT_TIMEOUT` environment variable"},
 		{name: "the wait timeout property", expected: "`wait-timeout` property with `dokku redis:set`"},
+		{name: "the expose limits section", expected: "### Limiting where and to whom a service is exposed"},
+		{name: "the expose limits apply without a restart", expected: "Either reaches a running service with `dokku redis:reexpose`"},
 	}
 
 	for _, test := range tests {

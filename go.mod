@@ -3,7 +3,7 @@ module github.com/dokku/dokku-datastore
 go 1.26.2
 
 require (
-	github.com/dokku/docker-port-forward v0.0.0-20260923171123-1ce6fc73e1ba
+	github.com/dokku/docker-port-forward v0.0.0-20260927082313-8cbfc680c944
 	github.com/dokku/dokku/plugins/common v0.0.0-20260914154134-61ff696e0012
 	github.com/josegonzalez/cli-skeleton v0.25.0
 	github.com/mitchellh/cli v1.1.5

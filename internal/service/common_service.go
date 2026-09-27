@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"io"
+	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -253,18 +254,25 @@ func ValidateHostPort(value string) error {
 	return nil
 }
 
-// ExposedPorts gets the exposed ports for a service
+// ExposedPorts gets the exposed ports for a service. A port with no address of
+// its own is shown on the service's expose-address when it has one, since that
+// is where it is published.
 func ExposedPorts(s *Datastore, serviceName string) string {
 	hostPorts := ExposedHostPorts(s, serviceName)
 	if len(hostPorts) == 0 {
 		return "-"
 	}
 
+	address := ServiceExposeAddress(s, serviceName)
 	datastorePorts := s.Properties().Ports
 	output := []string{}
 	for i, hostPort := range hostPorts {
 		if i >= len(datastorePorts) {
 			break
+		}
+
+		if address != "" && !strings.Contains(hostPort, ":") {
+			hostPort = net.JoinHostPort(address, hostPort)
 		}
 
 		output = append(output, fmt.Sprintf("%d->%s", datastorePorts[i], hostPort))
