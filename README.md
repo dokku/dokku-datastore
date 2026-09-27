@@ -360,7 +360,20 @@ dokku mysql:set lollipop import-args -- "--max-allowed-packet=1G"
 dokku mysql:set lollipop export-args
 ```
 
-A datastore declares that its tool takes them with `extra_args: true` on its `export` or `import` command. mysql, mariadb, postgres and mongo do. redis and couchdb dump and load with scripts that never read their arguments, so they refuse extra arguments, and the properties, rather than make a dump without them.
+A datastore declares that its tool takes them with `extra_args: true` on its `export` or `import` command. mysql, mariadb, postgres and mongo do. redis, couchdb and clickhouse dump and load with scripts that never read their arguments, so they refuse extra arguments, and the properties, rather than make a dump without them.
+
+## Clickhouse export and import
+
+The bash clickhouse plugin had no `export` or `import`, so a clickhouse service could not be cloned or backed up either. clickhouse now exports and imports, and with that gains `clone` and the `backup` commands.
+
+The dump is clickhouse's own `BACKUP` archive, a zip file that holds the service's database, its tables, views and dictionaries included. It stores the database under a fixed name, so an export from one service imports into any other, but only archives written by `export` can be imported. An import restores the archive beside the live database and swaps it in only once the restore succeeds, so an archive that fails to restore leaves the data as it was.
+
+```shell
+dokku clickhouse:export lollipop > lollipop.zip
+dokku clickhouse:import lollipop-2 < lollipop.zip
+```
+
+The server writes and reads the archive in the backup directory its config allows, which the image's own `config.xml` puts under the data directory. A config that allows none, such as one from an older image, is given one through `config.d/dokku-backups.xml` on the first export or import.
 
 ## Connecting without a terminal
 
