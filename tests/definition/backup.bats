@@ -49,6 +49,32 @@ teardown_file() {
   assert_output ""
 }
 
+@test "($DEFINITION) backup-auth replaces the settings it stored earlier" {
+  run "$BIN" backup-auth "$PLUGIN" "$SERVICE" AKIAEXAMPLE wJalrXUtnFEMI us-east-1 s3v4 http://127.0.0.1:9000
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup-auth"
+  fi
+  assert_success
+
+  run "$BIN" backup-auth "$PLUGIN" "$SERVICE" AKIAEXAMPLE wJalrXUtnFEMI
+  assert_success
+
+  local name
+  for name in AWS_DEFAULT_REGION AWS_SIGNATURE_VERSION ENDPOINT_URL; do
+    [[ ! -e "$(service_root)/backup/$name" ]] || fail "backup-auth left $name behind"
+  done
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --format json
+  assert_success
+  assert_output --partial '"backup-authenticated":"true"'
+  assert_output --partial '"backup-default-region":""'
+  assert_output --partial '"backup-signature-version":""'
+  assert_output --partial '"backup-endpoint-url":""'
+
+  run "$BIN" backup-deauth "$PLUGIN" "$SERVICE"
+  assert_success
+}
+
 @test "($DEFINITION) the backup passphrase is reported as a fingerprint" {
   run "$BIN" backup-set-encryption "$PLUGIN" "$SERVICE" "correct horse battery staple"
   if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then

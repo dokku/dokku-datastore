@@ -68,6 +68,7 @@ func (c *BackupAuthCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *BackupAuthCommand) Documentation() string {
 	return `setup s3 backup authentication
+> NOTE: each call replaces the stored credentials as a whole, so a region, signature version or endpoint url that is not passed is removed
 dokku {{.CommandPrefix}}:backup-auth lollipop AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 setup s3 backup authentication with different region
 dokku {{.CommandPrefix}}:backup-auth lollipop AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION
