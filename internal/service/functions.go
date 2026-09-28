@@ -913,7 +913,7 @@ type ServicePortReconcileStatusInput struct {
 const AmbassadorContainerIDLabel = "dokku.ambassador.container-id"
 
 // AmbassadorAddressLabel is the label an ambassador carries naming the
-// expose-address it was made with. Unset when it was made with none.
+// port-bind-address it was made with. Unset when it was made with none.
 const AmbassadorAddressLabel = "dokku.ambassador.address"
 
 // AmbassadorSourceRangeLabel is the label an ambassador carries naming the
@@ -924,7 +924,7 @@ const AmbassadorSourceRangeLabel = "dokku.ambassador.source-range"
 // that a running one cannot take on: a change to either only reaches the
 // service through a new ambassador.
 type ambassadorSettings struct {
-	// Address is the expose-address, empty for every interface
+	// Address is the port-bind-address, empty for every interface
 	Address string
 
 	// SourceRange is the expose-source-range, empty for every client
@@ -935,7 +935,7 @@ type ambassadorSettings struct {
 // made with.
 func serviceAmbassadorSettings(s *Datastore, serviceName string) ambassadorSettings {
 	return ambassadorSettings{
-		Address:     ServiceExposeAddress(s, serviceName),
+		Address:     ServicePortBindAddress(s, serviceName),
 		SourceRange: ServiceExposeSourceRange(s, serviceName),
 	}
 }
@@ -1025,7 +1025,7 @@ type ambassadorState struct {
 // target from. And one that dials the service by an address the service no
 // longer has publishes nothing.
 //
-// Nor is one kept that was made with an expose-address or expose-source-range
+// Nor is one kept that was made with a port-bind-address or expose-source-range
 // the service no longer has, since it would go on publishing the service where
 // or to whom it was told not to. One made before those labels existed carries
 // neither, which is what a service that has set neither expects. A forced
@@ -1082,7 +1082,7 @@ type ambassadorForwardOptionsInput struct {
 	// docker-port-forward reads an empty policy as unless-stopped
 	RestartPolicy string
 
-	// Settings are the service's expose-address and expose-source-range
+	// Settings are the service's port-bind-address and expose-source-range
 	Settings ambassadorSettings
 }
 
@@ -1091,7 +1091,7 @@ type ambassadorForwardOptionsInput struct {
 func ambassadorForwardOptions(input ambassadorForwardOptionsInput) portforward.Options {
 	// the port file holds either a port or an ip:port, both of which are the
 	// front half of a docker style port spec. A port with no address of its own
-	// is published on the service's expose-address, or on every interface, as
+	// is published on the service's port-bind-address, or on every interface, as
 	// a plain --publish was, when it has none
 	ports := make([]string, 0, len(input.HostPorts))
 	for i, hostPort := range input.HostPorts {

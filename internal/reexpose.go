@@ -26,7 +26,7 @@ type ReexposeServiceInput struct {
 // the ports and expose settings the service has now, leaving the service
 // container alone.
 //
-// It is how an expose-address or expose-source-range reaches a running
+// It is how a port-bind-address or expose-source-range reaches a running
 // service without restarting it. The ambassador is replaced even when nothing
 // has changed, so it is also how one that has stopped publishing is made
 // again.

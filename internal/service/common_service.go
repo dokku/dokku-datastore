@@ -255,7 +255,7 @@ func ValidateHostPort(value string) error {
 }
 
 // ExposedPorts gets the exposed ports for a service. A port with no address of
-// its own is shown on the service's expose-address when it has one, since that
+// its own is shown on the service's port-bind-address when it has one, since that
 // is where it is published.
 func ExposedPorts(s *Datastore, serviceName string) string {
 	hostPorts := ExposedHostPorts(s, serviceName)
@@ -263,7 +263,7 @@ func ExposedPorts(s *Datastore, serviceName string) string {
 		return "-"
 	}
 
-	address := ServiceExposeAddress(s, serviceName)
+	address := ServicePortBindAddress(s, serviceName)
 	datastorePorts := s.Properties().Ports
 	output := []string{}
 	for i, hostPort := range hostPorts {

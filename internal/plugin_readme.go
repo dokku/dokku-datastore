@@ -398,7 +398,7 @@ func readmeExposeLimits(data DocumentationData) []string {
 	return []string{
 		"### Limiting where and to whom a service is exposed",
 		fmt.Sprintf("An exposed service's ports are published on every interface unless they are given an address of their own. "+
-			"To publish them on one address instead, set the service's `expose-address` property with `dokku %s:set`, and to accept connections only from clients in one IP address or CIDR, set its `expose-source-range` property. "+
+			"To publish them on one address instead, set the service's `port-bind-address` property with `dokku %s:set`, and to accept connections only from clients in one IP address or CIDR, set its `expose-source-range` property. "+
 			"Either reaches a running service with `dokku %s:reexpose`, which leaves the service running.", data.CommandPrefix, data.CommandPrefix),
 		"Only one source range can be given. The range is checked against the address a connection reaches the service from, which for a connection to the exposed port on the loopback interface, or an IPv6 connection to a service network without IPv6, is the docker network's gateway rather than the client, " +
 			"so with a range that leaves the gateway out, connecting to `127.0.0.1` from the dokku host itself is refused.",

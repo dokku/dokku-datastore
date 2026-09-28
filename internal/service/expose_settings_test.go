@@ -7,9 +7,9 @@ import (
 	"github.com/dokku/dokku/plugins/common"
 )
 
-func TestValidateExposeAddress(t *testing.T) {
+func TestValidatePortBindAddress(t *testing.T) {
 	for _, value := range []string{"", "10.0.0.5", "0.0.0.0", "::1", "2001:db8::1"} {
-		if err := ValidateExposeAddress(value); err != nil {
+		if err := ValidatePortBindAddress(value); err != nil {
 			t.Errorf("expected %q to be accepted, got %q", value, err)
 		}
 	}
@@ -17,14 +17,14 @@ func TestValidateExposeAddress(t *testing.T) {
 	// a hostname is not an address docker can publish on, the brackets belong to
 	// a port, and a zone names an interface of the host rather than an address
 	for _, value := range []string{"localhost", "example.com", "[::1]", "10.0.0.5:6379", "10.0.0.0/8", "fe80::1%eth0", "a.b.c.d"} {
-		err := ValidateExposeAddress(value)
+		err := ValidatePortBindAddress(value)
 		if err == nil {
 			t.Errorf("expected %q to be refused", value)
 			continue
 		}
 
-		if !strings.Contains(err.Error(), ExposeAddressProperty) {
-			t.Errorf("expected the error to name %s, got %q", ExposeAddressProperty, err)
+		if !strings.Contains(err.Error(), PortBindAddressProperty) {
+			t.Errorf("expected the error to name %s, got %q", PortBindAddressProperty, err)
 		}
 	}
 }
@@ -54,19 +54,19 @@ func TestServiceExposeSettings(t *testing.T) {
 	withServiceRoot(t, redis, "lollipop")
 	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
 
-	if address, sourceRange := ServiceExposeAddress(redis, "lollipop"), ServiceExposeSourceRange(redis, "lollipop"); address != "" || sourceRange != "" {
+	if address, sourceRange := ServicePortBindAddress(redis, "lollipop"), ServiceExposeSourceRange(redis, "lollipop"); address != "" || sourceRange != "" {
 		t.Fatalf("expected nothing to be set, got %q and %q", address, sourceRange)
 	}
 
 	commandPrefix := redis.Properties().CommandPrefix
-	if err := common.PropertyWrite(commandPrefix, "lollipop", ExposeAddressProperty, "10.0.0.5"); err != nil {
+	if err := common.PropertyWrite(commandPrefix, "lollipop", PortBindAddressProperty, "10.0.0.5"); err != nil {
 		t.Fatalf("failed to write the property: %v", err)
 	}
 	if err := common.PropertyWrite(commandPrefix, "lollipop", ExposeSourceRangeProperty, "10.0.0.0/8"); err != nil {
 		t.Fatalf("failed to write the property: %v", err)
 	}
 
-	if address := ServiceExposeAddress(redis, "lollipop"); address != "10.0.0.5" {
+	if address := ServicePortBindAddress(redis, "lollipop"); address != "10.0.0.5" {
 		t.Errorf("expected the address to be read back, got %q", address)
 	}
 	if sourceRange := ServiceExposeSourceRange(redis, "lollipop"); sourceRange != "10.0.0.0/8" {

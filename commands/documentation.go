@@ -512,7 +512,7 @@ dokku {{.CommandPrefix}}:expose lollipop {{.PortList}}
 expose the service on the service's normal ports, with the first on a specified ip address (127.0.0.1)
 dokku {{.CommandPrefix}}:expose lollipop 127.0.0.1:{{.PortList}}
 expose the service on random ports on a single address, and only to clients in one network
-dokku {{.CommandPrefix}}:set lollipop expose-address 10.0.0.5
+dokku {{.CommandPrefix}}:set lollipop port-bind-address 10.0.0.5
 dokku {{.CommandPrefix}}:set lollipop expose-source-range 10.0.0.0/8
 dokku {{.CommandPrefix}}:expose lollipop`
 }
@@ -925,7 +925,7 @@ dokku {{.CommandPrefix}}:set lollipop wait-timeout 120
 go back to the wait timeout the host or the datastore sets
 dokku {{.CommandPrefix}}:set lollipop wait-timeout
 publish exposed ports that have no address of their own on one address rather than on every interface
-dokku {{.CommandPrefix}}:set lollipop expose-address 10.0.0.5
+dokku {{.CommandPrefix}}:set lollipop port-bind-address 10.0.0.5
 only accept connections to the exposed ports from clients in one IP address or CIDR
 dokku {{.CommandPrefix}}:set lollipop expose-source-range 10.0.0.0/8
 go back to accepting every client
@@ -943,7 +943,7 @@ go back to importing with the datastore's own arguments alone
 dokku {{.CommandPrefix}}:set lollipop import-args
 {{- end}}
 > NOTE: a log setting or a restart policy reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.
-> NOTE: an expose-address or expose-source-range reaches an exposed service with {{.CommandPrefix}}:reexpose, which replaces the container publishing its ports and leaves the service container running.`
+> NOTE: a port-bind-address or expose-source-range reaches an exposed service with {{.CommandPrefix}}:reexpose, which replaces the container publishing its ports and leaves the service container running.`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1032,7 +1032,7 @@ func (c *ReexposeCommand) Usage() string {
 
 // Documentation returns the long form documentation for the command
 func (c *ReexposeCommand) Documentation() string {
-	return `apply a changed expose-address or expose-source-range to an exposed service, on the ports it is already exposed on
+	return `apply a changed port-bind-address or expose-source-range to an exposed service, on the ports it is already exposed on
 dokku {{.CommandPrefix}}:set lollipop expose-source-range 10.0.0.0/8
 dokku {{.CommandPrefix}}:reexpose lollipop
 > NOTE: only the container publishing the service's ports is replaced, so the service keeps running, though connections made through the exposed ports are dropped. A service that is not exposed, or is not running, is refused.`

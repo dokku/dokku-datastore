@@ -507,7 +507,7 @@ dokku-datastore clone redis lollipop lollipop-3 --restart no --custom-env ""
 
 The `<VARIABLE>_CONFIG_OPTIONS` and `<VARIABLE>_CUSTOM_ENV` environment variables are not read by `clone`. They fill in a new service, and the source already says what its clone should have. The networks are copied as well, since a container joins a network under its own service name and a clone next to its source does not clash with it.
 
-The password, the exposed ports and the `expose-address` and `expose-source-range` they are published with, the app links and the backup credentials, schedule and encryption are not copied. The password is generated for each service unless `--password` or `--root-password` gives one, an exposed port would clash with the source's on the host, links belong to the apps, and a copied backup schedule would ship a second set of backups to the source's bucket.
+The password, the exposed ports and the `port-bind-address` and `expose-source-range` they are published with, the app links and the backup credentials, schedule and encryption are not copied. The password is generated for each service unless `--password` or `--root-password` gives one, an exposed port would clash with the source's on the host, links belong to the apps, and a copied backup schedule would ship a second set of backups to the source's bucket.
 
 ## Exposed services
 
@@ -537,14 +537,16 @@ dokku redis:expose lollipop 127.0.0.1:6380
 
 Two properties limit an exposed service without naming an address in every port:
 
-- `expose-address` is the address a port with no address of its own is published on, rather than every interface. A port exposed on an address of its own, such as `127.0.0.1:6380`, keeps it. It has to be an IPv4 or IPv6 address, written without brackets. Random ports, from an `expose` with no ports, are picked from the ones free on that address.
+- `port-bind-address` is the address a port with no address of its own is published on, rather than every interface. A port exposed on an address of its own, such as `127.0.0.1:6380`, keeps it. It has to be an IPv4 or IPv6 address, written without brackets. Random ports, from an `expose` with no ports, are picked from the ones free on that address.
 - `expose-source-range` is the only range of client addresses the exposed ports accept connections from, as one IP address or CIDR. A bare address is a range of one. The ambassador refuses a client outside it before anything reaches the service.
+
+`port-bind-address` used to be named `expose-address`. It was renamed because it only decides where the ports are bound, not the address clients connect to. A value set under the old name is not read, so it has to be set again under the new one.
 
 Both are read when the ambassador is made, and the ambassador records the ones it was made with. `reexpose` replaces it on the ports the service is already exposed on, which is how a change reaches a running service without restarting it. A `start`, `restart` or `upgrade` replaces an ambassador made with other settings as well, and a service that is not exposed takes them up on its next `expose`. `unexpose` leaves both set.
 
 ```shell
 # only clients on the private network, on the private interface
-dokku redis:set lollipop expose-address 10.0.0.5
+dokku redis:set lollipop port-bind-address 10.0.0.5
 dokku redis:set lollipop expose-source-range 10.0.0.0/8
 dokku redis:reexpose lollipop
 dokku redis:info lollipop --exposed-ports

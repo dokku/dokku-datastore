@@ -53,7 +53,6 @@ var InfoKeys = []InfoKey{
 	{Name: "definition", Description: "show the definition the service was created with"},
 	{Name: "dsn", Description: "show the service DSN"},
 	{Name: "export-args", Description: "show the extra arguments every export of the service is run with"},
-	{Name: "expose-address", Description: "show the address exposed ports without one of their own are published on"},
 	{Name: "expose-source-range", Description: "show the only range of client addresses the exposed ports accept"},
 	{Name: "exposed-ports", Description: "show service exposed ports"},
 	{Name: "id", Description: "show the service container id"},
@@ -67,6 +66,7 @@ var InfoKeys = []InfoKey{
 	{Name: "log-opt", Description: "show the docker log options the service container is run with"},
 	{Name: "memory", Description: "show the memory limit the service container is run with"},
 	{Name: "mounts", Description: "show the host paths and docker volumes mounted into the service container"},
+	{Name: "port-bind-address", Description: "show the address exposed ports without one of their own are bound on"},
 	{Name: "post-create-network", Description: "show the networks to attach to after service container creation"},
 	{Name: "post-start-network", Description: "show the networks to attach to after service container start"},
 	{Name: "restart-policy", Description: "show the restart policy the service container is run with"},
@@ -137,7 +137,7 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info[service.LogOptProperty] = common.PropertyGet(commandPrefix, input.ServiceName, service.LogOptProperty)
 	info[service.RestartPolicyProperty] = service.ServiceRestartPolicy(input.Datastore, input.ServiceName)
 	info[service.WaitTimeoutProperty] = service.ServiceWaitTimeout(input.Datastore, input.ServiceName)
-	info[service.ExposeAddressProperty] = service.ServiceExposeAddress(input.Datastore, input.ServiceName)
+	info[service.PortBindAddressProperty] = service.ServicePortBindAddress(input.Datastore, input.ServiceName)
 	info[service.ExposeSourceRangeProperty] = service.ServiceExposeSourceRange(input.Datastore, input.ServiceName)
 	info[service.ExportArgsProperty] = service.ServiceExtraArgs(input.Datastore, input.ServiceName, service.ExportArgsProperty)
 	info[service.ImportArgsProperty] = service.ServiceExtraArgs(input.Datastore, input.ServiceName, service.ImportArgsProperty)

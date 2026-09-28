@@ -131,7 +131,7 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		service.LogOptProperty:            "max-size=20m,max-file=3",
 		service.RestartPolicyProperty:     "unless-stopped",
 		service.WaitTimeoutProperty:       "120",
-		service.ExposeAddressProperty:     "10.0.0.5",
+		service.PortBindAddressProperty:   "10.0.0.5",
 		service.ExposeSourceRangeProperty: "10.0.0.0/8",
 	} {
 		if err := SetProperty(datastore, "lollipop", key, value); err != nil {
@@ -159,7 +159,7 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		"database-name":       "lollipop_db",
 		"definition":          "redis",
 		"export-args":         "--hex-blob",
-		"expose-address":      "10.0.0.5",
+		"port-bind-address":   "10.0.0.5",
 		"expose-source-range": "10.0.0.0/8",
 		"image":               "redis",
 		"image-version":       "8.4.2",

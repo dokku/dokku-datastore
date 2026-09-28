@@ -208,14 +208,14 @@ func TestExposedPorts(t *testing.T) {
 			expected:  "6379->33201",
 		},
 		{
-			name:      "a port on the expose-address",
+			name:      "a port on the port-bind-address",
 			datastore: Datastores["redis"],
 			portFile:  ptr("33201\n"),
 			address:   "10.0.0.5",
 			expected:  "6379->10.0.0.5:33201",
 		},
 		{
-			name:      "a port on an IPv6 expose-address",
+			name:      "a port on an IPv6 port-bind-address",
 			datastore: Datastores["redis"],
 			portFile:  ptr("33201\n"),
 			address:   "::1",
@@ -241,7 +241,7 @@ func TestExposedPorts(t *testing.T) {
 			}
 
 			if test.address != "" {
-				if err := common.PropertyWrite(test.datastore.Properties().CommandPrefix, "lollipop", ExposeAddressProperty, test.address); err != nil {
+				if err := common.PropertyWrite(test.datastore.Properties().CommandPrefix, "lollipop", PortBindAddressProperty, test.address); err != nil {
 					t.Fatalf("failed to write the property: %v", err)
 				}
 			}

@@ -18,7 +18,7 @@ func TestSetPropertyRejectsUnknownKeys(t *testing.T) {
 		t.Fatal("expected an error for an unknown key, got none")
 	}
 
-	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, log-driver, log-opt, restart-policy, wait-timeout, expose-address, expose-source-range, export-args, import-args"
+	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, expose-source-range, export-args, import-args"
 	if err.Error() != expected {
 		t.Errorf("expected %q, got %q", expected, err)
 	}
@@ -31,7 +31,7 @@ func TestSettableProperties(t *testing.T) {
 	// the two that bound a container's log, the policy docker restarts it by, how
 	// long it is waited on to become ready, where and to whom an exposed service
 	// is published, and the arguments its exports and imports are run with
-	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "log-driver", "log-opt", "restart-policy", "wait-timeout", "expose-address", "expose-source-range", "export-args", "import-args"}
+	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "expose-source-range", "export-args", "import-args"}
 	if strings.Join(SettableProperties, ",") != strings.Join(expected, ",") {
 		t.Errorf("expected %v, got %v", expected, SettableProperties)
 	}
@@ -134,23 +134,23 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 		},
 		{
 			// docker publishes on an address, not a name
-			name:     "an expose address that is a hostname",
-			key:      service.ExposeAddressProperty,
+			name:     "a port bind address that is a hostname",
+			key:      service.PortBindAddressProperty,
 			value:    "localhost",
-			expected: `invalid expose-address value "localhost"`,
+			expected: `invalid port-bind-address value "localhost"`,
 		},
 		{
 			// the brackets belong to a port, not to an address
-			name:     "an expose address in brackets",
-			key:      service.ExposeAddressProperty,
+			name:     "a port bind address in brackets",
+			key:      service.PortBindAddressProperty,
 			value:    "[::1]",
-			expected: `invalid expose-address value "[::1]"`,
+			expected: `invalid port-bind-address value "[::1]"`,
 		},
 		{
-			name:     "an expose address that is not an address",
-			key:      service.ExposeAddressProperty,
+			name:     "a port bind address that is not an address",
+			key:      service.PortBindAddressProperty,
 			value:    "a.b.c.d",
-			expected: `invalid expose-address value "a.b.c.d"`,
+			expected: `invalid port-bind-address value "a.b.c.d"`,
 		},
 		{
 			name:     "a source range with too many bits",
@@ -203,7 +203,7 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 // Unsetting is how every other property is cleared, so an empty value has to
 // reach the delete rather than being refused as an unusable one.
 func TestSetPropertyAcceptsAnEmptyValue(t *testing.T) {
-	for _, key := range []string{service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.ExposeAddressProperty, service.ExposeSourceRangeProperty, service.ExportArgsProperty, service.ImportArgsProperty} {
+	for _, key := range []string{service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.PortBindAddressProperty, service.ExposeSourceRangeProperty, service.ExportArgsProperty, service.ImportArgsProperty} {
 		if err := ValidatePropertyValue(key, ""); err != nil {
 			t.Errorf("expected an empty %s to be accepted, got %q", key, err)
 		}

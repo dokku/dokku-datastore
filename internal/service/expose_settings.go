@@ -8,36 +8,36 @@ import (
 	"github.com/dokku/dokku/plugins/common"
 )
 
-// ExposeAddressProperty is the address an exposed service's ports are
+// PortBindAddressProperty is the address an exposed service's ports are
 // published on when the port file gives them none of their own. Empty
 // publishes them on every interface, which is what every exposed service did
 // before there was anything to say here.
 //
 // Read when the ambassador is made, so a change reaches the running service
 // on the next reexpose, or whenever the ambassador is next replaced.
-const ExposeAddressProperty = "expose-address"
+const PortBindAddressProperty = "port-bind-address"
 
 // ExposeSourceRangeProperty is the only range of client addresses an exposed
 // service accepts connections from. Empty accepts every client.
 //
-// Read when the ambassador is made, like the expose address.
+// Read when the ambassador is made, like the port bind address.
 const ExposeSourceRangeProperty = "expose-source-range"
 
-// ValidateExposeAddress reports whether a value is an address an exposed
+// ValidatePortBindAddress reports whether a value is an address an exposed
 // service can be published on: an IPv4 or IPv6 address, written without the
 // brackets a port gives an IPv6 one. An empty value is valid and means every
 // interface.
 //
 // A hostname such as localhost is refused, as it is in a port: docker only
 // publishes on an address.
-func ValidateExposeAddress(value string) error {
+func ValidatePortBindAddress(value string) error {
 	if value == "" {
 		return nil
 	}
 
 	address, err := netip.ParseAddr(value)
 	if err != nil || address.Zone() != "" {
-		return fmt.Errorf("invalid %s value %q, must be an IPv4 or IPv6 address", ExposeAddressProperty, value)
+		return fmt.Errorf("invalid %s value %q, must be an IPv4 or IPv6 address", PortBindAddressProperty, value)
 	}
 
 	return nil
@@ -70,10 +70,10 @@ func ValidateExposeSourceRange(value string) error {
 	return nil
 }
 
-// ServiceExposeAddress is the address a service's ports are published on when
+// ServicePortBindAddress is the address a service's ports are published on when
 // they have none of their own, empty for every interface.
-func ServiceExposeAddress(s *Datastore, serviceName string) string {
-	return strings.TrimSpace(common.PropertyGet(s.Properties().CommandPrefix, serviceName, ExposeAddressProperty))
+func ServicePortBindAddress(s *Datastore, serviceName string) string {
+	return strings.TrimSpace(common.PropertyGet(s.Properties().CommandPrefix, serviceName, PortBindAddressProperty))
 }
 
 // ServiceExposeSourceRange is the only range of client addresses a service
