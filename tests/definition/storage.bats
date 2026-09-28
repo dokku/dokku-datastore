@@ -46,12 +46,17 @@ unbound_on_purpose() {
 }
 
 # paths in a container's own layer that hold nothing a datastore keeps: pid
-# files and sockets, scratch space, and the certificate authority a docker
-# desktop such as orbstack adds to every container it starts
+# files and sockets, scratch space, logs, which docker keeps a copy of anyway,
+# caches rebuilt on start, the history a client the probes run keeps, and the
+# certificate authority a docker desktop such as orbstack adds to every
+# container it starts
 not_data() {
   case "$1" in
   /run | /run/* | /var/run | /var/run/* | /tmp | /tmp/*) return 0 ;;
-  */orbstack-root.crt) return 0 ;;
+  /var/log/* | */logs/* | *.log | *.log.[0-9]*) return 0 ;;
+  */.cache/* | */dropin.cache | /var/lib/nginx/*) return 0 ;;
+  /root/.*_history) return 0 ;;
+  */orbstack-root.crt | /etc/ssl/certs/ca-certificates.crt) return 0 ;;
   esac
   return 1
 }
