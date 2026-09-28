@@ -124,10 +124,11 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return err
 	}
 
-	// the version decides the definition before anything else is settled: a
-	// datastore split by major version mounts its data somewhere different in
-	// each, and the requirements checked below are the definition's own
-	input.Datastore = input.Datastore.ForImageVersion(input.ImageVersion)
+	// the image and version decide the definition before anything else is
+	// settled: a datastore split by major version mounts its data somewhere
+	// different in each, a flavor such as pgvector has definitions of its own, and
+	// the requirements checked below are the definition's own
+	input.Datastore = input.Datastore.ForImage(input.Image, input.ImageVersion)
 
 	// the name decides the database, so one the datastore keeps for itself is
 	// refused before anything is made for it

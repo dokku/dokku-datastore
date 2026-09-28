@@ -97,7 +97,8 @@ A plugin may carry the definitions for its own datastore, in `datastore/<name>/`
 It writes the script dokku runs for each of the plugin's commands in `subcommands/` too: every command this binary implements, such as `create`, `expose` and `enter`, and every one a definition declares for itself, such as mongo's `connect-admin`. These are the scripts the plugins used to keep by hand, so a command this binary starts implementing reaches a plugin the next time it is regenerated, as a trigger does. Every datastore gets a script for every command, as the plugins had, and one its datastore does not implement exits the way dokku expects of a command a plugin does not handle. The `enter` script passes the command to run in the container after a `--`, so a flag of its own, such as `mariabackup --backup`, is not read as one of the binary's. A definition may not declare a command under the name of one this binary implements, which `generate` refuses rather than writing one over the other.
 
 ```shell
-# writes datastore/postgres-17/, datastore/postgres-18/ and subcommands/
+# writes datastore/postgres-17/, datastore/postgres-18/, one directory per
+# flavor and major such as datastore/postgres-pgvector-pg17/, and subcommands/
 dokku-datastore generate --plugin-dir . postgres
 ```
 
@@ -123,6 +124,35 @@ If a service names a definition the plugin no longer ships, commands that would 
 
 `upgrade` across a major version moves the service onto the other definition, which moves where its data is mounted along with it. That is the upgrade a major version asks for rather than something to work around, but it is not a tag change and it is not reversible by pointing the version back. A bare `upgrade` never crosses one: with no version named it moves to the newest tag the service's own major version ships, and leaves the data where it is.
 
+## Flavors
+
+A flavor is a datastore on an image other than its own, shipped as definitions of its own - one per major version, named `<plugin>-<flavor>-<major>` - so that it is placed on the right data directory and followed by dependabot like any other. Postgres has three:
+
+| Definition | Image | Tags |
+|---|---|---|
+| `postgres-pgvector-pg17` | `pgvector/pgvector` | `*-pg17` |
+| `postgres-pgvector-pg18` | `pgvector/pgvector` | `*-pg18` |
+| `postgres-postgis-pg17` | `postgis/postgis` | `17-*` |
+| `postgres-postgis-pg18` | `postgis/postgis` | `18-*` |
+| `postgres-timescaledb-pg17` | `timescale/timescaledb` | `*-pg17` |
+| `postgres-timescaledb-pg18` | `timescale/timescaledb` | `*-pg18` |
+
+The image picks the flavor and the version picks the major within it, however that image writes its tags: pgvector and timescaledb carry the postgres major as a `-pg17` suffix after their own version, and postgis leads with it. A version that only named the major by its leading number used to place `pgvector/pgvector:pg17` on `postgres-18`, which mounts its data one directory above where postgres 17 keeps it.
+
+```shell
+# creates a service on the postgres-pgvector-pg17 definition
+dokku-datastore create postgres db --image pgvector/pgvector --image-version pg17
+
+# and on postgres-pgvector-pg18, the newest pgvector, at the version it pins
+dokku-datastore create postgres db --image pgvector/pgvector
+```
+
+An image no definition ships still runs on the datastore's own definitions, as it did before flavors existed. A service pinned to one of those keeps its pin: a service created with `pgvector/pgvector:pg17` before pgvector had definitions of its own was placed on `postgres-18`, and its data is where that definition mounts it. `upgrade` only moves a service onto a flavor's definition when the image it ran and the one it is moved to resolve to different definitions, so an upgrade inside a major leaves such a service where it is, and one across a major or onto another image moves it.
+
+The images are pinned in each definition's `Dockerfile`, and dependabot holds an older major inside it according to how the image writes its tags. A tag carrying the major as a suffix, such as `0.8.6-pg17`, is only ever moved to one with the same suffix, so it needs nothing more; a tag leading with the major, such as `17-3.5`, needs its semver-major updates ignored, as `postgres-17` does. `go test` checks both, and that every definition has an entry.
+
+postgis publishes images for amd64 only, so its definitions do not run on an arm64 host. The timescaledb image is alpine rather than debian, so its postgres user is `70` rather than `999`, and it ships no `openssl`: its certificate is made in the plain postgres image of the same major, at the tag that definition pins.
+
 ## The version a service runs
 
 A service records the image it runs in `IMAGE` and `IMAGE_VERSION` beside its data, and that record is what it is placed by every time its container has to be made again. A release that ships a newer image does not move a service that already exists onto it - only `upgrade` changes the version a service runs.
@@ -143,7 +173,7 @@ dokku-datastore upgrade redis lollipop --image-version 8.9.0
 
 ## An image the plugin does not ship
 
-A service may run an image other than the one its definition pins, which is how redis runs `redis/redis-stack-server` and postgres runs `postgis/postgis`. The version that image runs at has to be named alongside it, because a tag belongs to the repository that published it and the definition ships no tag for somebody else's: pasting its own on named `redis/redis-stack-server` at whatever version plain `redis` is on, which is a reference nobody ever built, and the command then failed saying that image was missing.
+A service may run an image other than the one its definition pins, which is how redis runs `redis/redis-stack-server`. An image a datastore ships as a [flavor](#flavors), such as `postgis/postgis`, has definitions of its own and so a version to fall back on. The version that image runs at has to be named alongside it, because a tag belongs to the repository that published it and the definition ships no tag for somebody else's: pasting its own on named `redis/redis-stack-server` at whatever version plain `redis` is on, which is a reference nobody ever built, and the command then failed saying that image was missing.
 
 ```shell
 # refused, and says which image has no version rather than inventing one

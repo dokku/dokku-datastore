@@ -327,11 +327,22 @@ func (r *Registry) Definition(name string) (definition.Definition, bool) {
 	return found, ok
 }
 
-// For returns the definition a service of a given datastore type runs. Where a
-// datastore is split by major version the imageVersion selects between them; a
-// service with no recorded version, which is what a service whose container is
-// gone looks like, gets the newest rather than an error.
+// For returns the definition a service of a given datastore type runs on the
+// datastore's own image. It is ForImage without an image.
 func (r *Registry) For(plugin string, imageVersion string) (definition.Definition, error) {
+	return r.ForImage(plugin, "", imageVersion)
+}
+
+// ForImage returns the definition a service of a given datastore type runs.
+//
+// The image selects the flavor: a definition shipping another image, such as
+// postgres-pgvector-pg17 shipping pgvector/pgvector, is only ever chosen for
+// that image, and an image no definition ships runs on the datastore's own
+// definitions, which is what it did before flavors existed. Within those, the
+// imageVersion selects the major version. A service with no recorded version,
+// which is what a service whose container is gone looks like, gets the newest
+// rather than an error.
+func (r *Registry) ForImage(plugin string, image string, imageVersion string) (definition.Definition, error) {
 	names, ok := r.byPlugin[plugin]
 	if !ok {
 		return definition.Definition{}, fmt.Errorf("datastore type %s is not supported", plugin)
@@ -341,15 +352,62 @@ func (r *Registry) For(plugin string, imageVersion string) (definition.Definitio
 		return r.definitions[names[0]], nil
 	}
 
-	major := majorVersion(imageVersion)
-	if major != "" {
-		if found, ok := r.definitions[plugin+"-"+major]; ok {
-			return found, nil
+	candidates := r.candidatesFor(names, image)
+	for _, name := range candidates {
+		found := parseVariant(name)
+		if found.major == 0 {
+			continue
+		}
+
+		if major, ok := tagMajor(imageVersion, found.prefix); ok && major == found.major {
+			return r.definitions[name], nil
 		}
 	}
 
-	// byPlugin is sorted, so the last entry is the newest major
-	return r.definitions[names[len(names)-1]], nil
+	// byPlugin is sorted, so the last entry of a flavor is its newest major
+	return r.definitions[candidates[len(candidates)-1]], nil
+}
+
+// candidatesFor is the definitions of one datastore a given image can run on:
+// the ones shipping that image, and otherwise the ones that are not a flavor.
+func (r *Registry) candidatesFor(names []string, image string) []string {
+	shipping := []string{}
+	plain := []string{}
+	for _, name := range names {
+		if image != "" && sameRepository(r.definitions[name].DefaultImage, image) {
+			shipping = append(shipping, name)
+		}
+
+		if parseVariant(name).flavor == "" {
+			plain = append(plain, name)
+		}
+	}
+
+	if len(shipping) > 0 {
+		return shipping
+	}
+
+	// a datastore made only of flavors has nothing plain to fall back on, and
+	// any of its definitions is a better answer than none
+	if len(plain) == 0 {
+		return names
+	}
+
+	return plain
+}
+
+// sameRepository reports whether two image references name one repository,
+// whether or not either spells out the docker hub it defaults to.
+func sameRepository(left string, right string) bool {
+	return normalizeRepository(left) == normalizeRepository(right)
+}
+
+func normalizeRepository(image string) string {
+	for _, registry := range []string{"docker.io/", "index.docker.io/"} {
+		image = strings.TrimPrefix(image, registry)
+	}
+
+	return strings.TrimPrefix(image, "library/")
 }
 
 // NamesFor returns every definition belonging to a datastore type, oldest first.
@@ -379,36 +437,103 @@ func (r *Registry) Names() []string {
 	return names
 }
 
-// sortVariants orders a datastore's definitions oldest first.
+// sortVariants orders a datastore's definitions by flavor, the datastore's own
+// first, and each flavor oldest first.
 //
 // By the number rather than by the name: a datastore that reaches a tenth major
 // version would otherwise sort it before its seventh, and the newest, which is
 // what a service with no recorded version falls back to, would be the wrong one.
 func sortVariants(names []string) {
 	sort.Slice(names, func(i int, j int) bool {
-		left, right := variantVersion(names[i]), variantVersion(names[j])
-		if left != right {
-			return left < right
+		left, right := parseVariant(names[i]), parseVariant(names[j])
+		if left.flavor != right.flavor {
+			return left.flavor < right.flavor
+		}
+
+		if left.major != right.major {
+			return left.major < right.major
 		}
 
 		return names[i] < names[j]
 	})
 }
 
-// variantVersion is the major version a definition's name ends in, or zero for
-// a datastore that is not split by version.
-func variantVersion(name string) int {
-	_, suffix, found := strings.Cut(name, "-")
+// variant is what a definition's name says about it.
+//
+// A definition is named <plugin>, <plugin>-<major> or <plugin>-<flavor>-<major>,
+// where the major may be written the way the flavor's image tags write it:
+// postgres-18 is postgres 18 on the postgres image, and postgres-pgvector-pg17
+// is postgres 17 on the pgvector image, whose tags carry the major as pg17.
+type variant struct {
+	// flavor is the image a definition ships other than the datastore's own, or
+	// empty for the datastore's own
+	flavor string
+
+	// prefix is what the major is written after in an image tag, "pg" for pg17
+	prefix string
+
+	// major is the major version, or zero for a datastore not split by version
+	major int
+}
+
+// parseVariant reads a definition's name. The plugin is everything before the
+// first hyphen, which is how a variant has always been named.
+func parseVariant(name string) variant {
+	_, rest, found := strings.Cut(name, "-")
 	if !found {
-		return 0
+		return variant{}
 	}
 
-	version, err := strconv.Atoi(suffix)
+	flavor, suffix := "", rest
+	if index := strings.LastIndex(rest, "-"); index >= 0 {
+		flavor, suffix = rest[:index], rest[index+1:]
+	}
+
+	prefix := strings.TrimRightFunc(suffix, func(char rune) bool {
+		return char >= '0' && char <= '9'
+	})
+
+	major, err := strconv.Atoi(suffix[len(prefix):])
 	if err != nil {
-		return 0
+		// a name that ends in no version is a flavor with only the one
+		// definition, or a datastore named with a hyphen
+		return variant{flavor: rest}
 	}
 
-	return version
+	return variant{flavor: flavor, prefix: prefix, major: major}
+}
+
+// tagMajor returns the major version an image tag carries.
+//
+// Where the definition's name writes its major after a prefix, a hyphenated
+// part of the tag written the same way names it, so that pg17, 0.8.6-pg17 and
+// 0.8.6-pg17-trixie are all 17 for pg: the leading number of those is the
+// extension's own version rather than postgres's. Otherwise, and for a tag with
+// no such part, it is the tag's leading number, so that 18.4 and 17-3.5 are 18
+// and 17. postgis is named postgres-postgis-pg17 alongside the other flavors
+// and still leads its tags with the major.
+func tagMajor(imageVersion string, prefix string) (int, bool) {
+	digits := ""
+	if prefix != "" {
+		for _, part := range strings.Split(imageVersion, "-") {
+			candidate, found := strings.CutPrefix(part, prefix)
+			if found && candidate != "" && majorVersion(candidate) == candidate {
+				digits = candidate
+				break
+			}
+		}
+	}
+
+	if digits == "" {
+		digits = majorVersion(imageVersion)
+	}
+
+	major, err := strconv.Atoi(digits)
+	if err != nil {
+		return 0, false
+	}
+
+	return major, true
 }
 
 // majorVersion returns the leading numeric component of an image tag, so that

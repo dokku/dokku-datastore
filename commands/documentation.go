@@ -346,6 +346,13 @@ dokku {{.CommandPrefix}}:create lollipop
 an image other than {{.Image}} has no version to fall back on, because the
 version this plugin pins belongs to {{.Image}}, so name one alongside it.
 dokku {{.CommandPrefix}}:create lollipop --image <image> --image-version <version>
+{{- if .Flavors}}
+these images each have definitions of their own, one per major version, so a
+service on one is placed by the major its tag carries and has a version to fall back on.
+{{- range .Flavors}}
+dokku {{$.CommandPrefix}}:create lollipop --image {{.Image}} --image-version {{.ImageVersion}}
+{{- end}}
+{{- end}}
 you can also specify custom environment variables to start
 the {{.CommandPrefix}} service in semicolon-separated form.
 export {{.PluginVariable}}_CUSTOM_ENV="USER=alpha;HOST=beta"

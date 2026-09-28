@@ -210,7 +210,9 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	// mounts the service already has are checked too, since a host path removed
 	// since it was mounted would otherwise only be found once there is no
 	// container left to go back to
-	if err := checkUpgradeMounts(ctx, input, taggedImage); err != nil {
+	image, imageVersion, _ := definition.CutImage(taggedImage)
+	target := upgradeTarget(input.Datastore, recorded, image, imageVersion)
+	if err := checkUpgradeMounts(ctx, input, target); err != nil {
 		return err
 	}
 
@@ -239,7 +241,6 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	// Recorded together with the image it was resolved from: a container rebuilt
 	// later is placed by these two files and nothing else, so a pin that moved
 	// without the image would mount the new path at the old version.
-	image, imageVersion, _ := definition.CutImage(taggedImage)
 	if err := service.RecordImage(service.RecordImageInput{
 		Datastore:    input.Datastore,
 		Image:        image,
@@ -249,7 +250,7 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		return err
 	}
 
-	input.Datastore = input.Datastore.ForImageVersion(imageVersion)
+	input.Datastore = target
 	if err := service.PinDefinition(input.Datastore, input.ServiceName); err != nil {
 		return err
 	}
@@ -386,10 +387,35 @@ func applyUpgradeSettings(input UpgradeServiceInput) error {
 	return nil
 }
 
+// upgradeTarget is the datastore an upgrade leaves a service running.
+//
+// The definition moves only when the image the service recorded and the one it
+// is upgraded to resolve to different definitions, which is an upgrade across a
+// major version or onto another flavor. Anything else keeps the definition the
+// service is pinned to, even where the new image alone would resolve elsewhere:
+// a service created with pgvector/pgvector:pg17 before pgvector had definitions
+// of its own was pinned to postgres-18, and its data is where that definition
+// mounts it rather than where postgres-pgvector-pg17 would look for it.
+//
+// Pure, so which definition an upgrade lands on is pinned by a test rather than
+// by a docker daemon.
+func upgradeTarget(s *service.Datastore, recorded service.RecordedImage, image string, imageVersion string) *service.Datastore {
+	target := s.ForImage(image, imageVersion)
+	if recorded.ImageVersion == "" {
+		return target
+	}
+
+	if s.ForImage(recorded.Image, recorded.ImageVersion).DefinitionName() == target.DefinitionName() {
+		return s
+	}
+
+	return target
+}
+
 // checkUpgradeMounts reports whether the mounts a service will have after an
 // upgrade can be given to the container it is upgraded to: the ones the upgrade
 // was asked for, and otherwise the ones the service already has.
-func checkUpgradeMounts(ctx context.Context, input UpgradeServiceInput, taggedImage string) error {
+func checkUpgradeMounts(ctx context.Context, input UpgradeServiceInput, target *service.Datastore) error {
 	var mounts []service.Mount
 	if input.Mounts != nil {
 		mounts = *input.Mounts
@@ -401,8 +427,6 @@ func checkUpgradeMounts(ctx context.Context, input UpgradeServiceInput, taggedIm
 		mounts = stored
 	}
 
-	_, imageVersion, _ := definition.CutImage(taggedImage)
-	target := input.Datastore.ForImageVersion(imageVersion)
 	if err := service.CheckMounts(target.Definition, mounts); err != nil {
 		return fmt.Errorf("unable to upgrade %s: %w", input.ServiceName, err)
 	}

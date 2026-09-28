@@ -15,7 +15,7 @@ setup_file() {
   # the clone means it was copied rather than defaulted. Log settings are left
   # out: a max-size is refused by a daemon that logs any way but json-file or
   # local, and the unit tests already cover copying them
-  "$BIN" create "$PLUGIN" "$SERVICE" --image-version "$IMAGE_VERSION" \
+  "$BIN" create "$PLUGIN" "$SERVICE" --image "$IMAGE" --image-version "$IMAGE_VERSION" \
     --memory 512 --shm-size 128m --restart unless-stopped --custom-env FOO=bar --wait-timeout 120 \
     --volume "$(mount_source clone):$MOUNT_TARGET:ro"
   "$BIN" set "$PLUGIN" "$SERVICE" backup-keyserver keys.example.com

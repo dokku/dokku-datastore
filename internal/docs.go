@@ -72,6 +72,17 @@ type DocumentationData struct {
 	// ReservedNames are the service names create and clone refuse, because the
 	// database a service is named after would be one the datastore keeps
 	ReservedNames []string
+
+	// Flavors are the images other than the datastore's own that it ships
+	// definitions for, such as pgvector/pgvector for postgres, each at the
+	// version its newest definition pins
+	Flavors []DocumentedImage
+}
+
+// DocumentedImage is an image and the version a definition pins for it.
+type DocumentedImage struct {
+	Image        string
+	ImageVersion string
 }
 
 // DocumentationDataInput is the input for the NewDocumentationData function
@@ -114,7 +125,34 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		ExportArgs:     input.Datastore.AcceptsExtraArgs("export"),
 		ImportArgs:     input.Datastore.AcceptsExtraArgs("import"),
 		ReservedNames:  input.Datastore.Definition.Dokku.ReservedNames,
+		Flavors:        documentedFlavors(input.Datastore),
 	}
+}
+
+// documentedFlavors is every image a datastore ships definitions for besides
+// its own, in the order its definitions are kept, at the version the newest of
+// each pins. Definitions come oldest first, so the last one seen for an image
+// is the one a create naming only that image lands on.
+func documentedFlavors(datastore *service.Datastore) []DocumentedImage {
+	own := datastore.Definition.DefaultImage
+	flavors := []DocumentedImage{}
+	seen := map[string]int{}
+	for _, found := range datastore.Definitions() {
+		if found.DefaultImage == own {
+			continue
+		}
+
+		documented := DocumentedImage{Image: found.DefaultImage, ImageVersion: found.DefaultImageVersion}
+		if index, ok := seen[found.DefaultImage]; ok {
+			flavors[index] = documented
+			continue
+		}
+
+		seen[found.DefaultImage] = len(flavors)
+		flavors = append(flavors, documented)
+	}
+
+	return flavors
 }
 
 // documentedImage works out which image the readme and the help are written

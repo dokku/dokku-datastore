@@ -79,7 +79,8 @@ setup() {
 }
 
 @test "($DEFINITION) backup ships the dump and it restores" {
-  local probe="$REPO_ROOT/tests/probes/$DEFINITION.sh"
+  local probe
+  probe="$(probe_path)"
   if [[ -x "$probe" ]]; then
     run "$probe" write "$SERVICE"
     assert_success

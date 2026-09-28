@@ -34,8 +34,11 @@ SERVICE="${SERVICE:-ci-$(basename "$BATS_TEST_FILENAME" .bats)}"
 # two definitions of one datastore, and the commands take the datastore
 PLUGIN="$(awk '/^  plugin:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose.yml")"
 
-# the version this definition pins, so a datastore split by major version runs
-# the variant this run is for rather than whichever is newest
+# the image and version this definition pins, so a datastore split by major
+# version runs the variant this run is for rather than whichever is newest, and
+# a flavor such as postgres-pgvector-pg17 runs on its own image rather than the
+# datastore's. Every create passes both
+IMAGE="$(awk '/^FROM / { split($2, parts, ":"); print parts[1]; exit }' "$DEFINITION_ROOT/Dockerfile")"
 IMAGE_VERSION="$(awk -F: '/^FROM / { print $2; exit }' "$DEFINITION_ROOT/Dockerfile")"
 
 # the directory its services live in, which is the plugin name unless the
@@ -135,9 +138,21 @@ reserved_name() {
   awk -F'[][]' '/^  reserved_names:/ { split($2, names, ","); gsub(/ /, "", names[1]); print names[1]; exit }' "$DEFINITION_ROOT/docker-compose.yml"
 }
 
+# the probe that writes and reads back a known record: the definition's own if
+# it has one, and otherwise its datastore's, so that postgres-17, postgres-18
+# and every postgres flavor share tests/probes/postgres.sh
+probe_path() {
+  if [[ -x "$REPO_ROOT/tests/probes/$DEFINITION.sh" ]]; then
+    echo "$REPO_ROOT/tests/probes/$DEFINITION.sh"
+    return
+  fi
+
+  echo "$REPO_ROOT/tests/probes/$PLUGIN.sh"
+}
+
 # creates a service on the version this definition pins
 create_service() {
-  "$BIN" create "$PLUGIN" "$1" --image-version "$IMAGE_VERSION"
+  "$BIN" create "$PLUGIN" "$1" --image "$IMAGE" --image-version "$IMAGE_VERSION"
 }
 
 # whether this definition declares a secret that the environment variable,

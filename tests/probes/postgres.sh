@@ -3,8 +3,8 @@
 # survived rather than only that the service came back up.
 set -eo pipefail
 
-ACTION="${1:?usage: $0 <write|clobber|read> <service>}"
-SERVICE="${2:?usage: $0 <write|clobber|read> <service>}"
+ACTION="${1:?usage: $0 <write|clobber|read|extension> <service> [extension]}"
+SERVICE="${2:?usage: $0 <write|clobber|read|extension> <service> [extension]}"
 CONTAINER="dokku.postgres.$SERVICE"
 PASSWORD="$(cat "$DOKKU_LIB_ROOT/services/postgres/$SERVICE/PASSWORD")"
 # the database the service was created with, which is the service name with
@@ -25,6 +25,13 @@ clobber)
   ;;
 read)
   sql "SELECT value FROM probe;"
+  ;;
+extension)
+  # the extension a flavor's image exists to ship, created and then reported
+  # back by name, so a flavor running the plain postgres image fails here
+  EXTENSION="${3:?usage: $0 extension <service> <extension>}"
+  sql "CREATE EXTENSION IF NOT EXISTS $EXTENSION;" >/dev/null
+  sql "SELECT extname FROM pg_extension WHERE extname = '$EXTENSION';"
   ;;
 *)
   echo "unknown action $ACTION" >&2
