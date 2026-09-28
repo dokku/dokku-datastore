@@ -13,10 +13,11 @@ import (
 // was pinned to. Reproducing it is the whole point of the declarative renderer:
 // it is the difference between believing the migration is faithful and knowing.
 //
-// It carries one deliberate addition since, --dir naming the data volume. Redis
-// writes its dump to its working directory, which is the data volume only while
-// that volume is where the image expects it, so a service that moved the volume
-// would otherwise write its data where nothing is mounted.
+// It carries one deliberate addition since, the working directory naming the
+// data volume. Redis writes its dump to its working directory, and the image's
+// entrypoint hands that directory to the redis user, so a service that moved the
+// volume would otherwise write its data where nothing is mounted, or be refused
+// the directory it is mounted in.
 const goldenContainerArgs = "testdata/container_args.golden"
 
 // redisScope is the state of a redis service named lollipop, matching the fixture
@@ -312,7 +313,8 @@ func TestContainerArgsMountsAMovedVolume(t *testing.T) {
 	for _, expected := range []string{
 		"--volume=/var/lib/dokku/services/redis/lollipop/data:/redis-data\n",
 		"--volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis\n",
-		"redis-server\n/usr/local/etc/redis/redis.conf\n--bind\n0.0.0.0\n--dir\n/redis-data",
+		"--workdir=/redis-data\n",
+		"redis-server\n/usr/local/etc/redis/redis.conf\n--bind\n0.0.0.0",
 	} {
 		if !strings.Contains(argv, expected) {
 			t.Errorf("expected %q in the argv, got:\n%s", expected, argv)

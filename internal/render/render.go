@@ -58,6 +58,11 @@ func ContainerArgs(input Input) (ContainerArgsInput, error) {
 		return ContainerArgsInput{}, err
 	}
 
+	workingDir, err := definition.Render(service.WorkingDir, input.Scope)
+	if err != nil {
+		return ContainerArgsInput{}, err
+	}
+
 	// a variable that renders to nothing is left out, the way RenderAll drops
 	// an empty element. The declared environment is applied after the custom
 	// one, so passing it empty would clear a value the operator set.
@@ -102,6 +107,7 @@ func ContainerArgs(input Input) (ContainerArgsInput, error) {
 		TaggedImage:    image,
 		Volumes:        volumes,
 		VolumeMounts:   input.Scope.VolumeMounts,
+		WorkingDir:     workingDir,
 	}, nil
 }
 

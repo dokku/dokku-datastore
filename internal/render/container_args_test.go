@@ -15,12 +15,13 @@ var updateGolden = flag.Bool("update-golden", false, "rewrite the golden files i
 
 // redisContainerArgs is what the previous hand written redis service passed
 // named lollipop, with everything the user can vary left at its default. The
-// --dir naming the data volume is the one thing added since, so that a service
-// that moves the volume writes its dump into it.
+// working directory naming the data volume is the one thing added since, so that
+// a service that moves the volume writes its dump into it.
 func redisContainerArgs() ContainerArgsInput {
 	return ContainerArgsInput{
 		CommandPrefix: "redis",
-		Command:       []string{"redis-server", "/usr/local/etc/redis/redis.conf", "--bind", "0.0.0.0", "--dir", "/data"},
+		Command:       []string{"redis-server", "/usr/local/etc/redis/redis.conf", "--bind", "0.0.0.0"},
+		WorkingDir:    "/data",
 		ContainerName: "dokku.redis.lollipop",
 		EnvFile:       "/var/lib/dokku/services/redis/lollipop/ENV",
 		IDFile:        "/var/lib/dokku/services/redis/lollipop/ID",

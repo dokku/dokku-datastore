@@ -384,4 +384,9 @@ func TestComposeMountsAMovedVolume(t *testing.T) {
 	if strings.Contains(document, "lollipop/data:/data\n") {
 		t.Errorf("expected nothing at the path the volume left, got:\n%s", document)
 	}
+
+	// and started in it, the way the docker backend starts it
+	if !strings.Contains(document, "working_dir: /redis-data\n") {
+		t.Errorf("expected the container started in the moved data volume, got:\n%s", document)
+	}
 }

@@ -504,7 +504,7 @@ func TargetReferences(body string) []string {
 // templateBodies is every template a definition renders against a service's
 // scope, for the checks that hold for all of them.
 func templateBodies(definition Definition) []string {
-	bodies := []string{definition.Service.Image, definition.Dokku.DSN}
+	bodies := []string{definition.Service.Image, definition.Service.WorkingDir, definition.Dokku.DSN}
 	bodies = append(bodies, definition.Service.Command...)
 	for _, value := range definition.Service.Environment {
 		bodies = append(bodies, value)

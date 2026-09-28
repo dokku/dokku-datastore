@@ -46,8 +46,9 @@ type composeService struct {
 	// Volumes are the short syntax strings the docker path passes to -v,
 	// followed by a composeVolume for each mount only --mount can express.
 	// Compose takes the two syntaxes mixed in one list.
-	Volumes []any  `yaml:"volumes,omitempty"`
-	ShmSize string `yaml:"shm_size,omitempty"`
+	Volumes    []any  `yaml:"volumes,omitempty"`
+	ShmSize    string `yaml:"shm_size,omitempty"`
+	WorkingDir string `yaml:"working_dir,omitempty"`
 
 	Logging *composeLogging `yaml:"logging,omitempty"`
 
@@ -157,6 +158,7 @@ func Compose(input Input) ([]byte, error) {
 		Environment: environment(input.Environment, arguments.Env),
 		Volumes:     composeVolumes(arguments),
 		ShmSize:     arguments.ShmSize,
+		WorkingDir:  arguments.WorkingDir,
 	}
 
 	if arguments.Memory != "" {

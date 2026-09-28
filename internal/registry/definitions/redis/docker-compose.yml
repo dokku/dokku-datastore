@@ -3,17 +3,19 @@ services:
   redis:
     image: "{{ .Image }}:{{ .ImageVersion }}"
 
-    # the config and data paths follow the volumes, so a service that moved one
-    # still starts on its own file and writes its dump where it is mounted.
-    # redis writes the dump to its working directory unless told otherwise,
-    # which is only the data volume while that volume is at /data
+    # the config path follows the config volume, so a service that moved it
+    # still starts on its own file
     command:
       - redis-server
       - "{{ .Target.config }}/redis.conf"
       - --bind
       - 0.0.0.0
-      - --dir
-      - "{{ .Target.data }}"
+
+    # redis writes its dump to its working directory, and the image's
+    # entrypoint hands its working directory to the redis user before starting
+    # it. Starting in the data volume, wherever it is mounted, is what has redis
+    # write its dump there and be allowed to
+    working_dir: "{{ .Target.data }}"
 
     volumes:
       - type: bind

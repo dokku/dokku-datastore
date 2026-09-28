@@ -90,6 +90,12 @@ type Service struct {
 	// Environment are environment variables, values templated.
 	Environment map[string]string `yaml:"environment"`
 
+	// WorkingDir is the directory the container starts in, templated, and the
+	// image's own when empty. An image whose entrypoint takes ownership of its
+	// working directory for the user it runs as, as redis's does, is pointed at
+	// its data volume here so that it can write to it wherever it is mounted.
+	WorkingDir string `yaml:"working_dir"`
+
 	// Volumes are bind mounts. Every source must be rooted at {{ .HostRoot }},
 	// which is validated, so a mount is always absolute and always inside the
 	// service's own directory.

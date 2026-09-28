@@ -68,6 +68,10 @@ type ContainerArgsInput struct {
 	// VolumeMounts are docker volumes mounted from a subpath, which -v cannot
 	// express and so are passed to --mount after the volumes above
 	VolumeMounts []definition.VolumeMount
+
+	// WorkingDir is the directory the container starts in, empty for the
+	// image's own
+	WorkingDir string
 }
 
 // NamedVolumes are the docker volumes a container mounts, as opposed to host
@@ -175,6 +179,10 @@ func DockerCreateArgs(input ContainerArgsInput) []string {
 
 	if input.ShmSize != "" {
 		args = append(args, "--shm-size="+input.ShmSize)
+	}
+
+	if input.WorkingDir != "" {
+		args = append(args, "--workdir="+input.WorkingDir)
 	}
 
 	args = append(args, LogArgs(input.LogDriver, input.LogOptions)...)
