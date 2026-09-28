@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -465,5 +466,112 @@ func TestCheckSecretOverrides(t *testing.T) {
 				t.Errorf("expected an error naming %s and %s, got %s", test.expected, test.datastore, err)
 			}
 		})
+	}
+}
+
+// A file a service mounts is written by the config or the hook that makes it,
+// and making it a directory first is what stopped rabbitmq's config ever being
+// written. The directory it goes in is made instead.
+func TestBindDirectoriesLeaveAFileToWhatMakesIt(t *testing.T) {
+	for _, test := range []struct {
+		datastore string
+		file      string
+		directory string
+	}{
+		{datastore: "rabbitmq", file: "/config/rabbitmq.conf", directory: "/config"},
+		{datastore: "graphite", file: "/data/graphite-web/graphite.db", directory: "/data/graphite-web"},
+	} {
+		t.Run(test.datastore, func(t *testing.T) {
+			datastore, ok := Datastores[test.datastore]
+			if !ok {
+				t.Fatalf("expected %s to be registered", test.datastore)
+			}
+
+			root := Folders(datastore, "lollipop").Root
+			directories := datastore.BindDirectories("lollipop")
+			if slices.Contains(directories, root+test.file) {
+				t.Errorf("expected %s not to be made a directory, got %v", test.file, directories)
+			}
+
+			if !slices.Contains(directories, root+test.directory) {
+				t.Errorf("expected %s to be made, got %v", test.directory, directories)
+			}
+		})
+	}
+}
+
+// A service made before a definition bound something new has nothing there,
+// and one made by an earlier release has a directory where its config file
+// belongs. Either is put right before a container is made on it, rather than
+// left for docker to make a directory of, which for a file stops the container
+// starting at all.
+func TestEnsureBindSourcesMakesWhatIsMissing(t *testing.T) {
+	rabbitmq, ok := Datastores["rabbitmq"]
+	if !ok {
+		t.Fatal("expected rabbitmq to be registered")
+	}
+
+	root := withServiceRoot(t, rabbitmq, "lollipop")
+	config := filepath.Join(root, "config", "rabbitmq.conf")
+	if err := os.MkdirAll(config, 0755); err != nil {
+		t.Fatalf("unable to make the directory an earlier release left: %s", err)
+	}
+
+	if err := rabbitmq.ensureBindSources(t.Context(), "lollipop"); err != nil {
+		t.Fatalf("unable to make the bind sources: %s", err)
+	}
+
+	info, err := os.Stat(config)
+	if err != nil || info.IsDir() {
+		t.Fatalf("expected %s to be a file, got %v and %v", config, info, err)
+	}
+
+	contents, err := os.ReadFile(config)
+	if err != nil || !strings.Contains(string(contents), "settings for this service go here") {
+		t.Errorf("expected the seeded config, got %q and %v", contents, err)
+	}
+
+	if info, err := os.Stat(filepath.Join(root, "data")); err != nil || !info.IsDir() {
+		t.Errorf("expected the data directory to be made, got %v and %v", info, err)
+	}
+
+	// what an operator put there since is theirs, and is left alone
+	if err := os.WriteFile(config, []byte("edited\n"), 0644); err != nil {
+		t.Fatalf("unable to edit the config: %s", err)
+	}
+
+	if err := rabbitmq.ensureBindSources(t.Context(), "lollipop"); err != nil {
+		t.Fatalf("unable to make the bind sources: %s", err)
+	}
+
+	if contents, _ := os.ReadFile(config); string(contents) != "edited\n" {
+		t.Errorf("expected the operator's edit to be kept, got %q", contents)
+	}
+}
+
+// A directory where a file belongs that has something in it is not the empty
+// one an earlier release made, so it is reported rather than removed.
+func TestEnsureBindSourcesLeavesADirectoryWithSomethingInIt(t *testing.T) {
+	rabbitmq, ok := Datastores["rabbitmq"]
+	if !ok {
+		t.Fatal("expected rabbitmq to be registered")
+	}
+
+	root := withServiceRoot(t, rabbitmq, "lollipop")
+	config := filepath.Join(root, "config", "rabbitmq.conf")
+	if err := os.MkdirAll(config, 0755); err != nil {
+		t.Fatalf("unable to make the directory: %s", err)
+	}
+	if err := os.WriteFile(filepath.Join(config, "kept"), []byte("kept\n"), 0644); err != nil {
+		t.Fatalf("unable to write into the directory: %s", err)
+	}
+
+	err := rabbitmq.ensureBindSources(t.Context(), "lollipop")
+	if err == nil || !strings.Contains(err.Error(), "is mounted as a file and is a directory") {
+		t.Errorf("expected the directory to be reported, got %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(config, "kept")); err != nil {
+		t.Errorf("expected what was in the directory to be kept, got %v", err)
 	}
 }

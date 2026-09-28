@@ -209,11 +209,13 @@ data_directories() {
   assert_success
 
   # an empty data directory in place of the one holding the record, each bind
-  # source in it made again as it was, so the datastore starts on nothing
+  # directory in it made again as it was, so the datastore starts on nothing. A
+  # file bound from it is left for the start to make, the way it makes one a
+  # service is missing
   directories="$(data_directories | tr '\n' ' ')"
   run "$BIN" stop "$PLUGIN" "$SERVICE"
   assert_success
-  run as_root "mv /mnt/data /mnt/data.kept && for directory in $directories; do kept=/mnt/data.kept\${directory#data}; mkdir -p /mnt/\$directory && chown \$(stat -c %u:%g \$kept) /mnt/\$directory && chmod \$(stat -c %a \$kept) /mnt/\$directory; done"
+  run as_root "mv /mnt/data /mnt/data.kept && for directory in $directories; do kept=/mnt/data.kept\${directory#data}; [ -d \$kept ] || continue; mkdir -p /mnt/\$directory && chown \$(stat -c %u:%g \$kept) /mnt/\$directory && chmod \$(stat -c %a \$kept) /mnt/\$directory; done"
   assert_success
 
   run "$BIN" start "$PLUGIN" "$SERVICE"
