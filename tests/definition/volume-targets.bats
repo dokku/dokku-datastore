@@ -18,6 +18,13 @@ teardown_file() {
   datastore_teardown_file "$COPY" "$FLAG" "$ENVIRONMENT" "$REDIS" "$SERVICE"
 }
 
+# every test starts from a service with nothing moved and nothing mounted, so a
+# test that fails part way does not hand the next one what it left behind
+setup() {
+  "$BIN" set "$PLUGIN" "$SERVICE" volume-targets >/dev/null
+  "$BIN" unmount "$PLUGIN" "$SERVICE" --all >/dev/null
+}
+
 # a definition that mounts nothing has nothing to move
 volume_key_or_skip() {
   VOLUME_KEY="$(volume_key)"
@@ -59,9 +66,12 @@ volume_key_or_skip() {
   assert_success
   assert_output "$(host_service_root)/$VOLUME_KEY:true"
 
+  # the service's own directory is no longer mounted where the definition puts
+  # it. Something else may be: an image declaring the path a VOLUME gets an
+  # anonymous volume of docker's own there
   run mount_of "$(service_container)" "$DEFAULT_TARGET"
   assert_success
-  assert_output ""
+  refute_output "$(host_service_root)/$VOLUME_KEY:true"
 
   # and back to where the definition mounts it
   run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" volume-targets
