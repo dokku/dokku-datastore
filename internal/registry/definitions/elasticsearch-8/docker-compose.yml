@@ -98,7 +98,7 @@ x-dokku:
         # is not set here: jvm.options has not named one since 7.11, and the
         # environment above decides it on every start instead.
         - >-
-          cp -Rn {{ .Target.config }}/. /seed/ 2>/dev/null || true;
+          cp -Rn /usr/share/elasticsearch/config/. /seed/ 2>/dev/null || true;
           chown -R 1000:0 /seed /seed-data
 
   # no commands: the bash plugin implements none of connect, export or import,
