@@ -29,15 +29,15 @@ func TestValidatePortBindAddress(t *testing.T) {
 	}
 }
 
-func TestValidateExposeSourceRange(t *testing.T) {
+func TestValidatePortSourceRange(t *testing.T) {
 	for _, value := range []string{"", "10.0.0.0/8", "10.1.2.3/8", "192.0.2.1", "0.0.0.0/0", "2001:db8::/32", "::1"} {
-		if err := ValidateExposeSourceRange(value); err != nil {
+		if err := ValidatePortSourceRange(value); err != nil {
 			t.Errorf("expected %q to be accepted, got %q", value, err)
 		}
 	}
 
 	for _, value := range []string{"localhost", "10.0.0.0/33", "10.0.0.0/", "a.b.c.d", "10.0.0.0/8,192.168.0.0/16", "10.0.0.0/8 192.168.0.0/16", "[::1]"} {
-		err := ValidateExposeSourceRange(value)
+		err := ValidatePortSourceRange(value)
 		if err == nil {
 			t.Errorf("expected %q to be refused", value)
 			continue
@@ -54,7 +54,7 @@ func TestServiceExposeSettings(t *testing.T) {
 	withServiceRoot(t, redis, "lollipop")
 	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
 
-	if address, sourceRange := ServicePortBindAddress(redis, "lollipop"), ServiceExposeSourceRange(redis, "lollipop"); address != "" || sourceRange != "" {
+	if address, sourceRange := ServicePortBindAddress(redis, "lollipop"), ServicePortSourceRange(redis, "lollipop"); address != "" || sourceRange != "" {
 		t.Fatalf("expected nothing to be set, got %q and %q", address, sourceRange)
 	}
 
@@ -62,14 +62,14 @@ func TestServiceExposeSettings(t *testing.T) {
 	if err := common.PropertyWrite(commandPrefix, "lollipop", PortBindAddressProperty, "10.0.0.5"); err != nil {
 		t.Fatalf("failed to write the property: %v", err)
 	}
-	if err := common.PropertyWrite(commandPrefix, "lollipop", ExposeSourceRangeProperty, "10.0.0.0/8"); err != nil {
+	if err := common.PropertyWrite(commandPrefix, "lollipop", PortSourceRangeProperty, "10.0.0.0/8"); err != nil {
 		t.Fatalf("failed to write the property: %v", err)
 	}
 
 	if address := ServicePortBindAddress(redis, "lollipop"); address != "10.0.0.5" {
 		t.Errorf("expected the address to be read back, got %q", address)
 	}
-	if sourceRange := ServiceExposeSourceRange(redis, "lollipop"); sourceRange != "10.0.0.0/8" {
+	if sourceRange := ServicePortSourceRange(redis, "lollipop"); sourceRange != "10.0.0.0/8" {
 		t.Errorf("expected the range to be read back, got %q", sourceRange)
 	}
 

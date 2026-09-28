@@ -17,11 +17,11 @@ import (
 // on the next reexpose, or whenever the ambassador is next replaced.
 const PortBindAddressProperty = "port-bind-address"
 
-// ExposeSourceRangeProperty is the only range of client addresses an exposed
+// PortSourceRangeProperty is the only range of client addresses an exposed
 // service accepts connections from. Empty accepts every client.
 //
 // Read when the ambassador is made, like the port bind address.
-const ExposeSourceRangeProperty = "expose-source-range"
+const PortSourceRangeProperty = "port-source-range"
 
 // ExposeHostProperty is the host the exposed dsn names, for clients that reach
 // the server by a name or address other than its global domain. Empty names
@@ -106,18 +106,18 @@ func validHostname(value string) bool {
 	return true
 }
 
-// ValidateExposeSourceRange reports whether a value is a range of client
+// ValidatePortSourceRange reports whether a value is a range of client
 // addresses: one IP address or CIDR. An empty value is valid and means every
 // client.
 //
 // Only one range is taken because the ambassador enforces it with socat, which
 // honors a single range for each port it listens on.
-func ValidateExposeSourceRange(value string) error {
+func ValidatePortSourceRange(value string) error {
 	if value == "" {
 		return nil
 	}
 
-	invalid := fmt.Errorf("invalid %s value %q, must be a single IP address or CIDR", ExposeSourceRangeProperty, value)
+	invalid := fmt.Errorf("invalid %s value %q, must be a single IP address or CIDR", PortSourceRangeProperty, value)
 	if strings.Contains(value, "/") {
 		if _, err := netip.ParsePrefix(value); err != nil {
 			return invalid
@@ -139,10 +139,10 @@ func ServicePortBindAddress(s *Datastore, serviceName string) string {
 	return strings.TrimSpace(common.PropertyGet(s.Properties().CommandPrefix, serviceName, PortBindAddressProperty))
 }
 
-// ServiceExposeSourceRange is the only range of client addresses a service
+// ServicePortSourceRange is the only range of client addresses a service
 // accepts connections from, empty for every client.
-func ServiceExposeSourceRange(s *Datastore, serviceName string) string {
-	return strings.TrimSpace(common.PropertyGet(s.Properties().CommandPrefix, serviceName, ExposeSourceRangeProperty))
+func ServicePortSourceRange(s *Datastore, serviceName string) string {
+	return strings.TrimSpace(common.PropertyGet(s.Properties().CommandPrefix, serviceName, PortSourceRangeProperty))
 }
 
 // ServiceExposeHost is the host the exposed dsn names, as it was set, empty

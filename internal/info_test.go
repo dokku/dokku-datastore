@@ -126,14 +126,14 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 	}
 
 	for key, value := range map[string]string{
-		"initial-network":                 "my-network",
-		service.LogDriverProperty:         "json-file",
-		service.LogOptProperty:            "max-size=20m,max-file=3",
-		service.RestartPolicyProperty:     "unless-stopped",
-		service.WaitTimeoutProperty:       "120",
-		service.PortBindAddressProperty:   "10.0.0.5",
-		service.ExposeSourceRangeProperty: "10.0.0.0/8",
-		service.ExposeHostProperty:        "db.example.com",
+		"initial-network":               "my-network",
+		service.LogDriverProperty:       "json-file",
+		service.LogOptProperty:          "max-size=20m,max-file=3",
+		service.RestartPolicyProperty:   "unless-stopped",
+		service.WaitTimeoutProperty:     "120",
+		service.PortBindAddressProperty: "10.0.0.5",
+		service.PortSourceRangeProperty: "10.0.0.0/8",
+		service.ExposeHostProperty:      "db.example.com",
 	} {
 		if err := SetProperty(datastore, "lollipop", key, value); err != nil {
 			t.Fatalf("failed to set the %s property: %s", key, err)
@@ -154,26 +154,26 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
 
 	for key, expected := range map[string]string{
-		"backend":             "compose",
-		"config-options":      "--appendonly yes",
-		"custom-env":          "ONE=1;TWO=2",
-		"database-name":       "lollipop_db",
-		"definition":          "redis",
-		"export-args":         "--hex-blob",
-		"port-bind-address":   "10.0.0.5",
-		"expose-source-range": "10.0.0.0/8",
-		"expose-host":         "db.example.com",
-		"image":               "redis",
-		"image-version":       "8.4.2",
-		"import-args":         "--force",
-		"initial-network":     "my-network",
-		"log-driver":          "json-file",
-		"log-opt":             "max-size=20m,max-file=3",
-		"memory":              "512",
-		"restart-policy":      "unless-stopped",
-		"service":             "lollipop",
-		"shm-size":            "128m",
-		"wait-timeout":        "120",
+		"backend":           "compose",
+		"config-options":    "--appendonly yes",
+		"custom-env":        "ONE=1;TWO=2",
+		"database-name":     "lollipop_db",
+		"definition":        "redis",
+		"export-args":       "--hex-blob",
+		"port-bind-address": "10.0.0.5",
+		"port-source-range": "10.0.0.0/8",
+		"expose-host":       "db.example.com",
+		"image":             "redis",
+		"image-version":     "8.4.2",
+		"import-args":       "--force",
+		"initial-network":   "my-network",
+		"log-driver":        "json-file",
+		"log-opt":           "max-size=20m,max-file=3",
+		"memory":            "512",
+		"restart-policy":    "unless-stopped",
+		"service":           "lollipop",
+		"shm-size":          "128m",
+		"wait-timeout":      "120",
 	} {
 		if info[key] != expected {
 			t.Errorf("expected %s to be %q, got %q", key, expected, info[key])

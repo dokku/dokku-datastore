@@ -243,7 +243,7 @@ skip_unless_log_is_capped() {
 @test "($DEFINITION) the expose settings are set, read back and unset" {
   run "$BIN" set "$PLUGIN" "$SERVICE" port-bind-address 10.0.0.5
   assert_success
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range 203.0.113.7
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-source-range 203.0.113.7
   assert_success
   run "$BIN" set "$PLUGIN" "$SERVICE" expose-host db.example.com
   assert_success
@@ -261,14 +261,14 @@ skip_unless_log_is_capped() {
   assert_success
   assert_output --regexp "Expose host: +db\.example\.com"
 
-  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-source-range
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --port-source-range
   assert_success
   assert_output "203.0.113.7"
 
   # and back to what every other check expects of this service
   run "$BIN" set "$PLUGIN" "$SERVICE" port-bind-address
   assert_success
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-source-range
   assert_success
   run "$BIN" set "$PLUGIN" "$SERVICE" expose-host
   assert_success
@@ -277,7 +277,7 @@ skip_unless_log_is_capped() {
   assert_success
   assert_output ""
 
-  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-source-range
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --port-source-range
   assert_success
   assert_output ""
 
@@ -297,9 +297,9 @@ skip_unless_log_is_capped() {
 
   # socat honors a single range for each port it listens on
   for value in 10.0.0.0/33 "10.0.0.0/8,192.168.0.0/16" example.com; do
-    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range "$value"
+    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" port-source-range "$value"
     assert_failure
-    assert_stderr --partial "expose-source-range"
+    assert_stderr --partial "port-source-range"
   done
 
   # the port comes from the exposed ports, so the host is a host alone
@@ -317,7 +317,7 @@ skip_unless_log_is_capped() {
   assert_success
   assert_output ""
 
-  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-source-range
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --port-source-range
   assert_success
   assert_output ""
 }

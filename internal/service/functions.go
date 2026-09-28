@@ -917,7 +917,7 @@ const AmbassadorContainerIDLabel = "dokku.ambassador.container-id"
 const AmbassadorAddressLabel = "dokku.ambassador.address"
 
 // AmbassadorSourceRangeLabel is the label an ambassador carries naming the
-// expose-source-range it was made with. Unset when it was made with none.
+// port-source-range it was made with. Unset when it was made with none.
 const AmbassadorSourceRangeLabel = "dokku.ambassador.source-range"
 
 // ambassadorSettings are the service properties an ambassador is made from
@@ -927,7 +927,7 @@ type ambassadorSettings struct {
 	// Address is the port-bind-address, empty for every interface
 	Address string
 
-	// SourceRange is the expose-source-range, empty for every client
+	// SourceRange is the port-source-range, empty for every client
 	SourceRange string
 }
 
@@ -936,7 +936,7 @@ type ambassadorSettings struct {
 func serviceAmbassadorSettings(s *Datastore, serviceName string) ambassadorSettings {
 	return ambassadorSettings{
 		Address:     ServicePortBindAddress(s, serviceName),
-		SourceRange: ServiceExposeSourceRange(s, serviceName),
+		SourceRange: ServicePortSourceRange(s, serviceName),
 	}
 }
 
@@ -1025,7 +1025,7 @@ type ambassadorState struct {
 // target from. And one that dials the service by an address the service no
 // longer has publishes nothing.
 //
-// Nor is one kept that was made with a port-bind-address or expose-source-range
+// Nor is one kept that was made with a port-bind-address or port-source-range
 // the service no longer has, since it would go on publishing the service where
 // or to whom it was told not to. One made before those labels existed carries
 // neither, which is what a service that has set neither expects. A forced
@@ -1082,7 +1082,7 @@ type ambassadorForwardOptionsInput struct {
 	// docker-port-forward reads an empty policy as unless-stopped
 	RestartPolicy string
 
-	// Settings are the service's port-bind-address and expose-source-range
+	// Settings are the service's port-bind-address and port-source-range
 	Settings ambassadorSettings
 }
 

@@ -54,7 +54,6 @@ var InfoKeys = []InfoKey{
 	{Name: "dsn", Description: "show the service DSN"},
 	{Name: "export-args", Description: "show the extra arguments every export of the service is run with"},
 	{Name: "expose-host", Description: "show the host the exposed DSN names"},
-	{Name: "expose-source-range", Description: "show the only range of client addresses the exposed ports accept"},
 	{Name: "exposed-dsn", Description: "show the DSN the service is reached at through its exposed ports"},
 	{Name: "exposed-ports", Description: "show service exposed ports"},
 	{Name: "id", Description: "show the service container id"},
@@ -69,6 +68,7 @@ var InfoKeys = []InfoKey{
 	{Name: "memory", Description: "show the memory limit the service container is run with"},
 	{Name: "mounts", Description: "show the host paths and docker volumes mounted into the service container"},
 	{Name: "port-bind-address", Description: "show the address exposed ports without one of their own are bound on"},
+	{Name: "port-source-range", Description: "show the only range of client addresses the exposed ports accept"},
 	{Name: "post-create-network", Description: "show the networks to attach to after service container creation"},
 	{Name: "post-start-network", Description: "show the networks to attach to after service container start"},
 	{Name: "restart-policy", Description: "show the restart policy the service container is run with"},
@@ -141,7 +141,7 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info[service.RestartPolicyProperty] = service.ServiceRestartPolicy(input.Datastore, input.ServiceName)
 	info[service.WaitTimeoutProperty] = service.ServiceWaitTimeout(input.Datastore, input.ServiceName)
 	info[service.PortBindAddressProperty] = service.ServicePortBindAddress(input.Datastore, input.ServiceName)
-	info[service.ExposeSourceRangeProperty] = service.ServiceExposeSourceRange(input.Datastore, input.ServiceName)
+	info[service.PortSourceRangeProperty] = service.ServicePortSourceRange(input.Datastore, input.ServiceName)
 	// as it was set, like every other property. The host the exposed dsn falls
 	// back to when it is unset shows in the dsn itself
 	info[service.ExposeHostProperty] = service.ServiceExposeHost(input.Datastore, input.ServiceName)

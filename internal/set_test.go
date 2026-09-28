@@ -18,7 +18,7 @@ func TestSetPropertyRejectsUnknownKeys(t *testing.T) {
 		t.Fatal("expected an error for an unknown key, got none")
 	}
 
-	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, expose-source-range, expose-host, export-args, import-args"
+	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, port-source-range, expose-host, export-args, import-args"
 	if err.Error() != expected {
 		t.Errorf("expected %q, got %q", expected, err)
 	}
@@ -32,7 +32,7 @@ func TestSettableProperties(t *testing.T) {
 	// long it is waited on to become ready, where and to whom an exposed service
 	// is published, the host its exposed dsn names, and the arguments its exports
 	// and imports are run with
-	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "expose-source-range", "expose-host", "export-args", "import-args"}
+	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "port-source-range", "expose-host", "export-args", "import-args"}
 	if strings.Join(SettableProperties, ",") != strings.Join(expected, ",") {
 		t.Errorf("expected %v, got %v", expected, SettableProperties)
 	}
@@ -155,22 +155,22 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 		},
 		{
 			name:     "a source range with too many bits",
-			key:      service.ExposeSourceRangeProperty,
+			key:      service.PortSourceRangeProperty,
 			value:    "10.0.0.0/33",
-			expected: `invalid expose-source-range value "10.0.0.0/33"`,
+			expected: `invalid port-source-range value "10.0.0.0/33"`,
 		},
 		{
 			name:     "a source range that is not an address",
-			key:      service.ExposeSourceRangeProperty,
+			key:      service.PortSourceRangeProperty,
 			value:    "a.b.c.d",
-			expected: `invalid expose-source-range value "a.b.c.d"`,
+			expected: `invalid port-source-range value "a.b.c.d"`,
 		},
 		{
 			// socat, which enforces it, honors one range per port
 			name:     "more than one source range",
-			key:      service.ExposeSourceRangeProperty,
+			key:      service.PortSourceRangeProperty,
 			value:    "10.0.0.0/8,192.168.0.0/16",
-			expected: `invalid expose-source-range value "10.0.0.0/8,192.168.0.0/16"`,
+			expected: `invalid port-source-range value "10.0.0.0/8,192.168.0.0/16"`,
 		},
 		{
 			// the port comes from the exposed ports
@@ -223,7 +223,7 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 // Unsetting is how every other property is cleared, so an empty value has to
 // reach the delete rather than being refused as an unusable one.
 func TestSetPropertyAcceptsAnEmptyValue(t *testing.T) {
-	for _, key := range []string{service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.PortBindAddressProperty, service.ExposeSourceRangeProperty, service.ExposeHostProperty, service.ExportArgsProperty, service.ImportArgsProperty} {
+	for _, key := range []string{service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExportArgsProperty, service.ImportArgsProperty} {
 		if err := ValidatePropertyValue(key, ""); err != nil {
 			t.Errorf("expected an empty %s to be accepted, got %q", key, err)
 		}

@@ -282,11 +282,11 @@ expected_exposed_dsn() {
   [[ "$(service_id)" == "$service_before" ]] || fail "expected reexpose to leave the service container alone"
 }
 
-@test "($DEFINITION) reexpose limits the service to the expose-source-range" {
+@test "($DEFINITION) reexpose limits the service to the port-source-range" {
   local service_before
   service_before="$(service_id)"
 
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range 192.0.2.0/24
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-source-range 192.0.2.0/24
   assert_success
   run "$BIN" reexpose "$PLUGIN" "$SERVICE"
   assert_success
@@ -294,11 +294,11 @@ expected_exposed_dsn() {
   assert_source_range "reexpose with a source range" "192.0.2.0/24"
   [[ "$(service_id)" == "$service_before" ]] || fail "expected reexpose to leave the service container alone"
 
-  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-source-range
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --port-source-range
   assert_success
   assert_output "192.0.2.0/24"
 
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-source-range
   assert_success
   run "$BIN" reexpose "$PLUGIN" "$SERVICE"
   assert_success
@@ -320,7 +320,7 @@ expected_exposed_dsn() {
   local service_before
   service_before="$(service_id)"
 
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range 192.0.2.0/24
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-source-range 192.0.2.0/24
   assert_success
   run "$BIN" start "$PLUGIN" "$SERVICE"
   assert_success
@@ -328,7 +328,7 @@ expected_exposed_dsn() {
   assert_source_range "start with a changed source range" "192.0.2.0/24"
   [[ "$(service_id)" == "$service_before" ]] || fail "expected start to leave the running service container alone"
 
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-source-range
   assert_success
   run "$BIN" start "$PLUGIN" "$SERVICE"
   assert_success
