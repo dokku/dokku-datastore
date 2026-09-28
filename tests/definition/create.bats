@@ -24,7 +24,8 @@ setup_file() {
 }
 
 teardown_file() {
-  datastore_teardown_file "$SERVICE" "$SERVICE-unpinned" "$SERVICE-json" "$SERVICE-network"
+  datastore_teardown_file "$SERVICE" "$SERVICE-unpinned" "$SERVICE-json" "$SERVICE-network" "$SERVICE-named" "$SERVICE-custom"
+  untag_custom_image
 
   # after the services, since docker will not remove a network a container is
   # still attached to
@@ -42,6 +43,16 @@ teardown_file() {
   assert_stderr --partial -- "--image-version"
   assert_stderr --partial "example.invalid/not-the-definition-image"
   [[ ! -d "$(service_root "$SERVICE-noversion")" ]] || fail "a refused create left $(service_root "$SERVICE-noversion") behind"
+}
+
+@test "($DEFINITION) a create naming a definition the datastore does not have is refused" {
+  # rather than placed on whatever its image would resolve to. Refused before the
+  # pull and before the service root is made, so this costs the daemon nothing
+  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-nodefinition" --definition not-a-definition
+  assert_failure
+  assert_stderr --partial "is not a $PLUGIN definition"
+  assert_stderr --partial "$DEFINITION"
+  [[ ! -d "$(service_root "$SERVICE-nodefinition")" ]] || fail "a refused create left $(service_root "$SERVICE-nodefinition") behind"
 }
 
 @test "($DEFINITION) a create naming an invalid service is refused with the characters it may use" {
@@ -288,6 +299,53 @@ teardown_file() {
   assert [ -n "$output" ]
 
   run "$BIN" destroy "$PLUGIN" "$SERVICE-unpinned" --force
+  assert_success
+}
+
+@test "($DEFINITION) a create naming its definition runs the image and version it pins" {
+  # with no image flags at all, which for a datastore split by major version
+  # would otherwise land on its newest definition rather than this one
+  run "$BIN" create "$PLUGIN" "$SERVICE-named" --definition "$DEFINITION"
+  assert_success
+
+  run cat "$(service_root "$SERVICE-named")/DEFINITION"
+  assert_success
+  assert_output "$DEFINITION"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE-named" --image
+  assert_success
+  assert_output "$IMAGE"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE-named" --image-version
+  assert_success
+  assert_output "$IMAGE_VERSION"
+
+  run "$BIN" destroy "$PLUGIN" "$SERVICE-named" --force
+  assert_success
+}
+
+@test "($DEFINITION) a create naming its definition runs an image whose tag says nothing" {
+  # the case the flag is for: a tag that does not carry the major version
+  # resolves to nothing in particular, and so to the newest definition, which
+  # for an older major mounts the data somewhere its image does not keep it
+  tag_custom_image
+
+  run "$BIN" create "$PLUGIN" "$SERVICE-custom" --definition "$DEFINITION" --image "$CUSTOM_IMAGE" --image-version "$CUSTOM_IMAGE_VERSION"
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE-custom" --definition
+  assert_success
+  assert_output "$DEFINITION"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE-custom" --status
+  assert_success
+  assert_output "running"
+
+  run container_inspect "$(service_container "$SERVICE-custom")" '{{ .Config.Image }}'
+  assert_success
+  assert_output "$CUSTOM_IMAGE:$CUSTOM_IMAGE_VERSION"
+
+  run "$BIN" destroy "$PLUGIN" "$SERVICE-custom" --force
   assert_success
 }
 

@@ -85,3 +85,30 @@ func TestExtraArgsAreDocumentedWhereTheyAreTaken(t *testing.T) {
 		})
 	}
 }
+
+// The create and upgrade templates only document naming a definition for a
+// datastore with more than one to choose between.
+func TestDefinitionIsDocumentedWhereThereIsAChoice(t *testing.T) {
+	commands := []internal.PluginCommand{&CreateCommand{}, &UpgradeCommand{}}
+
+	for name, expected := range map[string]bool{"postgres": true, "redis": false} {
+		t.Run(name, func(t *testing.T) {
+			data := internal.NewDocumentationData(internal.DocumentationDataInput{Datastore: service.Datastores[name]})
+
+			for _, c := range commands {
+				documentation, err := internal.RenderDocumentation(c.Documentation(), data)
+				if err != nil {
+					t.Fatalf("unable to render the %s documentation: %s", c.Name(), err)
+				}
+
+				if actual := strings.Contains(documentation, "--definition"); actual != expected {
+					t.Errorf("expected %s to document --definition to be %t, got %t:\n%s", c.Name(), expected, actual, documentation)
+				}
+
+				if strings.Contains(documentation, "\n\n") {
+					t.Errorf("expected the %s documentation to have no blank lines left by the conditionals", c.Name())
+				}
+			}
+		})
+	}
+}

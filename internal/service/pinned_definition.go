@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
@@ -69,6 +70,34 @@ func (s *Datastore) ForImage(image string, imageVersion string) *Datastore {
 	}
 
 	return s.withDefinition(found)
+}
+
+// WithDefinitionNamed returns the datastore as a service placed on a definition
+// by name runs it, whatever its image and version would resolve to.
+//
+// An image's tags do not always say which major version they are, and a custom
+// build of postgres 17 tagged custom-3 would otherwise be placed on the newest
+// definition and handed postgres 18's data directory. A definition belonging to
+// another datastore is refused rather than borrowed, since the commands, the
+// triggers and the service root are all this datastore's.
+func (s *Datastore) WithDefinitionNamed(name string) (*Datastore, error) {
+	if s == nil {
+		return s, fmt.Errorf("definition %s cannot be used without a datastore", name)
+	}
+
+	plugin := s.Definition.Dokku.Plugin
+	names := []string{s.Definition.Name}
+	if s.registry != nil {
+		names = s.registry.NamesFor(plugin)
+		if found, ok := s.registry.Definition(name); ok && found.Dokku.Plugin == plugin {
+			return s.withDefinition(found), nil
+		}
+	} else if name == s.Definition.Name {
+		return s, nil
+	}
+
+	return s, fmt.Errorf("definition %s is not a %s definition; choose one of: %s",
+		name, plugin, strings.Join(names, ", "))
 }
 
 // withDefinition returns the datastore running a different definition, and the

@@ -16,6 +16,7 @@ setup_file() {
 
 teardown_file() {
   datastore_teardown_file "$SERVICE"
+  untag_custom_image
 }
 
 setup() {
@@ -217,6 +218,55 @@ setup() {
   run container_inspect "$(service_container)" '{{ .HostConfig.Memory }}'
   assert_success
   assert_output "0"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --status
+  assert_success
+  assert_output "running"
+}
+
+@test "($DEFINITION) an upgrade naming its definition stays on it whatever the tag says" {
+  # a tag that does not carry the major version would otherwise resolve to the
+  # newest definition, and move the data of an older major along with it
+  tag_custom_image
+
+  run "$BIN" upgrade "$PLUGIN" "$SERVICE" --definition "$DEFINITION" --image "$CUSTOM_IMAGE" --image-version "$CUSTOM_IMAGE_VERSION"
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --definition
+  assert_success
+  assert_output "$DEFINITION"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --image
+  assert_success
+  assert_output "$CUSTOM_IMAGE"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --image-version
+  assert_success
+  assert_output "$CUSTOM_IMAGE_VERSION"
+
+  # and naming the definition alone takes it back to the image and version the
+  # definition pins, rather than the one the service recorded
+  run "$BIN" upgrade "$PLUGIN" "$SERVICE" --definition "$DEFINITION"
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --image
+  assert_success
+  assert_output "$RECORDED_IMAGE"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --image-version
+  assert_success
+  assert_output "$RECORDED_VERSION"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --status
+  assert_success
+  assert_output "running"
+}
+
+@test "($DEFINITION) an upgrade naming a definition the datastore does not have is refused" {
+  # before the container is taken away
+  run --separate-stderr "$BIN" upgrade "$PLUGIN" "$SERVICE" --definition not-a-definition
+  assert_failure
+  assert_stderr --partial "is not a $PLUGIN definition"
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --status
   assert_success

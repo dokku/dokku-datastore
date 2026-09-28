@@ -120,9 +120,21 @@ dokku-datastore create postgres db --image-version 17.8
 dokku-datastore create postgres db --image-version 18.4
 ```
 
+The definition can also be named outright with `--definition`, or with `<VARIABLE>_DEFINITION` - `POSTGRES_DEFINITION` for postgres - when the flag is not given. It is for an image whose tags do not carry the major version: `--image myorg/postgres --image-version custom-3` resolves to nothing in particular and so lands on the newest definition, which for a build of postgres 17 is the wrong data directory. The named definition supplies the image and version it ships, and `--image` and `--image-version` are laid over them. A definition that belongs to another datastore is refused.
+
+```shell
+# creates a service on the postgres-17 definition, at the image and version it pins
+dokku-datastore create postgres db --definition postgres-17
+
+# and on postgres-17 with an image of your own, whatever its tags say
+dokku-datastore create postgres db --definition postgres-17 --image myorg/postgres --image-version custom-3
+```
+
 If a service names a definition the plugin no longer ships, commands that would run it refuse rather than quietly placing it on another one, since that is the failure the pin exists to prevent. The service stays inspectable and can still be destroyed, so it can be reported on and cleaned up; reinstalling a plugin that carries the definition makes it runnable again.
 
 `upgrade` across a major version moves the service onto the other definition, which moves where its data is mounted along with it. That is the upgrade a major version asks for rather than something to work around, but it is not a tag change and it is not reversible by pointing the version back. A bare `upgrade` never crosses one: with no version named it moves to the newest tag the service's own major version ships, and leaves the data where it is.
+
+`upgrade --definition` moves the service onto the named definition, with the image and version it ships unless `--image` and `--image-version` say otherwise. That moves where its data is mounted in the same way, even when the image stays the same. `<VARIABLE>_DEFINITION` is only read by `create`. `clone` places the new service on the definition the source is pinned to, rather than on the one the source's image resolves to.
 
 ## Flavors
 
@@ -147,7 +159,7 @@ dokku-datastore create postgres db --image pgvector/pgvector --image-version pg1
 dokku-datastore create postgres db --image pgvector/pgvector
 ```
 
-An image no definition ships still runs on the datastore's own definitions, as it did before flavors existed. A service pinned to one of those keeps its pin: a service created with `pgvector/pgvector:pg17` before pgvector had definitions of its own was placed on `postgres-18`, and its data is where that definition mounts it. `upgrade` only moves a service onto a flavor's definition when the image it ran and the one it is moved to resolve to different definitions, so an upgrade inside a major leaves such a service where it is, and one across a major or onto another image moves it.
+An image no definition ships still runs on the datastore's own definitions, as it did before flavors existed. A service pinned to one of those keeps its pin: a service created with `pgvector/pgvector:pg17` before pgvector had definitions of its own was placed on `postgres-18`, and its data is where that definition mounts it. `upgrade` only moves a service onto a flavor's definition when the image it ran and the one it is moved to resolve to different definitions, so an upgrade inside a major leaves such a service where it is, and one across a major or onto another image moves it. An image of your own built on a flavor can be kept on that flavor's definition with `--definition`, such as `--definition postgres-pgvector-pg17`.
 
 The images are pinned in each definition's `Dockerfile`, and dependabot holds an older major inside it according to how the image writes its tags. A tag carrying the major as a suffix, such as `0.8.6-pg17`, is only ever moved to one with the same suffix, so it needs nothing more; a tag leading with the major, such as `17-3.5`, needs its semver-major updates ignored, as `postgres-17` does. `go test` checks both, and that every definition has an entry.
 

@@ -50,6 +50,10 @@ type CreateServiceInput struct {
 	// Datastore is the service to create
 	Datastore *service.Datastore
 
+	// Definition names the definition to place the service on, empty to have
+	// the image and version decide it
+	Definition string
+
 	// Image is the image to use for the service
 	Image string
 
@@ -127,8 +131,18 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	// the image and version decide the definition before anything else is
 	// settled: a datastore split by major version mounts its data somewhere
 	// different in each, a flavor such as pgvector has definitions of its own, and
-	// the requirements checked below are the definition's own
-	input.Datastore = input.Datastore.ForImage(input.Image, input.ImageVersion)
+	// the requirements checked below are the definition's own. A definition
+	// named outright wins over all of that, and the image and version it ships
+	// become the defaults the flags are laid over
+	if input.Definition != "" {
+		named, err := input.Datastore.WithDefinitionNamed(input.Definition)
+		if err != nil {
+			return err
+		}
+		input.Datastore = named
+	} else {
+		input.Datastore = input.Datastore.ForImage(input.Image, input.ImageVersion)
+	}
 
 	// the name decides the database, so one the datastore keeps for itself is
 	// refused before anything is made for it

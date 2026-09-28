@@ -353,6 +353,14 @@ service on one is placed by the major its tag carries and has a version to fall 
 dokku {{$.CommandPrefix}}:create lollipop --image {{.Image}} --image-version {{.ImageVersion}}
 {{- end}}
 {{- end}}
+{{- if .Definitions}}
+the definition a service runs on decides where its data is mounted, and is otherwise
+worked out from the image and version. an image whose tags do not carry the major
+version can name one outright, and --image and --image-version are laid over the
+image and version it ships. the definitions are: {{range $index, $name := .Definitions}}{{if $index}}, {{end}}{{$name}}{{end}}.
+export {{.PluginVariable}}_DEFINITION="{{index .Definitions 0}}"
+dokku {{.CommandPrefix}}:create lollipop --definition {{index .Definitions 0}} --image <image> --image-version <version>
+{{- end}}
 you can also specify custom environment variables to start
 the {{.CommandPrefix}} service in semicolon-separated form.
 export {{.PluginVariable}}_CUSTOM_ENV="USER=alpha;HOST=beta"
@@ -1106,6 +1114,10 @@ dokku {{.CommandPrefix}}:upgrade lollipop
 This is the only command that changes the version a service runs. With no version named it moves to the newest the service's own major version ships, which leaves the data where it is.
 dokku {{.CommandPrefix}}:upgrade lollipop --image-version 1.2.3
 Moving across a major version has to be asked for by name, because it is not a tag change: the data is mounted somewhere different under the new one, and pointing the version back does not undo it.
+{{- if .Definitions}}
+A service can also be moved onto a definition by name, with --image and --image-version laid over the image and version it ships. This moves where the data is mounted in the same way, even when the image stays the same.
+dokku {{.CommandPrefix}}:upgrade lollipop --definition {{index .Definitions 0}}
+{{- end}}
 A service keeps the mounts it has unless --volume is passed, which replaces them, and each one is checked against the new container before the old one is taken away.
 dokku {{.CommandPrefix}}:upgrade lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro
 A service keeps its memory limit unless --memory is passed, and --memory 0 removes it.

@@ -21,6 +21,8 @@ type UpgradeCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+	// definition is the definition to move the service onto
+	definition string
 	// image is the image to upgrade to
 	image string
 	// imageVersion is the image version to upgrade to
@@ -109,6 +111,7 @@ func (c *UpgradeCommand) ParsedArguments(args []string) (map[string]command.Argu
 func (c *UpgradeCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.StringVar(&c.definition, "definition", "", "the definition to move the service onto, instead of the one its image and version resolve to")
 	f.StringVarP(&c.image, "image", "i", "", "the image to upgrade the service to")
 	f.StringVarP(&c.imageVersion, "image-version", "I", "", "the image version to upgrade the service to")
 	f.BoolVarP(&c.restartApps, "restart-apps", "R", false, "whether to stop and start the linked apps around the upgrade")
@@ -231,6 +234,7 @@ func (c *UpgradeCommand) Run(args []string) int {
 
 	if err := internal.UpgradeService(ctx, internal.UpgradeServiceInput{
 		Datastore:    datastore,
+		Definition:   c.definition,
 		Image:        c.image,
 		ImageVersion: c.imageVersion,
 		Logger:       logger,

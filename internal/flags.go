@@ -29,6 +29,8 @@ type UpdateFlagFromEnvInput struct {
 	ConfigOptions string
 	// CustomEnv is the custom environment variables to update from the environment
 	CustomEnv string
+	// Definition is the definition to update from the environment
+	Definition string
 	// Image is the image to update from the environment
 	Image string
 	// ImageVersion is the image version to update from the environment
@@ -57,6 +59,10 @@ func UpdateFlagFromEnv(input UpdateFlagFromEnvInput) (UpdateFlagFromEnvInput, er
 
 	if input.CustomEnv == "" {
 		input.CustomEnv = os.Getenv(envVariable)
+	}
+
+	if input.Definition == "" {
+		input.Definition = DefinitionFromEnv(properties)
 	}
 
 	if input.Image == "" {

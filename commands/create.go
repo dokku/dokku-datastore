@@ -27,6 +27,8 @@ type CreateCommand struct {
 	configOptions string
 	// customEnv is the custom environment variables to use for the service
 	customEnv string
+	// definition is the definition to place the service on
+	definition string
 	// image is the image to use for the service
 	image string
 	// imageVersion is the image version to use for the service
@@ -115,6 +117,7 @@ func (c *CreateCommand) FlagSet() *flag.FlagSet {
 	c.GlobalFlags(f)
 	f.StringVarP(&c.configOptions, "config-options", "c", "", "extra arguments for the process the service container runs, not docker flags; use mount for mounts")
 	f.StringVarP(&c.customEnv, "custom-env", "C", "", "semi-colon delimited environment variables to start the service with")
+	f.StringVar(&c.definition, "definition", "", "the definition to run the service on, instead of the one its image and version resolve to")
 	f.StringVarP(&c.image, "image", "i", "", "the image name to start the service with")
 	f.StringVarP(&c.imageVersion, "image-version", "I", "", "the image version to start the service with")
 	f.IntVarP(&c.memory, "memory", "m", 0, "container memory limit in megabytes (default: unlimited)")
@@ -142,6 +145,7 @@ func (c *CreateCommand) AutocompleteFlags() complete.Flags {
 		complete.Flags{
 			"--config-options":      complete.PredictAnything,
 			"--custom-env":          complete.PredictAnything,
+			"--definition":          complete.PredictAnything,
 			"--image":               complete.PredictAnything,
 			"--image-version":       complete.PredictAnything,
 			"--memory":              complete.PredictAnything,
@@ -227,6 +231,7 @@ func (c *CreateCommand) Run(args []string) int {
 		ConfigOptions: c.configOptions,
 		CustomEnv:     c.customEnv,
 		Datastore:     datastore,
+		Definition:    c.definition,
 		Image:         c.image,
 		ImageVersion:  c.imageVersion,
 	})
@@ -249,6 +254,7 @@ func (c *CreateCommand) Run(args []string) int {
 		ConfigOptions:      updatedFlags.ConfigOptions,
 		CustomEnv:          updatedFlags.CustomEnv,
 		Datastore:          datastore,
+		Definition:         updatedFlags.Definition,
 		Image:              updatedFlags.Image,
 		ImageVersion:       updatedFlags.ImageVersion,
 		InitialNetwork:     c.initialNetwork,

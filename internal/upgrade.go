@@ -61,6 +61,10 @@ type UpgradeServiceInput struct {
 	// Datastore is the datastore the service belongs to
 	Datastore *service.Datastore
 
+	// Definition names the definition to move the service onto, empty to have
+	// the image and version decide it
+	Definition string
+
 	// Image is the image to upgrade to
 	Image string
 
@@ -158,6 +162,25 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		}
 	}
 
+	// a definition named outright is refused before anything is touched, and
+	// otherwise supplies the image and version the flags are laid over, the
+	// way it does at create: the service's recorded image belongs to the
+	// definition it is being moved off
+	var named *service.Datastore
+	versionedBy := input.Datastore.Definition
+	if input.Definition != "" {
+		found, err := input.Datastore.WithDefinitionNamed(input.Definition)
+		if err != nil {
+			return err
+		}
+
+		named = found
+		versionedBy = named.Definition
+		if input.Image == "" {
+			input.Image = named.Definition.DefaultImage
+		}
+	}
+
 	// before the version is decided, because deciding it needs to know which
 	// image the service runs, and a service that never recorded one only knows
 	// while its container is still there
@@ -169,7 +192,7 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		return err
 	}
 
-	imageVersion, err := upgradeVersion(input.Datastore.Definition, recorded, input.Image, input.ImageVersion)
+	imageVersion, err := upgradeVersion(versionedBy, recorded, input.Image, input.ImageVersion)
 	if err != nil {
 		return fmt.Errorf("unable to upgrade %s: %w", input.ServiceName, err)
 	}
@@ -197,9 +220,14 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	})
+	image, imageVersion, _ := definition.CutImage(taggedImage)
+	target := upgradeTarget(input.Datastore, named, recorded, image, imageVersion)
+
 	// an upgrade to the image a service already runs is nothing to do - unless it
-	// also asked to change a setting, which is a recreate whatever the image says
-	if currentImage == taggedImage && !input.changesSettings() {
+	// also asked to change a setting, or named a definition other than the one it
+	// runs, which is a recreate whatever the image says
+	movesDefinition := named != nil && named.DefinitionName() != input.Datastore.DefinitionName()
+	if currentImage == taggedImage && !input.changesSettings() && !movesDefinition {
 		input.Logger.Info(fmt.Sprintf("Service %s already running %s", input.ServiceName, taggedImage)) //nolint:errcheck
 		return nil
 	}
@@ -210,8 +238,6 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	// mounts the service already has are checked too, since a host path removed
 	// since it was mounted would otherwise only be found once there is no
 	// container left to go back to
-	image, imageVersion, _ := definition.CutImage(taggedImage)
-	target := upgradeTarget(input.Datastore, recorded, image, imageVersion)
 	if err := checkUpgradeMounts(ctx, input, target); err != nil {
 		return err
 	}
@@ -397,9 +423,17 @@ func applyUpgradeSettings(input UpgradeServiceInput) error {
 // of its own was pinned to postgres-18, and its data is where that definition
 // mounts it rather than where postgres-pgvector-pg17 would look for it.
 //
+// A definition the upgrade named outright is where it lands, whatever the image
+// says, since a tag that does not carry its major version is exactly what it is
+// named for.
+//
 // Pure, so which definition an upgrade lands on is pinned by a test rather than
 // by a docker daemon.
-func upgradeTarget(s *service.Datastore, recorded service.RecordedImage, image string, imageVersion string) *service.Datastore {
+func upgradeTarget(s *service.Datastore, named *service.Datastore, recorded service.RecordedImage, image string, imageVersion string) *service.Datastore {
+	if named != nil {
+		return named
+	}
+
 	target := s.ForImage(image, imageVersion)
 	if recorded.ImageVersion == "" {
 		return target
