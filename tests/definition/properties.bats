@@ -241,30 +241,47 @@ skip_unless_log_is_capped() {
 }
 
 @test "($DEFINITION) the expose settings are set, read back and unset" {
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-address 10.0.0.5
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-bind-address 10.0.0.5
   assert_success
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range 203.0.113.7
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-source-range 203.0.113.7
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-host db.example.com
   assert_success
 
-  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-address
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --port-bind-address
   assert_success
   assert_output "10.0.0.5"
 
-  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-source-range
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-host
+  assert_success
+  assert_output "db.example.com"
+
+  # and in the full report, as the value that was set
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_output --regexp "Expose host: +db\.example\.com"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --port-source-range
   assert_success
   assert_output "203.0.113.7"
 
   # and back to what every other check expects of this service
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-address
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-bind-address
   assert_success
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-source-range
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-host
   assert_success
 
-  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-address
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --port-bind-address
   assert_success
   assert_output ""
 
-  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-source-range
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --port-source-range
+  assert_success
+  assert_output ""
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-host
   assert_success
   assert_output ""
 }
@@ -273,23 +290,34 @@ skip_unless_log_is_capped() {
   local value
   # docker publishes on an address, not a name, and without a port's brackets
   for value in localhost "[::1]" 10.0.0.5:6379; do
-    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" expose-address "$value"
+    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" port-bind-address "$value"
     assert_failure
-    assert_stderr --partial "expose-address"
+    assert_stderr --partial "port-bind-address"
   done
 
   # socat honors a single range for each port it listens on
   for value in 10.0.0.0/33 "10.0.0.0/8,192.168.0.0/16" example.com; do
-    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range "$value"
+    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" port-source-range "$value"
     assert_failure
-    assert_stderr --partial "expose-source-range"
+    assert_stderr --partial "port-source-range"
   done
 
-  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-address
+  # the port comes from the exposed ports, so the host is a host alone
+  for value in db.example.com:5432 "postgres://db.example.com" bad_host "[::1]"; do
+    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" expose-host "$value"
+    assert_failure
+    assert_stderr --partial "expose-host"
+  done
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-host
   assert_success
   assert_output ""
 
-  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-source-range
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --port-bind-address
+  assert_success
+  assert_output ""
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --port-source-range
   assert_success
   assert_output ""
 }

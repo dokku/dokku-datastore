@@ -97,6 +97,36 @@ assert_source_range() {
   fi
 }
 
+# the dsn a linked app is handed, pointed at a host and at the host port the
+# port it names is exposed on: the same scheme, credentials and path, so a
+# client off the host authenticates the way the app does
+expected_exposed_dsn() {
+  local host="$1" dsn rest host_and_port container_port prefix path mapping host_port=""
+  dsn="$("$BIN" info "$PLUGIN" "$SERVICE" --dsn)"
+
+  rest="${dsn#*://}"
+  prefix="${dsn%%://*}://"
+  if [[ "$rest" == *@* ]]; then
+    prefix="${dsn%%@*}@"
+    rest="${rest#*@}"
+  fi
+
+  host_and_port="${rest%%/*}"
+  container_port="${host_and_port##*:}"
+  path=""
+  [[ "$rest" == */* ]] && path="/${rest#*/}"
+
+  for mapping in $("$BIN" info "$PLUGIN" "$SERVICE" --exposed-ports); do
+    if [[ "${mapping%%->*}" == "$container_port" ]]; then
+      host_port="${mapping#*->}"
+      host_port="${host_port##*:}"
+    fi
+  done
+  [[ -n "$host_port" ]] || fail "expected port $container_port to be exposed"
+
+  echo "${prefix}${host}:${host_port}${path}"
+}
+
 @test "($DEFINITION) expose publishes the service" {
   run "$BIN" expose "$PLUGIN" "$SERVICE"
   assert_success
@@ -105,6 +135,32 @@ assert_source_range() {
 
   "$BIN" info "$PLUGIN" "$SERVICE" --exposed-ports >"$EXPOSED_PORTS_FILE"
   [[ -s "$EXPOSED_PORTS_FILE" ]] || fail "expected the exposed ports to be reported"
+}
+
+@test "($DEFINITION) the exposed dsn names the expose-host and the exposed port" {
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-host dsn.example.com
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --exposed-dsn
+  assert_success
+  assert_output "$(expected_exposed_dsn dsn.example.com)"
+
+  # and back to what every other check expects of this service
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-host
+  assert_success
+}
+
+@test "($DEFINITION) the exposed dsn names the global domain without an expose-host" {
+  echo "dokku.me other.me" >"$BATS_TEST_TMPDIR/VHOST"
+
+  run --separate-stderr env DOKKU_ROOT="$BATS_TEST_TMPDIR" "$BIN" info "$PLUGIN" "$SERVICE" --exposed-dsn
+  assert_success
+  assert_output "$(expected_exposed_dsn dokku.me)"
+
+  # a host without dokku sets no DOKKU_ROOT, and has no domain to name
+  run --separate-stderr env -u DOKKU_ROOT "$BIN" info "$PLUGIN" "$SERVICE" --exposed-dsn
+  assert_success
+  assert_output ""
 }
 
 @test "($DEFINITION) an exposed service survives a stop and a start" {
@@ -195,22 +251,22 @@ assert_source_range() {
   assert_ambassador "an unset restart policy"
 }
 
-@test "($DEFINITION) reexpose publishes on the expose-address without restarting the service" {
+@test "($DEFINITION) reexpose publishes on the port-bind-address without restarting the service" {
   local service_before ambassador_before ports_before
   service_before="$(service_id)"
   ambassador_before="$(ambassador_id)"
   ports_before="$(cat "$PORT_FILE")"
 
   # setting it changes nothing until it is applied
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-address 127.0.0.1
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-bind-address 127.0.0.1
   assert_success
   [[ "$(ambassador_id)" == "$ambassador_before" ]] || fail "expected set to leave the ambassador alone"
 
   run "$BIN" reexpose "$PLUGIN" "$SERVICE"
   assert_success
   assert_output --partial "reexposed on port(s)"
-  assert_ambassador "reexpose on the expose-address"
-  assert_bound_on "reexpose on the expose-address" "127.0.0.1"
+  assert_ambassador "reexpose on the port-bind-address"
+  assert_bound_on "reexpose on the port-bind-address" "127.0.0.1"
   [[ "$(ambassador_id)" != "$ambassador_before" ]] || fail "expected reexpose to replace the ambassador"
   [[ "$(service_id)" == "$service_before" ]] || fail "expected reexpose to leave the service container alone"
   [[ "$(cat "$PORT_FILE")" == "$ports_before" ]] || fail "expected reexpose to keep the ports the service was exposed on"
@@ -219,21 +275,31 @@ assert_source_range() {
   assert_success
   assert_output --partial "->127.0.0.1:"
 
+  # where the ports are bound is not where a client elsewhere connects
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-host dsn.example.com
+  assert_success
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --exposed-dsn
+  assert_success
+  assert_output "$(expected_exposed_dsn dsn.example.com)"
+  refute_output --partial "127.0.0.1"
+
   # and back to every interface
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-address
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-bind-address
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-host
   assert_success
   run "$BIN" reexpose "$PLUGIN" "$SERVICE"
   assert_success
-  assert_ambassador "reexpose with no expose-address"
-  assert_bound_on "reexpose with no expose-address" ""
+  assert_ambassador "reexpose with no port-bind-address"
+  assert_bound_on "reexpose with no port-bind-address" ""
   [[ "$(service_id)" == "$service_before" ]] || fail "expected reexpose to leave the service container alone"
 }
 
-@test "($DEFINITION) reexpose limits the service to the expose-source-range" {
+@test "($DEFINITION) reexpose limits the service to the port-source-range" {
   local service_before
   service_before="$(service_id)"
 
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range 192.0.2.0/24
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-source-range 192.0.2.0/24
   assert_success
   run "$BIN" reexpose "$PLUGIN" "$SERVICE"
   assert_success
@@ -241,11 +307,11 @@ assert_source_range() {
   assert_source_range "reexpose with a source range" "192.0.2.0/24"
   [[ "$(service_id)" == "$service_before" ]] || fail "expected reexpose to leave the service container alone"
 
-  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-source-range
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --port-source-range
   assert_success
   assert_output "192.0.2.0/24"
 
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-source-range
   assert_success
   run "$BIN" reexpose "$PLUGIN" "$SERVICE"
   assert_success
@@ -267,7 +333,7 @@ assert_source_range() {
   local service_before
   service_before="$(service_id)"
 
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range 192.0.2.0/24
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-source-range 192.0.2.0/24
   assert_success
   run "$BIN" start "$PLUGIN" "$SERVICE"
   assert_success
@@ -275,7 +341,7 @@ assert_source_range() {
   assert_source_range "start with a changed source range" "192.0.2.0/24"
   [[ "$(service_id)" == "$service_before" ]] || fail "expected start to leave the running service container alone"
 
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-source-range
   assert_success
   run "$BIN" start "$PLUGIN" "$SERVICE"
   assert_success
@@ -304,6 +370,15 @@ assert_source_range() {
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --exposed-ports
   assert_success
   assert_output -- "-"
+
+  # with a host to name, there is still no port to name it with
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-host dsn.example.com
+  assert_success
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --exposed-dsn
+  assert_success
+  assert_output ""
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-host
+  assert_success
 }
 
 @test "($DEFINITION) reexpose refuses a service that is not exposed" {
@@ -331,21 +406,21 @@ assert_source_range() {
   assert_no_ambassador "unexpose after an expose on an address"
 }
 
-@test "($DEFINITION) expose picks random ports on the expose-address" {
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-address 127.0.0.1
+@test "($DEFINITION) expose picks random ports on the port-bind-address" {
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-bind-address 127.0.0.1
   assert_success
 
   run "$BIN" expose "$PLUGIN" "$SERVICE"
   assert_success
-  assert_ambassador "a random expose on the expose-address"
-  assert_bound_on "a random expose on the expose-address" "127.0.0.1"
+  assert_ambassador "a random expose on the port-bind-address"
+  assert_bound_on "a random expose on the port-bind-address" "127.0.0.1"
 
-  # written without the address, so a later expose-address moves them
+  # written without the address, so a later port-bind-address moves them
   [[ "$(cat "$PORT_FILE")" != *":"* ]] || fail "expected the port file to hold bare ports, got '$(cat "$PORT_FILE")'"
 
   run "$BIN" unexpose "$PLUGIN" "$SERVICE"
   assert_success
-  run "$BIN" set "$PLUGIN" "$SERVICE" expose-address
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-bind-address
   assert_success
 }
 

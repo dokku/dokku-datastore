@@ -100,6 +100,9 @@ func TestReadme(t *testing.T) {
 		{name: "the wait timeout property", expected: "`wait-timeout` property with `dokku redis:set`"},
 		{name: "the expose limits section", expected: "### Limiting where and to whom a service is exposed"},
 		{name: "the expose limits apply without a restart", expected: "Either reaches a running service with `dokku redis:reexpose`"},
+		{name: "the exposed dsn section", expected: "### Connecting to an exposed service from outside the host"},
+		{name: "the exposed dsn flag", expected: "`dokku redis:info lollipop --exposed-dsn`"},
+		{name: "the exposed dsn host", expected: "`expose-host` property, set with `dokku redis:set`"},
 	}
 
 	for _, test := range tests {

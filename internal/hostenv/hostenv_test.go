@@ -122,3 +122,17 @@ func TestPluginCheckoutIsEmptyWithoutBoth(t *testing.T) {
 		})
 	}
 }
+
+// dokku's home is read with a default, because a host without dokku sets
+// nothing and the binary still has to answer there
+func TestRoot(t *testing.T) {
+	t.Setenv("DOKKU_ROOT", "")
+	if actual := Root(); actual != "/home/dokku" {
+		t.Errorf("expected an unset root to be /home/dokku, got %q", actual)
+	}
+
+	t.Setenv("DOKKU_ROOT", "/opt/dokku-home")
+	if actual := Root(); actual != "/opt/dokku-home" {
+		t.Errorf("expected the root to be read from DOKKU_ROOT, got %q", actual)
+	}
+}

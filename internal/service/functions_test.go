@@ -696,8 +696,8 @@ func TestActionForAmbassador(t *testing.T) {
 		{name: "exposed, dead", state: ambassadorState{Exposed: true, Status: "dead", Managed: true, FrontedID: "abc", ServiceID: "abc"}, expected: ambassadorReplace},
 		{name: "exposed, a state docker has not shipped yet", state: ambassadorState{Exposed: true, Status: "hibernating", Managed: true, FrontedID: "abc", ServiceID: "abc"}, expected: ambassadorReplace},
 		{name: "exposed, made with the settings the service has", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", FrontedSettings: ambassadorSettings{Address: "10.0.0.5", SourceRange: "10.0.0.0/8"}, Settings: ambassadorSettings{Address: "10.0.0.5", SourceRange: "10.0.0.0/8"}}, expected: ambassadorKeep},
-		{name: "exposed, made before an expose-address was set", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", Settings: ambassadorSettings{Address: "10.0.0.5"}}, expected: ambassadorReplace},
-		{name: "exposed, made before an expose-source-range was set", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", Settings: ambassadorSettings{SourceRange: "10.0.0.0/8"}}, expected: ambassadorReplace},
+		{name: "exposed, made before a port-bind-address was set", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", Settings: ambassadorSettings{Address: "10.0.0.5"}}, expected: ambassadorReplace},
+		{name: "exposed, made before a port-source-range was set", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", Settings: ambassadorSettings{SourceRange: "10.0.0.0/8"}}, expected: ambassadorReplace},
 		{name: "exposed, made with a source range since unset", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", FrontedSettings: ambassadorSettings{SourceRange: "10.0.0.0/8"}}, expected: ambassadorReplace},
 		{name: "exposed, made with a source range since changed", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", FrontedSettings: ambassadorSettings{SourceRange: "10.0.0.0/8"}, Settings: ambassadorSettings{SourceRange: "192.0.2.0/24"}}, expected: ambassadorReplace},
 		{name: "exposed, forced over one that could be kept", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", Force: true}, expected: ambassadorReplace},
@@ -829,9 +829,9 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 			}(),
 		},
 		{
-			// a port with no address of its own goes on the expose-address, and
+			// a port with no address of its own goes on the port-bind-address, and
 			// one with its own keeps it; both are only open to the source range
-			name: "an expose-address and expose-source-range",
+			name: "a port-bind-address and port-source-range",
 			input: ambassadorForwardOptionsInput{
 				AmbassadorName: "dokku.rabbitmq.queue.ambassador",
 				CommandPrefix:  "rabbitmq",
@@ -860,7 +860,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 			}(),
 		},
 		{
-			name: "an expose-source-range alone",
+			name: "a port-source-range alone",
 			input: ambassadorForwardOptionsInput{
 				AmbassadorName: "dokku.postgres.lake.ambassador",
 				CommandPrefix:  "postgres",
@@ -1090,7 +1090,7 @@ func TestDatabaseNameWritesNothingForAMissingService(t *testing.T) {
 	}
 }
 
-// A service with an expose-address has its random ports picked where they are
+// A service with a port-bind-address has its random ports picked where they are
 // published, and an address the host does not have is reported by name rather
 // than as a port that could not be found.
 func TestGetAvailablePort(t *testing.T) {

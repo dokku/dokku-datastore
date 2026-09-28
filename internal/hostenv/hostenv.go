@@ -30,8 +30,22 @@ const (
 // defaultLibRoot is where dokku keeps its data when nothing says otherwise.
 const defaultLibRoot = "/var/lib/dokku"
 
+// defaultRoot is dokku's own home when nothing says otherwise.
+const defaultRoot = "/home/dokku"
+
 // defaultSystemUser is the user and group dokku's files belong to.
 const defaultSystemUser = "dokku"
+
+// Root is dokku's home, where it keeps files such as the global domains. It is
+// read with a default rather than required, since nothing the binary reads
+// from it is needed to answer, and a host without dokku does not set it.
+func Root() string {
+	if root := os.Getenv("DOKKU_ROOT"); root != "" {
+		return root
+	}
+
+	return defaultRoot
+}
 
 // LibRoot is the dokku library root as this process sees it.
 func LibRoot() string {

@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"io"
+	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/backend"
@@ -924,6 +927,95 @@ func (s *Datastore) URL(serviceName string, schemeOverride string) string {
 	}
 
 	return url
+}
+
+// ExposedURL returns the url a client off the host reaches the service at
+// through its exposed ports, empty when it is not exposed or there is no host
+// to name.
+//
+// It is the same dsn a linked app receives, rendered with the exposed host
+// ports in place of the container's and a public host in place of the service
+// container's name, so every definition gets one without saying anything more.
+// The host is the expose-host, or the first global domain. The address the
+// ports are bound on is never used, since a port bound on every interface has
+// none to name and one bound on a private or loopback address is not where a
+// client elsewhere connects.
+func (s *Datastore) ExposedURL(serviceName string) string {
+	hostPorts := ExposedHostPorts(s, serviceName)
+	if len(hostPorts) == 0 || len(hostPorts) < len(s.Definition.Service.Ports) {
+		return ""
+	}
+
+	host := exposedHost(s, serviceName)
+	if host == "" {
+		return ""
+	}
+
+	ports := map[string]int{}
+	for i, port := range s.Definition.Service.Ports {
+		// the port file may carry the address a port is bound on, which is
+		// dropped here along with everything else about where it is bound
+		hostPort := hostPorts[i]
+		if strings.Contains(hostPort, ":") {
+			_, bare, err := net.SplitHostPort(hostPort)
+			if err != nil {
+				return ""
+			}
+			hostPort = bare
+		}
+
+		number, err := strconv.Atoi(hostPort)
+		if err != nil {
+			return ""
+		}
+		ports[port.Name] = number
+	}
+
+	scope := s.scope(serviceName)
+	scope.Host = host
+	scope.Port = ports
+
+	url, err := definition.Render(s.Definition.Dokku.DSN, scope)
+	if err != nil {
+		return ""
+	}
+
+	return url
+}
+
+// exposedHost is the host an exposed dsn names, bracketed when it is an IPv6
+// address because every dsn follows its host with a port
+func exposedHost(s *Datastore, serviceName string) string {
+	host := ServiceExposeHost(s, serviceName)
+	if host == "" {
+		host = globalVhost()
+	}
+
+	if address, err := netip.ParseAddr(host); err == nil && address.Is6() {
+		return "[" + host + "]"
+	}
+
+	return host
+}
+
+// globalVhost is the first global domain dokku was given, empty when it has
+// none. It is read from the file dokku keeps them in, as the graphite
+// nginx-expose script does, since reading it through dokku needs a configured
+// dokku that rendering a connection string must not. For the same reason an
+// unset DOKKU_ROOT falls back to dokku's default rather than stopping info.
+func globalVhost() string {
+	lines, err := common.FileToSlice(filepath.Join(hostenv.Root(), "VHOST"))
+	if err != nil {
+		return ""
+	}
+
+	for _, line := range lines {
+		if fields := strings.Fields(line); len(fields) > 0 {
+			return fields[0]
+		}
+	}
+
+	return ""
 }
 
 // taggedImage is the image a service runs, which is what it recorded at create
