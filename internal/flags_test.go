@@ -107,3 +107,38 @@ func TestUpdateFlagFromEnvReadsTheDocumentedNames(t *testing.T) {
 		})
 	}
 }
+
+// The definition is read under the same prefix as the image, and a flag beats
+// it the way a flag beats the image. There is no legacy name to fall back on.
+func TestUpdateFlagFromEnvReadsTheDefinition(t *testing.T) {
+	postgres := service.Datastores["postgres"]
+
+	tests := []struct {
+		name        string
+		environment string
+		flag        string
+		expected    string
+	}{
+		{name: "from the environment", environment: "postgres-17", expected: "postgres-17"},
+		{name: "a flag beats the environment", environment: "postgres-17", flag: "postgres-18", expected: "postgres-18"},
+		{name: "nothing is filled in from the definition"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("POSTGRES_DEFINITION", test.environment)
+
+			updated, err := UpdateFlagFromEnv(UpdateFlagFromEnvInput{
+				Datastore:  postgres,
+				Definition: test.flag,
+			})
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+
+			if updated.Definition != test.expected {
+				t.Errorf("expected definition %q, got %q", test.expected, updated.Definition)
+			}
+		})
+	}
+}

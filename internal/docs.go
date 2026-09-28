@@ -77,6 +77,11 @@ type DocumentationData struct {
 	// definitions for, such as pgvector/pgvector for postgres, each at the
 	// version its newest definition pins
 	Flavors []DocumentedImage
+
+	// Definitions are the names of the datastore's definitions, oldest first,
+	// and empty for a datastore with only the one, where there is nothing to
+	// choose between
+	Definitions []string
 }
 
 // DocumentedImage is an image and the version a definition pins for it.
@@ -126,6 +131,7 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		ImportArgs:     input.Datastore.AcceptsExtraArgs("import"),
 		ReservedNames:  input.Datastore.Definition.Dokku.ReservedNames,
 		Flavors:        documentedFlavors(input.Datastore),
+		Definitions:    documentedDefinitions(input.Datastore),
 	}
 }
 
@@ -153,6 +159,22 @@ func documentedFlavors(datastore *service.Datastore) []DocumentedImage {
 	}
 
 	return flavors
+}
+
+// documentedDefinitions is every definition a service of the datastore can be
+// placed on by name, or nothing when there is only the one.
+func documentedDefinitions(datastore *service.Datastore) []string {
+	found := datastore.Definitions()
+	if len(found) < 2 {
+		return nil
+	}
+
+	names := make([]string, 0, len(found))
+	for _, one := range found {
+		names = append(names, one.Name)
+	}
+
+	return names
 }
 
 // documentedImage works out which image the readme and the help are written

@@ -187,16 +187,50 @@ func TestUpgradeVersionOfAFlavor(t *testing.T) {
 	}
 }
 
+// A definition named outright supplies the version as well as the image, so a
+// service moved onto one with nothing else said lands on the version it pins
+// rather than the one the service's old definition does.
+func TestUpgradeVersionOfANamedDefinition(t *testing.T) {
+	pgvector17, err := service.Datastores["postgres"].WithDefinitionNamed("postgres-pgvector-pg17")
+	if err != nil {
+		t.Fatalf("expected postgres-pgvector-pg17 to resolve, got %v", err)
+	}
+
+	recorded := service.RecordedImage{Image: "postgres", ImageVersion: "18.4"}
+	actual, err := upgradeVersion(pgvector17.Definition, recorded, pgvector17.Definition.DefaultImage, "")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if actual != pgvector17.Definition.DefaultImageVersion {
+		t.Errorf("expected %q, got %q", pgvector17.Definition.DefaultImageVersion, actual)
+	}
+
+	// and an image of its own still needs a version named alongside it
+	if _, err := upgradeVersion(pgvector17.Definition, recorded, "myorg/pgvector", ""); err == nil {
+		t.Error("expected an image the definition does not ship to need a version")
+	}
+}
+
 // Which definition an upgrade leaves a service on. It moves only when the image
 // the service ran and the one it is moved to resolve to different definitions,
 // so a service pinned before its flavor had definitions keeps the directory its
-// data is in.
+// data is in, unless the upgrade named a definition outright.
 func TestUpgradeTarget(t *testing.T) {
 	postgres := service.Datastores["postgres"]
+
+	named := func(name string) *service.Datastore {
+		found, err := postgres.WithDefinitionNamed(name)
+		if err != nil {
+			t.Fatalf("expected %s to resolve, got %v", name, err)
+		}
+		return found
+	}
 
 	tests := []struct {
 		name     string
 		pinned   *service.Datastore
+		named    *service.Datastore
 		recorded service.RecordedImage
 		image    string
 		version  string
@@ -251,11 +285,40 @@ func TestUpgradeTarget(t *testing.T) {
 			version:  "17.11",
 			expected: "postgres-17",
 		},
+		{
+			// a tag that does not carry its major resolves to nothing in
+			// particular, and so to the newest, which is why a definition can be
+			// named at all
+			name:     "a custom tag with no name moves to the newest",
+			pinned:   postgres.ForImage("", "17.0"),
+			recorded: service.RecordedImage{Image: "postgres", ImageVersion: "17.0"},
+			image:    "myorg/postgres",
+			version:  "custom-3",
+			expected: "postgres-18",
+		},
+		{
+			name:     "a custom tag with a name stays on it",
+			pinned:   postgres.ForImage("", "17.0"),
+			named:    named("postgres-17"),
+			recorded: service.RecordedImage{Image: "postgres", ImageVersion: "17.0"},
+			image:    "myorg/postgres",
+			version:  "custom-3",
+			expected: "postgres-17",
+		},
+		{
+			name:     "a name wins over the image",
+			pinned:   postgres.ForImage("", "18.4"),
+			named:    named("postgres-pgvector-pg17"),
+			recorded: service.RecordedImage{Image: "postgres", ImageVersion: "18.4"},
+			image:    "postgres",
+			version:  "18.4",
+			expected: "postgres-pgvector-pg17",
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			actual := upgradeTarget(test.pinned, test.recorded, test.image, test.version)
+			actual := upgradeTarget(test.pinned, test.named, test.recorded, test.image, test.version)
 			if name := actual.DefinitionName(); name != test.expected {
 				t.Errorf("expected %s, got %s", test.expected, name)
 			}
@@ -282,6 +345,26 @@ func TestUpgradeRefusesAnUnusableLogConfig(t *testing.T) {
 
 	if !strings.Contains(err.Error(), `invalid max-size value "20"`) {
 		t.Errorf("expected the error to name the value, got %q", err)
+	}
+}
+
+// A definition that is not the datastore's own is refused before the service is
+// touched, rather than moving it onto whatever its image would resolve to.
+func TestUpgradeRefusesAnUnknownDefinition(t *testing.T) {
+	datastore := service.Datastores["postgres"]
+	withDataRoot(t)
+
+	err := UpgradeService(t.Context(), UpgradeServiceInput{
+		Datastore:   datastore,
+		Definition:  "redis",
+		ServiceName: "lollipop",
+	})
+	if err == nil {
+		t.Fatal("expected the redis definition to be refused for postgres, got no error")
+	}
+
+	if !strings.Contains(err.Error(), "is not a postgres definition") {
+		t.Errorf("expected the error to say whose definition it is not, got %q", err)
 	}
 }
 

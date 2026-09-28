@@ -327,3 +327,67 @@ func TestOnlyGraphiteDeclaresADirectory(t *testing.T) {
 		}
 	}
 }
+
+// A definition named outright wins over whatever the image would resolve to,
+// and only a definition of the datastore itself can be named: postgres cannot
+// be placed on redis, and a name nothing ships is refused with the ones that
+// could have been given.
+func TestWithDefinitionNamed(t *testing.T) {
+	postgres := postgresDatastore(t)
+
+	tests := []struct {
+		name      string
+		datastore *Datastore
+		expected  string
+		refused   bool
+	}{
+		{name: "postgres-17", datastore: postgres, expected: "postgres-17"},
+		{name: "postgres-pgvector-pg17", datastore: postgres, expected: "postgres-pgvector-pg17"},
+		{name: "postgres-18", datastore: postgres, expected: "postgres-18"},
+		{name: "postgres-12", datastore: postgres, refused: true},
+		{name: "redis", datastore: postgres, refused: true},
+		{name: "redis", datastore: Datastores["redis"], expected: "redis"},
+		{name: "postgres-17", datastore: Datastores["redis"], refused: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.datastore.Definition.Dokku.Plugin+"/"+test.name, func(t *testing.T) {
+			found, err := test.datastore.WithDefinitionNamed(test.name)
+			if test.refused {
+				if err == nil {
+					t.Fatalf("expected %s to be refused, got %s", test.name, found.DefinitionName())
+				}
+
+				// the error names what could have been given instead
+				for _, name := range test.datastore.registry.NamesFor(test.datastore.Definition.Dokku.Plugin) {
+					if !strings.Contains(err.Error(), name) {
+						t.Errorf("expected the error to list %s, got %q", name, err)
+					}
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("expected %s to resolve, got %v", test.name, err)
+			}
+
+			if found.DefinitionName() != test.expected {
+				t.Errorf("expected %s, got %s", test.expected, found.DefinitionName())
+			}
+		})
+	}
+}
+
+// Naming a definition leaves the datastore it was asked of alone, since every
+// service shares that one.
+func TestWithDefinitionNamedDoesNotChangeTheDatastore(t *testing.T) {
+	postgres := postgresDatastore(t)
+
+	if _, err := postgres.WithDefinitionNamed("postgres-17"); err != nil {
+		t.Fatalf("expected postgres-17 to resolve, got %v", err)
+	}
+
+	if postgres.DefinitionName() != "postgres-18" {
+		t.Errorf("expected the shared datastore to stay on postgres-18, got %s", postgres.DefinitionName())
+	}
+}

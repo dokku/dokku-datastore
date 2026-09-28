@@ -155,6 +155,30 @@ func TestNewDocumentationDataFlavors(t *testing.T) {
 	}
 }
 
+// Every definition a service can be placed on by name is documented, oldest
+// first, and a datastore with only the one documents none.
+func TestNewDocumentationDataDefinitions(t *testing.T) {
+	postgres := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["postgres"]})
+	expected := service.Datastores["postgres"].Definitions()
+	if len(postgres.Definitions) != len(expected) {
+		t.Fatalf("expected %d definitions, got %v", len(expected), postgres.Definitions)
+	}
+
+	for index, found := range expected {
+		if postgres.Definitions[index] != found.Name {
+			t.Errorf("expected definition %d to be %s, got %s", index, found.Name, postgres.Definitions[index])
+		}
+	}
+
+	if postgres.Definitions[0] != "postgres-17" {
+		t.Errorf("expected the oldest plain definition first, got %s", postgres.Definitions[0])
+	}
+
+	if redis := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["redis"]}); len(redis.Definitions) != 0 {
+		t.Errorf("expected redis to document no definitions, got %v", redis.Definitions)
+	}
+}
+
 func TestClassifyDocLine(t *testing.T) {
 	tests := []struct {
 		name     string

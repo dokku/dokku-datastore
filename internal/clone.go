@@ -232,8 +232,9 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 	image, imageVersion := recorded.Image, recorded.ImageVersion
 
 	// create refuses it too, but checked here as well so that a refused clone is
-	// never announced as though it had started
-	if err := service.CheckReservedServiceName(input.Datastore.ForImage(image, imageVersion).Definition, input.NewServiceName); err != nil {
+	// never announced as though it had started. Against the definition the
+	// source runs, which is the one the clone is placed on below
+	if err := service.CheckReservedServiceName(input.Datastore.Definition, input.NewServiceName); err != nil {
 		return err
 	}
 
@@ -247,10 +248,14 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 
 	input.Logger.Header2(fmt.Sprintf("Cloning %s to %s @ %s", input.ServiceName, input.NewServiceName, sourceImage)) //nolint:errcheck
 
+	// placed on the definition the source is pinned to rather than the one its
+	// image resolves to, which differ for a service created with --definition
+	// or one pinned before its image had definitions of its own
 	if err := CreateService(ctx, CreateServiceInput{
 		ConfigOptions:      settings.ConfigOptions,
 		CustomEnv:          settings.CustomEnv,
 		Datastore:          input.Datastore,
+		Definition:         input.Datastore.DefinitionName(),
 		Image:              image,
 		ImageVersion:       imageVersion,
 		InitialNetwork:     settings.InitialNetwork,

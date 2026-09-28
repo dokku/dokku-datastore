@@ -6,6 +6,7 @@ load ../test_helper
 COPY="$SERVICE-copy"
 OVERRIDE="$SERVICE-override"
 ARGS="$SERVICE-args"
+CUSTOM="$SERVICE-custom"
 MOUNT_TARGET="/opt/dokku-mount"
 
 setup_file() {
@@ -23,7 +24,8 @@ setup_file() {
 }
 
 teardown_file() {
-  datastore_teardown_file "$COPY" "$OVERRIDE" "$ARGS" "$SERVICE"
+  datastore_teardown_file "$COPY" "$OVERRIDE" "$ARGS" "$CUSTOM-copy" "$CUSTOM" "$SERVICE"
+  untag_custom_image
 }
 
 # a clone copies the data through an export and an import, so a datastore
@@ -85,6 +87,28 @@ clone_or_skip() {
   run mount_of "$(service_container "$COPY")" "$MOUNT_TARGET"
   assert_success
   assert_output "$(mount_source clone):false"
+}
+
+@test "($DEFINITION) a clone runs the definition its source is pinned to" {
+  # rather than the one the source's image resolves to, which for a tag that
+  # does not carry the major version is the newest definition
+  tag_custom_image
+  run "$BIN" create "$PLUGIN" "$CUSTOM" --definition "$DEFINITION" --image "$CUSTOM_IMAGE" --image-version "$CUSTOM_IMAGE_VERSION"
+  assert_success
+
+  run "$BIN" clone "$PLUGIN" "$CUSTOM" "$CUSTOM-copy"
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement clone"
+  fi
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$CUSTOM-copy" --definition
+  assert_success
+  assert_output "$DEFINITION"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$CUSTOM-copy" --image-version
+  assert_success
+  assert_output "$CUSTOM_IMAGE_VERSION"
 }
 
 @test "($DEFINITION) a flag passed to clone overrides that one setting" {

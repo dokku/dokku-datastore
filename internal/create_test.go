@@ -211,3 +211,32 @@ func TestCreateServiceRefusesAReservedName(t *testing.T) {
 		})
 	}
 }
+
+// A definition that is not the datastore's own is refused before anything is
+// made, whether nothing ships it or another datastore does, rather than placing
+// the service on whatever its image would have resolved to.
+func TestCreateServiceRefusesAnUnknownDefinition(t *testing.T) {
+	datastore := service.Datastores["postgres"]
+	withDataRoot(t)
+
+	for _, name := range []string{"postgres-12", "redis"} {
+		t.Run(name, func(t *testing.T) {
+			err := CreateService(t.Context(), CreateServiceInput{
+				Datastore:   datastore,
+				Definition:  name,
+				ServiceName: "lollipop",
+			})
+			if err == nil {
+				t.Fatalf("expected the %s definition to be refused, got no error", name)
+			}
+
+			if !strings.Contains(err.Error(), "postgres-17") {
+				t.Errorf("expected the error to list the postgres definitions, got %q", err)
+			}
+
+			if root := service.Folders(datastore, "lollipop").Root; common.DirectoryExists(root) {
+				t.Errorf("a refused create left %s behind", root)
+			}
+		})
+	}
+}

@@ -42,3 +42,11 @@ func ImageVersionFromEnv(properties service.ServiceStruct) string {
 
 	return os.Getenv(LegacyImageVersionVariable)
 }
+
+// DefinitionFromEnv is the definition an operator asked a plugin to place new
+// services on, under the same prefix as the image - POSTGRES_DEFINITION for
+// postgres. There is no legacy name to fall back on, since the bash plugins had
+// no definitions to name.
+func DefinitionFromEnv(properties service.ServiceStruct) string {
+	return os.Getenv(properties.PluginVariable + "_DEFINITION")
+}

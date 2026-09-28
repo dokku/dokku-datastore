@@ -155,6 +155,21 @@ create_service() {
   "$BIN" create "$PLUGIN" "$1" --image "$IMAGE" --image-version "$IMAGE_VERSION"
 }
 
+# this definition's image under a name and tag no definition ships, the way a
+# build of one's own is, so that only --definition can place it. Tagged from the
+# pinned image, which every file's setup has already fetched, rather than pulled
+# shellcheck disable=SC2034
+CUSTOM_IMAGE="dokku-datastore-test/$DEFINITION"
+CUSTOM_IMAGE_VERSION="not-a-version"
+
+tag_custom_image() {
+  docker image tag "$IMAGE:$IMAGE_VERSION" "$CUSTOM_IMAGE:${1:-$CUSTOM_IMAGE_VERSION}"
+}
+
+untag_custom_image() {
+  docker image rm "$CUSTOM_IMAGE:${1:-$CUSTOM_IMAGE_VERSION}" >/dev/null 2>/dev/null || true
+}
+
 # whether this definition declares a secret that the environment variable,
 # and so the flag handed down under it, sets
 declares_secret() {
