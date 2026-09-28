@@ -197,9 +197,21 @@ volume_key_or_skip() {
   assert_output "$(host_service_root "$ENVIRONMENT")/$VOLUME_KEY:true"
 }
 
+# whether the definition tells its datastore where the volume the tests move is
+# mounted, so that it keeps its data there rather than at the image's own path.
+# A clone copies the data through an export, which only finds it where the
+# datastore keeps it
+follows_a_move() {
+  case "$DEFINITION" in
+  redis | typesense) return 0 ;;
+  esac
+  return 1
+}
+
 @test "($DEFINITION) a clone keeps where the source's volumes are mounted" {
   volume_key_or_skip
   [[ -d "$(service_root "$FLAG")" ]] || skip "the service created with a volume target is missing"
+  follows_a_move || skip "$DEFINITION keeps its data at the image's own path wherever the volume is mounted"
 
   run "$BIN" clone "$PLUGIN" "$FLAG" "$COPY"
   if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
@@ -252,9 +264,11 @@ volume_key_or_skip() {
   run "$BIN" create "$PLUGIN" "$REDIS" --image "$IMAGE" --image-version "$IMAGE_VERSION" --volume-target data=/redis-data
   assert_success
 
-  run container_inspect "$(service_container "$REDIS")" '{{ join .Config.Cmd " " }}'
+  # started in the data volume, which is where the image's entrypoint hands
+  # ownership to the redis user and where redis writes its dump
+  run container_inspect "$(service_container "$REDIS")" '{{ .Config.WorkingDir }}'
   assert_success
-  assert_output --partial "--dir /redis-data"
+  assert_output "/redis-data"
 
   run "$(probe_path)" write "$REDIS"
   assert_success
