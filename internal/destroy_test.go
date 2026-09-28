@@ -34,7 +34,7 @@ func TestRemoveDataArgsCoversEveryBindSource(t *testing.T) {
 		{
 			name:      "a third directory the image reads",
 			datastore: "mongo",
-			expected:  []string{"/config", "/data", "/initdb"},
+			expected:  []string{"/config", "/data", "/configdb", "/initdb"},
 		},
 	}
 
