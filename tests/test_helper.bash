@@ -229,6 +229,38 @@ mount_of() {
   container_inspect "$1" "{{ range .Mounts }}{{ if eq .Destination \"$2\" }}{{ .Source }}:{{ .RW }}{{ end }}{{ end }}"
 }
 
+# every host directory a container has bound, one <source> <destination> per line
+binds_of() {
+  container_inspect "$1" '{{ range .Mounts }}{{ if eq .Type "bind" }}{{ .Source }} {{ .Destination }}{{ "\n" }}{{ end }}{{ end }}'
+}
+
+# the destination of every docker volume a container has, one per line. A
+# service has none of its own, so on a fresh one these are the anonymous volumes
+# docker made for a VOLUME the image declares and nothing was bound over
+volumes_of() {
+  container_inspect "$1" '{{ range .Mounts }}{{ if eq .Type "volume" }}{{ .Destination }}{{ "\n" }}{{ end }}{{ end }}'
+}
+
+# whether a path is inside a directory or is the directory itself, with the trailing
+# slash so that /var/solr is not taken to hold /var/solrdata
+is_under() {
+  [[ "$1" == "$2" || "$1" == "${2%/}/"* ]]
+}
+
+# the full path of everything below a path in a container, one per line,
+# without the path itself. Read through docker rather than from the host, since
+# a datastore leaves its files owned by a user the tests are not, and through a
+# copy rather than an exec, since not every image ships a shell or find. The copy
+# takes in whatever else is mounted below the path, as the container sees it
+container_listing() {
+  local parent
+  parent="$(dirname "$2")"
+  docker container cp "$1:$2" - | tar -tf - | awk -v parent="${parent%/}" -v path="$2" '
+    { sub(/\/$/, ""); full = parent "/" $0 }
+    full != path { print full }
+  '
+}
+
 # a host directory to mount, under the data root so that it goes with it
 mount_source() {
   local directory="$DOKKU_LIB_ROOT/mounts/$1"
