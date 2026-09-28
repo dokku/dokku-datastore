@@ -154,6 +154,13 @@ type Volume struct {
 
 	// Target is the path inside the container.
 	Target string `yaml:"target"`
+
+	// File marks a source that is a file rather than a directory: a config the
+	// definition seeds, or a file a hook copies out of the image. Docker makes
+	// a missing source into a directory, which cannot be mounted over a file,
+	// so a file source is never made as a directory, and a service missing one
+	// has its hook run again to make it before its container is.
+	File bool `yaml:"x-file"`
 }
 
 // Port is a compose long-syntax port entry with a mandatory name.

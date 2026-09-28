@@ -2,6 +2,7 @@ package definition
 
 import (
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 
@@ -246,6 +247,26 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 			if _, err := strconv.ParseUint(config.Mode, 8, 32); err != nil {
 				return fail("config %q has mode %q, which is not an octal file mode", config.Source, config.Mode)
 			}
+		}
+	}
+
+	// a file source has to be marked as one, or it would be made a directory
+	// before anything could write the file, and something has to make it, or
+	// docker would make a directory there in its place
+	for _, volume := range definition.Service.Volumes {
+		seeded := false
+		for _, config := range definition.Service.Configs {
+			if path.Clean(config.Target) == path.Clean(volume.Target) {
+				seeded = true
+			}
+		}
+
+		if seeded && !volume.File {
+			return fail("volume %q is a config file, so it needs x-file: true", volume.Target)
+		}
+
+		if volume.File && !seeded && definition.Dokku.Hooks.PreCreate == nil {
+			return fail("volume %q is a file that neither a config nor a pre_create hook makes", volume.Target)
 		}
 	}
 

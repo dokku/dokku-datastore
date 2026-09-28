@@ -132,6 +132,19 @@ func TestParseRejects(t *testing.T) {
 			expected: "must be a bind mount",
 		},
 		{
+			// made a directory before the config could be written into it,
+			// which is how rabbitmq's config went unwritten
+			name:     "a config file bound without saying it is a file",
+			compose:  withConfigEntry(strings.Replace(validCompose, "        target: /data\n", "        target: /data\n      - type: bind\n        source: \"{{ .HostRoot }}/config/thing.conf\"\n        target: /etc/thing.conf\n", 1), "      - source: thing_conf\n        target: /etc/thing.conf\n"),
+			expected: `volume "/etc/thing.conf" is a config file, so it needs x-file: true`,
+		},
+		{
+			// docker would make a directory where it belongs
+			name:     "a file nothing makes",
+			compose:  strings.Replace(validCompose, "        target: /data\n", "        target: /data\n        x-file: true\n", 1),
+			expected: `volume "/data" is a file that neither a config nor a pre_create hook makes`,
+		},
+		{
 			name:     "a volume outside the service root",
 			compose:  strings.Replace(validCompose, `source: "{{ .HostRoot }}/data"`, `source: "/mnt/elsewhere"`, 1),
 			expected: "must be rooted at {{ .HostRoot }}",

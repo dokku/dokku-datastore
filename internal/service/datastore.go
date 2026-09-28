@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"io"
@@ -100,6 +101,13 @@ func (s *Datastore) CreateService(ctx context.Context, serviceName string, overr
 		return err
 	}
 
+	return s.seedConfigs(serviceName)
+}
+
+// seedConfigs writes the config files the definition seeds that are not there
+// yet, leaving any that are alone, so it can be run again without undoing an
+// operator's edits.
+func (s *Datastore) seedConfigs(serviceName string) error {
 	configs, err := render.Configs(render.Input{
 		Definition: s.Definition,
 		Scope:      s.scope(serviceName),
@@ -188,6 +196,10 @@ func (s *Datastore) CreateServiceContainer(ctx context.Context, input CreateServ
 	}
 
 	if err := s.writeScripts(input.ServiceName); err != nil {
+		return err
+	}
+
+	if err := s.ensureBindSources(ctx, input.ServiceName); err != nil {
 		return err
 	}
 
@@ -793,6 +805,91 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 // The payload is easy to forget here and impossible to miss at runtime: an
 // offline verb is one of the mounted scripts, so without it there is nothing to
 // exec and import fails with "not found".
+// ensureBindSources makes whatever the service's binds mount from that is not
+// there, before a container is made on them.
+//
+// Create makes all of them, so this is a service whose definition has bound
+// something new since it was created. Left alone, docker would make a missing
+// source a directory owned by root, and a directory cannot be mounted over a
+// file at all, so the container would not start. Directories are made the way
+// create makes them, and files by what makes them at create - the configs and
+// the pre_create hook, both of which leave anything already there alone.
+//
+// An earlier release made every source a directory, a file's included, so an
+// empty directory where a file belongs is taken away for the file to be made.
+func (s *Datastore) ensureBindSources(ctx context.Context, serviceName string) error {
+	root := Folders(s, serviceName).Root
+	resolve := func(volume definition.Volume) string {
+		return strings.Replace(volume.Source, definition.HostRootTemplate, root, 1)
+	}
+
+	missing := false
+	for _, volume := range s.Definition.Service.Volumes {
+		source := resolve(volume)
+		info, err := os.Stat(source)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			missing = true
+		case err != nil:
+			return fmt.Errorf("unable to check %s: %w", source, err)
+		case volume.File && info.IsDir():
+			if err := os.Remove(source); err != nil {
+				return fmt.Errorf("%s is mounted as a file and is a directory that could not be removed: %w", source, err)
+			}
+			missing = true
+		}
+	}
+
+	if !missing {
+		return nil
+	}
+
+	for _, directory := range s.BindDirectories(serviceName) {
+		if _, err := os.Stat(directory); err == nil {
+			continue
+		}
+
+		if err := os.MkdirAll(directory, BindDirectoryMode); err != nil {
+			return fmt.Errorf("unable to create %s: %w", directory, err)
+		}
+
+		if err := common.SetPermissions(common.SetPermissionInput{
+			Filename:  directory,
+			GroupName: hostenv.SystemGroup(),
+			Mode:      BindDirectoryMode,
+			Username:  hostenv.SystemUser(),
+		}); err != nil {
+			return fmt.Errorf("unable to set permissions on %s: %w", directory, err)
+		}
+	}
+
+	if err := s.seedConfigs(serviceName); err != nil {
+		return err
+	}
+
+	if err := s.RunPreCreate(ctx, serviceName); err != nil {
+		return fmt.Errorf("unable to make what %s mounts: %w", serviceName, err)
+	}
+
+	for _, volume := range s.Definition.Service.Volumes {
+		if !volume.File {
+			continue
+		}
+
+		if info, err := os.Stat(resolve(volume)); err != nil || info.IsDir() {
+			return fmt.Errorf("%s mounts %s as a file, which nothing made", serviceName, resolve(volume))
+		}
+	}
+
+	return nil
+}
+
+// BindDirectoryMode is the mode a bind directory is made with, the same as
+// every other service folder: the group keeps write access, since the datastore
+// container takes ownership of what it writes to and later commands still need
+// to reach it.
+const BindDirectoryMode = 0775
+
 // BindDirectories returns the host directories a definition binds into its
 // containers, beyond the folders every service already has.
 //
@@ -828,7 +925,14 @@ func (s *Datastore) bindSources(root string) []string {
 				continue
 			}
 
+			// a file is made by the config or the hook that writes it, and
+			// making it a directory first is what would stop either one. The
+			// directory it is written into is made instead
 			resolved := strings.Replace(volume.Source, definition.HostRootTemplate, root, 1)
+			if volume.File {
+				resolved = filepath.Dir(resolved)
+			}
+
 			if seen[resolved] {
 				continue
 			}

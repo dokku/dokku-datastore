@@ -16,6 +16,13 @@ services:
       - type: bind
         source: "{{ .HostRoot }}/data"
         target: /data/db
+      # a config server keeps its data here rather than in /data/db. A
+      # standalone service writes nothing to it, but the image declares it a
+      # volume, so it is bound rather than left for docker to make an anonymous
+      # volume of
+      - type: bind
+        source: "{{ .HostRoot }}/configdb"
+        target: /data/configdb
       - type: bind
         source: "{{ .HostRoot }}/initdb"
         target: /docker-entrypoint-initdb.d
