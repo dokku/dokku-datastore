@@ -286,6 +286,7 @@ func readmeUsage(input ReadmeInput) ([]string, error) {
 	}
 
 	sections = append(sections, readmeExposeLimits(input.Data)...)
+	sections = append(sections, readmeExposedDsn(input.Data)...)
 	sections = append(sections, readmeExtraArgs(input.Data)...)
 	sections = append(sections, readmeWaitTimeout(input.Data)...)
 	sections = append(sections, readmeReservedNames(input.Data)...)
@@ -402,6 +403,18 @@ func readmeExposeLimits(data DocumentationData) []string {
 			"Either reaches a running service with `dokku %s:reexpose`, which leaves the service running.", data.CommandPrefix, data.CommandPrefix),
 		"Only one source range can be given. The range is checked against the address a connection reaches the service from, which for a connection to the exposed port on the loopback interface, or an IPv6 connection to a service network without IPv6, is the docker network's gateway rather than the client, " +
 			"so with a range that leaves the gateway out, connecting to `127.0.0.1` from the dokku host itself is refused.",
+	}
+}
+
+// readmeExposedDsn explains the dsn a client off the host connects to an
+// exposed service with, and where its host comes from
+func readmeExposedDsn(data DocumentationData) []string {
+	return []string{
+		"### Connecting to an exposed service from outside the host",
+		fmt.Sprintf("`dokku %s:info lollipop --exposed-dsn` prints the dsn a client off the dokku host connects with. It is the dsn a linked app is handed, with the exposed ports in place of the container's and a public host in place of the service container's name, so it carries the same credentials. "+
+			"The host is the service's `expose-host` property, set with `dokku %s:set`, or the first global domain when it has none. "+
+			"The `port-bind-address`, or an address given with a port, is never used as the host, since it is where the port is bound rather than where a client elsewhere reaches it. "+
+			"The dsn is empty until the service is exposed and there is a host to name.", data.CommandPrefix, data.CommandPrefix),
 	}
 }
 

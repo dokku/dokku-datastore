@@ -133,6 +133,7 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		service.WaitTimeoutProperty:       "120",
 		service.PortBindAddressProperty:   "10.0.0.5",
 		service.ExposeSourceRangeProperty: "10.0.0.0/8",
+		service.ExposeHostProperty:        "db.example.com",
 	} {
 		if err := SetProperty(datastore, "lollipop", key, value); err != nil {
 			t.Fatalf("failed to set the %s property: %s", key, err)
@@ -161,6 +162,7 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		"export-args":         "--hex-blob",
 		"port-bind-address":   "10.0.0.5",
 		"expose-source-range": "10.0.0.0/8",
+		"expose-host":         "db.example.com",
 		"image":               "redis",
 		"image-version":       "8.4.2",
 		"import-args":         "--force",
@@ -347,5 +349,47 @@ func TestInfoReportsAnUnsetWaitTimeoutAsEmpty(t *testing.T) {
 	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
 	if timeout := info[service.WaitTimeoutProperty]; timeout != "" {
 		t.Errorf("expected an unset wait timeout to be reported empty, got %q", timeout)
+	}
+}
+
+// The expose-host is reported as it was set, like every other property, rather
+// than as the global domain the exposed dsn falls back to without one, so a
+// value read back and set again does not pin the service to today's domain.
+func TestInfoReportsAnUnsetExposeHostAsEmpty(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withInfoService(t, datastore, "lollipop")
+
+	dokkuRoot := t.TempDir()
+	t.Setenv("DOKKU_ROOT", dokkuRoot)
+	writeInfoFile(t, filepath.Join(dokkuRoot, "VHOST"), "dokku.me")
+	writeInfoFile(t, service.Files(datastore, "lollipop").Port, "33201")
+
+	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if host := info[service.ExposeHostProperty]; host != "" {
+		t.Errorf("expected an unset expose-host to be reported empty, got %q", host)
+	}
+
+	if dsn := info["exposed-dsn"]; !strings.Contains(dsn, "@dokku.me:33201") {
+		t.Errorf("expected the exposed dsn to name the global domain, got %q", dsn)
+	}
+}
+
+// A service that is not exposed has no dsn a client off the host could use,
+// even with a host to name.
+func TestInfoReportsNoExposedDsnForAServiceThatIsNotExposed(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withInfoService(t, datastore, "lollipop")
+
+	dokkuRoot := t.TempDir()
+	t.Setenv("DOKKU_ROOT", dokkuRoot)
+	writeInfoFile(t, filepath.Join(dokkuRoot, "VHOST"), "dokku.me")
+
+	if err := SetProperty(datastore, "lollipop", service.ExposeHostProperty, "db.example.com"); err != nil {
+		t.Fatalf("failed to set the property: %s", err)
+	}
+
+	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if dsn := info["exposed-dsn"]; dsn != "" {
+		t.Errorf("expected no exposed dsn for a service that is not exposed, got %q", dsn)
 	}
 }

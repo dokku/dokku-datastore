@@ -77,3 +77,26 @@ func TestServiceExposeSettings(t *testing.T) {
 		t.Errorf("expected the ambassador to be made with both, got %+v", settings)
 	}
 }
+
+func TestValidateExposeHost(t *testing.T) {
+	for _, value := range []string{"", "db.example.com", "localhost", "my-host", "10.0.0.5", "::1", "2001:db8::1", strings.Repeat("a", 63) + ".com"} {
+		if err := ValidateExposeHost(value); err != nil {
+			t.Errorf("expected %q to be accepted, got %q", value, err)
+		}
+	}
+
+	// the port comes from the exposed ports, so a value carrying one of its own,
+	// a scheme or anything else that is not a host is refused rather than put
+	// into the dsn as it is
+	for _, value := range []string{"db.example.com:5432", "postgres://db.example.com", "bad_host", "-a.com", "a-.com", "a..com", ".com", strings.Repeat("a", 64) + ".com", "db example.com", "[::1]", "fe80::1%eth0", "db.example.com/path"} {
+		err := ValidateExposeHost(value)
+		if err == nil {
+			t.Errorf("expected %q to be refused", value)
+			continue
+		}
+
+		if !strings.Contains(err.Error(), ExposeHostProperty) {
+			t.Errorf("expected the error to name %s, got %q", ExposeHostProperty, err)
+		}
+	}
+}

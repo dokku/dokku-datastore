@@ -514,7 +514,9 @@ dokku {{.CommandPrefix}}:expose lollipop 127.0.0.1:{{.PortList}}
 expose the service on random ports on a single address, and only to clients in one network
 dokku {{.CommandPrefix}}:set lollipop port-bind-address 10.0.0.5
 dokku {{.CommandPrefix}}:set lollipop expose-source-range 10.0.0.0/8
-dokku {{.CommandPrefix}}:expose lollipop`
+dokku {{.CommandPrefix}}:expose lollipop
+print the dsn a client off the host connects with, which names the expose-host or the first global domain
+dokku {{.CommandPrefix}}:info lollipop --exposed-dsn`
 }
 
 // Group is the readme usage section the command is documented under
@@ -580,6 +582,8 @@ dokku {{.CommandPrefix}}:info lollipop --status
 dokku {{.CommandPrefix}}:info lollipop --internal-ip
 dokku {{.CommandPrefix}}:info lollipop --initial-network
 > NOTE: a flag cannot be combined with --format, and only one may be given
+the exposed dsn is the one a client off the host connects with. it names the expose-host, or the first global domain without one, and is empty until the service is exposed and there is a host to name:
+dokku {{.CommandPrefix}}:info lollipop --exposed-dsn
 the properties {{.CommandPrefix}}:set writes are reported under the names it takes, so a value read here can be written back:
 dokku {{.CommandPrefix}}:set lollipop initial-network my-network
 the stored backup credentials and passphrase are never printed. each is reported as a lowercase hex sha256 fingerprint of the stored value, with surrounding whitespace trimmed, so a copy of the values can be compared against it:
@@ -930,6 +934,10 @@ only accept connections to the exposed ports from clients in one IP address or C
 dokku {{.CommandPrefix}}:set lollipop expose-source-range 10.0.0.0/8
 go back to accepting every client
 dokku {{.CommandPrefix}}:set lollipop expose-source-range
+name the host the exposed dsn points clients at, when they reach the server by a name or address other than its global domain. it does not change where the ports are bound
+dokku {{.CommandPrefix}}:set lollipop expose-host db.example.com
+go back to naming the first global domain
+dokku {{.CommandPrefix}}:set lollipop expose-host
 {{- if .ExportArgs}}
 pass extra arguments to every export of the service, including the ones backups and clones make. the value follows -- so that its leading dash is not read as a flag, and an argument with a space in it is quoted
 dokku {{.CommandPrefix}}:set lollipop export-args -- "<export-args...>"

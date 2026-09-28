@@ -53,7 +53,9 @@ var InfoKeys = []InfoKey{
 	{Name: "definition", Description: "show the definition the service was created with"},
 	{Name: "dsn", Description: "show the service DSN"},
 	{Name: "export-args", Description: "show the extra arguments every export of the service is run with"},
+	{Name: "expose-host", Description: "show the host the exposed DSN names"},
 	{Name: "expose-source-range", Description: "show the only range of client addresses the exposed ports accept"},
+	{Name: "exposed-dsn", Description: "show the DSN the service is reached at through its exposed ports"},
 	{Name: "exposed-ports", Description: "show service exposed ports"},
 	{Name: "id", Description: "show the service container id"},
 	{Name: "image", Description: "show the image the service runs"},
@@ -103,9 +105,10 @@ type InfoInput struct {
 // all the service package can answer without knowing how backups are stored,
 // and adds what that has no way of saying: every property the set command
 // writes, the state recorded when the service was created, and the backup
-// settings. Nothing secret is reported - stored credentials and the backup
-// passphrase are reported as being present and as a sha256 fingerprint, never
-// as their values.
+// settings. The dsn and exposed-dsn carry the service's password, since they
+// are what a client connects with. The backup credentials and passphrase are
+// not reported - they are reported as being present and as a sha256
+// fingerprint, never as their values.
 //
 // It returns no error. A service whose container is gone, or whose files were
 // never written, reports an empty value rather than failing, because a report
@@ -139,6 +142,9 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info[service.WaitTimeoutProperty] = service.ServiceWaitTimeout(input.Datastore, input.ServiceName)
 	info[service.PortBindAddressProperty] = service.ServicePortBindAddress(input.Datastore, input.ServiceName)
 	info[service.ExposeSourceRangeProperty] = service.ServiceExposeSourceRange(input.Datastore, input.ServiceName)
+	// as it was set, like every other property. The host the exposed dsn falls
+	// back to when it is unset shows in the dsn itself
+	info[service.ExposeHostProperty] = service.ServiceExposeHost(input.Datastore, input.ServiceName)
 	info[service.ExportArgsProperty] = service.ServiceExtraArgs(input.Datastore, input.ServiceName, service.ExportArgsProperty)
 	info[service.ImportArgsProperty] = service.ServiceExtraArgs(input.Datastore, input.ServiceName, service.ImportArgsProperty)
 	info["memory"] = common.ReadFirstLine(serviceFiles.Memory)

@@ -507,7 +507,7 @@ dokku-datastore clone redis lollipop lollipop-3 --restart no --custom-env ""
 
 The `<VARIABLE>_CONFIG_OPTIONS` and `<VARIABLE>_CUSTOM_ENV` environment variables are not read by `clone`. They fill in a new service, and the source already says what its clone should have. The networks are copied as well, since a container joins a network under its own service name and a clone next to its source does not clash with it.
 
-The password, the exposed ports and the `port-bind-address` and `expose-source-range` they are published with, the app links and the backup credentials, schedule and encryption are not copied. The password is generated for each service unless `--password` or `--root-password` gives one, an exposed port would clash with the source's on the host, links belong to the apps, and a copied backup schedule would ship a second set of backups to the source's bucket.
+The password, the exposed ports and the `port-bind-address`, `expose-source-range` and `expose-host` that go with them, the app links and the backup credentials, schedule and encryption are not copied. The password is generated for each service unless `--password` or `--root-password` gives one, an exposed port would clash with the source's on the host, links belong to the apps, and a copied backup schedule would ship a second set of backups to the source's bucket.
 
 ## Exposed services
 
@@ -561,6 +561,29 @@ The range is enforced by socat in the ambassador, which brings its limits with i
 - Only one range can be given, since socat honors a single range for each port it listens on. Networks that do not share a prefix have to be restricted with a host firewall instead, such as rules in docker's `DOCKER-USER` chain.
 - The address checked is the one the connection reaches the ambassador from. A client on another host that docker delivers by NAT keeps its own address, but a connection to the exposed port on the loopback interface, or an IPv6 connection to an ambassador without IPv6, goes through docker's userland proxy and arrives from the network's gateway, such as `172.17.0.1`. With a range that leaves the gateway out, connecting to `127.0.0.1:<port>` from the dokku host itself is refused.
 - An IPv6 range makes the ambassador listen on IPv6 alone, so on a network without IPv6 it refuses every connection.
+
+### Connecting to an exposed service from outside the host
+
+`info` reports the `dsn` a linked app is handed, which names the service container and the port inside it. Neither can be reached from anywhere but the dokku host's docker networks. `exposed-dsn` is the same dsn with the exposed ports in place of the container's and a public host in place of the container's name, so a client elsewhere can connect with it. It carries the same credentials as `dsn`.
+
+The host is picked in this order:
+
+1. The service's `expose-host` property, a hostname or an IP address written without brackets.
+2. The first global domain, as set with `dokku domains:set-global`.
+
+When neither gives a host, or the service is not exposed, `exposed-dsn` is empty. The `port-bind-address`, and an address given with a port such as `127.0.0.1:6380`, are never used as the host. They are where the ports are bound, which for every interface names nothing and for a private or loopback address is not where a client elsewhere connects. `expose-host` only changes what is reported, not where the ports are bound.
+
+```shell
+dokku postgres:expose lollipop
+pgcli "$(ssh dokku@dokku.me postgres:info lollipop --exposed-dsn)"
+
+# clients reach the server by a name other than its global domain
+dokku postgres:set lollipop expose-host db.example.com
+dokku postgres:info lollipop --exposed-dsn
+
+# back to the global domain
+dokku postgres:set lollipop expose-host
+```
 
 ## Starting linked services before an app
 

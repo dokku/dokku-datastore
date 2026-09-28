@@ -245,10 +245,21 @@ skip_unless_log_is_capped() {
   assert_success
   run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range 203.0.113.7
   assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-host db.example.com
+  assert_success
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --port-bind-address
   assert_success
   assert_output "10.0.0.5"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-host
+  assert_success
+  assert_output "db.example.com"
+
+  # and in the full report, as the value that was set
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_output --regexp "Expose host: +db\.example\.com"
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-source-range
   assert_success
@@ -259,12 +270,18 @@ skip_unless_log_is_capped() {
   assert_success
   run "$BIN" set "$PLUGIN" "$SERVICE" expose-source-range
   assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-host
+  assert_success
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --port-bind-address
   assert_success
   assert_output ""
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-source-range
+  assert_success
+  assert_output ""
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-host
   assert_success
   assert_output ""
 }
@@ -284,6 +301,17 @@ skip_unless_log_is_capped() {
     assert_failure
     assert_stderr --partial "expose-source-range"
   done
+
+  # the port comes from the exposed ports, so the host is a host alone
+  for value in db.example.com:5432 "postgres://db.example.com" bad_host "[::1]"; do
+    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" expose-host "$value"
+    assert_failure
+    assert_stderr --partial "expose-host"
+  done
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-host
+  assert_success
+  assert_output ""
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --port-bind-address
   assert_success
