@@ -71,6 +71,10 @@ type CloneServiceInput struct {
 	// container
 	Mounts *[]service.Mount
 
+	// VolumeTargets are the container paths the definition's volumes are
+	// mounted at in the new container in place of its own, keyed by volume
+	VolumeTargets *map[string]string
+
 	// PostCreateNetworks are attached after the new container is created
 	PostCreateNetworks *[]string
 
@@ -102,6 +106,7 @@ type serviceSettings struct {
 	PostStartNetworks  []string
 	RestartPolicy      string
 	ShmSize            string
+	VolumeTargets      map[string]string
 	WaitTimeout        string
 }
 
@@ -129,6 +134,11 @@ func readServiceSettings(datastore *service.Datastore, serviceName string) (serv
 		return serviceSettings{}, err
 	}
 
+	volumeTargets, err := service.ServiceVolumeTargets(datastore, serviceName)
+	if err != nil {
+		return serviceSettings{}, err
+	}
+
 	return serviceSettings{
 		BackupStorageClass: service.BackupStorageClass(datastore, serviceName),
 		ConfigOptions:      service.ConfigOptions(datastore, serviceName),
@@ -145,6 +155,7 @@ func readServiceSettings(datastore *service.Datastore, serviceName string) (serv
 		PostStartNetworks:  splitList(service.PostStartNetwork(datastore, serviceName)),
 		RestartPolicy:      service.ServiceRestartPolicy(datastore, serviceName),
 		ShmSize:            common.ReadFirstLine(serviceFiles.ShmSize),
+		VolumeTargets:      volumeTargets,
 		WaitTimeout:        service.ServiceWaitTimeout(datastore, serviceName),
 	}, nil
 }
@@ -193,6 +204,10 @@ func (s serviceSettings) withOverrides(input CloneServiceInput) serviceSettings 
 
 	if input.Mounts != nil {
 		s.Mounts = *input.Mounts
+	}
+
+	if input.VolumeTargets != nil {
+		s.VolumeTargets = *input.VolumeTargets
 	}
 
 	return s
@@ -270,6 +285,7 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 		RootPassword:       input.RootPassword,
 		ServiceName:        input.NewServiceName,
 		ShmSize:            settings.ShmSize,
+		VolumeTargets:      settings.VolumeTargets,
 		WaitTimeout:        settings.WaitTimeout,
 		Logger:             input.Logger,
 	}); err != nil {

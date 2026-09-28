@@ -2,6 +2,7 @@ package commands
 
 import (
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/mitchellh/cli"
@@ -193,6 +194,57 @@ func TestChangedInt(t *testing.T) {
 
 			if actual == nil || *actual != *test.expected {
 				t.Errorf("expected %d, got %v", *test.expected, actual)
+			}
+		})
+	}
+}
+
+// A volume target flag given empty is still a flag that was given, which is how
+// a clone or an upgrade is told to put every volume back where the definition
+// mounts it.
+func TestChangedVolumeTargets(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		expected *map[string]string
+		refused  bool
+	}{
+		{name: "not given", args: []string{}},
+		{name: "given", args: []string{"--volume-target", "data=/redis-data", "--volume-target", "config=/etc/redis"}, expected: &map[string]string{"data": "/redis-data", "config": "/etc/redis"}},
+		{name: "given empty", args: []string{"--volume-target", ""}, expected: &map[string]string{}},
+		{name: "given malformed", args: []string{"--volume-target", "data"}, refused: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var volumeTarget []string
+			f := flag.NewFlagSet("test", flag.ContinueOnError)
+			f.StringArrayVar(&volumeTarget, "volume-target", []string{}, "")
+			if err := f.Parse(test.args); err != nil {
+				t.Fatalf("failed to parse flags: %v", err)
+			}
+
+			actual, err := changedVolumeTargets(f, "volume-target", volumeTarget)
+			if test.refused {
+				if err == nil {
+					t.Errorf("expected %v to be refused", test.args)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+
+			if test.expected == nil {
+				if actual != nil {
+					t.Errorf("expected nil, got %v", *actual)
+				}
+				return
+			}
+
+			if actual == nil || !reflect.DeepEqual(*actual, *test.expected) {
+				t.Errorf("expected %v, got %v", *test.expected, actual)
 			}
 		})
 	}

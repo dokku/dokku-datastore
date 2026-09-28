@@ -364,3 +364,24 @@ func TestComposeQuotesARestartPolicyOfNo(t *testing.T) {
 		}
 	}
 }
+
+// The compose backend is rendered from the same resolution as the docker one,
+// so it mounts a moved volume at the same path.
+func TestComposeMountsAMovedVolume(t *testing.T) {
+	input := redisInput(t)
+	input.Scope.Target = map[string]string{"data": "/redis-data"}
+
+	rendered, err := Compose(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	document := string(rendered)
+	if !strings.Contains(document, "- /var/lib/dokku/services/redis/lollipop/data:/redis-data\n") {
+		t.Errorf("expected the data volume at the moved path, got:\n%s", document)
+	}
+
+	if strings.Contains(document, "lollipop/data:/data\n") {
+		t.Errorf("expected nothing at the path the volume left, got:\n%s", document)
+	}
+}

@@ -367,14 +367,15 @@ func ValidateChownOption(value string) error {
 }
 
 // ReservedMountTargets are the container paths a definition already mounts
-// something at: its volumes and its payload files. Docker refuses a container
-// with two mounts at one path, so a mount cannot take one of these. A mount
-// below one of them is fine, and is how a file is added to a directory a
-// definition mounts.
-func ReservedMountTargets(d definition.Definition) []string {
+// something at: its volumes, at the targets the service moved them to, and its
+// payload files. Docker refuses a container with two mounts at one path, so a
+// mount cannot take one of these. A mount below one of them is fine, and is how
+// a file is added to a directory a definition mounts.
+func ReservedMountTargets(d definition.Definition, volumeTargets map[string]string) []string {
 	targets := make([]string, 0, len(d.Service.Volumes)+len(d.Rootfs))
-	for _, volume := range d.Service.Volumes {
-		targets = append(targets, path.Clean(volume.Target))
+	moved := d.VolumeTargets(volumeTargets)
+	for _, key := range d.VolumeKeys() {
+		targets = append(targets, path.Clean(moved[key]))
 	}
 
 	for name := range d.Rootfs {
@@ -391,18 +392,38 @@ func ReservedMountTargets(d definition.Definition) []string {
 // The host path has to exist because docker would otherwise create it, empty
 // and owned by root, and the service would start on that rather than on
 // whatever was meant to be mounted.
-func CheckMounts(d definition.Definition, mounts []Mount) error {
+func CheckMounts(d definition.Definition, volumeTargets map[string]string, mounts []Mount) error {
+	for _, mount := range mounts {
+		if err := ValidateMount(mount); err != nil {
+			return err
+		}
+	}
+
+	if err := CheckMountTargets(d, volumeTargets, mounts); err != nil {
+		return err
+	}
+
+	for _, mount := range mounts {
+		if err := checkMountSource(mount); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// CheckMountTargets reports whether a set of mounts lands anywhere the
+// definition's volumes, at the targets given, or its payload already are, or
+// twice at one path. It is the part of CheckMounts that moving a volume can
+// break, and checks nothing about the host.
+func CheckMountTargets(d definition.Definition, volumeTargets map[string]string, mounts []Mount) error {
 	reserved := map[string]bool{}
-	for _, target := range ReservedMountTargets(d) {
+	for _, target := range ReservedMountTargets(d, volumeTargets) {
 		reserved[target] = true
 	}
 
 	seen := map[string]bool{}
 	for _, mount := range mounts {
-		if err := ValidateMount(mount); err != nil {
-			return err
-		}
-
 		target := path.Clean(mount.ContainerPath)
 		if reserved[target] {
 			return fmt.Errorf("Container path %s is already mounted by the %s definition", mount.ContainerPath, d.Dokku.Plugin) //nolint:staticcheck // matches dokku's storage plugin
@@ -412,10 +433,6 @@ func CheckMounts(d definition.Definition, mounts []Mount) error {
 			return fmt.Errorf("Container path %s is specified more than once", mount.ContainerPath) //nolint:staticcheck // matches dokku's storage plugin
 		}
 		seen[target] = true
-
-		if err := checkMountSource(mount); err != nil {
-			return err
-		}
 	}
 
 	return nil

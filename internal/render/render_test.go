@@ -12,6 +12,11 @@ import (
 // goldenContainerArgs is the file the previous implementation's emitted command
 // was pinned to. Reproducing it is the whole point of the declarative renderer:
 // it is the difference between believing the migration is faithful and knowing.
+//
+// It carries one deliberate addition since, --dir naming the data volume. Redis
+// writes its dump to its working directory, which is the data volume only while
+// that volume is where the image expects it, so a service that moved the volume
+// would otherwise write its data where nothing is mounted.
 const goldenContainerArgs = "testdata/container_args.golden"
 
 // redisScope is the state of a redis service named lollipop, matching the fixture
@@ -288,5 +293,73 @@ func TestElasticsearchHeapFollowsTheMemoryLimit(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A moved volume is mounted at its new path and every path the definition
+// names for it follows, so redis reads its own config and writes its dump
+// where the data is mounted rather than into the container.
+func TestContainerArgsMountsAMovedVolume(t *testing.T) {
+	input := withoutPayload(redisInput(t))
+	input.Scope.Target = map[string]string{"data": "/redis-data"}
+
+	args, err := ContainerArgs(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	argv := strings.Join(DockerCreateArgs(args), "\n")
+	for _, expected := range []string{
+		"--volume=/var/lib/dokku/services/redis/lollipop/data:/redis-data\n",
+		"--volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis\n",
+		"redis-server\n/usr/local/etc/redis/redis.conf\n--bind\n0.0.0.0\n--dir\n/redis-data",
+	} {
+		if !strings.Contains(argv, expected) {
+			t.Errorf("expected %q in the argv, got:\n%s", expected, argv)
+		}
+	}
+
+	if strings.Contains(argv, "lollipop/data:/data") {
+		t.Errorf("expected nothing mounted at the path the volume left, got:\n%s", argv)
+	}
+
+	input.Scope.Target = map[string]string{"config": "/etc/redis"}
+	args, err = ContainerArgs(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	argv = strings.Join(DockerCreateArgs(args), "\n")
+	if !strings.Contains(argv, "redis-server\n/etc/redis/redis.conf\n") {
+		t.Errorf("expected the config read from where it is mounted, got:\n%s", argv)
+	}
+}
+
+// What stands in for the service is given the same volumes the service is, so
+// an offline import writes to the path the service reads.
+func TestServiceVolumesFollowAMovedVolume(t *testing.T) {
+	input := redisInput(t)
+	input.Scope.Target = map[string]string{"data": "/redis-data"}
+	input.Scope.Mounts = []string{"/srv/extra:/opt/extra"}
+
+	volumes, err := ServiceVolumes(input)
+	if err != nil {
+		t.Fatalf("unable to resolve: %s", err)
+	}
+
+	joined := strings.Join(volumes, " ")
+	for _, expected := range []string{
+		"/var/lib/dokku/services/redis/lollipop/data:/redis-data",
+		"/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis",
+		"/usr/local/bin/dokku-redis-import:ro",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Errorf("expected %q among the volumes, got %v", expected, volumes)
+		}
+	}
+
+	// only the service is given what the operator mounted
+	if strings.Contains(joined, "/srv/extra") {
+		t.Errorf("expected the operator's mounts left out, got %v", volumes)
 	}
 }

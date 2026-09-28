@@ -50,3 +50,10 @@ func ImageVersionFromEnv(properties service.ServiceStruct) string {
 func DefinitionFromEnv(properties service.ServiceStruct) string {
 	return os.Getenv(properties.PluginVariable + "_DEFINITION")
 }
+
+// VolumeTargetsFromEnv is where an operator asked a plugin to mount the volumes
+// of new services, written the way the volume-targets property is, under the
+// same prefix - REDIS_VOLUME_TARGETS for redis.
+func VolumeTargetsFromEnv(properties service.ServiceStruct) string {
+	return os.Getenv(properties.PluginVariable + "_VOLUME_TARGETS")
+}

@@ -3,10 +3,12 @@ package internal
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"text/template"
 
+	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -82,12 +84,33 @@ type DocumentationData struct {
 	// and empty for a datastore with only the one, where there is nothing to
 	// choose between
 	Definitions []string
+
+	// Volumes are the volumes a service can move, one entry for each volume of
+	// each of the datastore's definitions, since a datastore split by major
+	// version mounts its data somewhere different in each. Empty for a
+	// datastore that mounts nothing.
+	Volumes []DocumentedVolume
+
+	// VolumeKey is the volume the examples move: the data volume where there
+	// is one, and otherwise the first the datastore mounts
+	VolumeKey string
+
+	// VolumeKeys are the volumes a service of the datastore can move, each
+	// once, whichever of its definitions mounts it
+	VolumeKeys []string
 }
 
 // DocumentedImage is an image and the version a definition pins for it.
 type DocumentedImage struct {
 	Image        string
 	ImageVersion string
+}
+
+// DocumentedVolume is a volume a definition mounts and where it mounts it.
+type DocumentedVolume struct {
+	Definition string
+	Key        string
+	Target     string
 }
 
 // DocumentationDataInput is the input for the NewDocumentationData function
@@ -115,6 +138,7 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 	}
 
 	image, imageVersion := documentedImage(properties)
+	volumes := documentedVolumes(input.Datastore)
 
 	return DocumentationData{
 		AltAlias:       properties.AltAlias,
@@ -132,7 +156,55 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		ReservedNames:  input.Datastore.Definition.Dokku.ReservedNames,
 		Flavors:        documentedFlavors(input.Datastore),
 		Definitions:    documentedDefinitions(input.Datastore),
+		Volumes:        volumes,
+		VolumeKey:      documentedVolumeKey(input.Datastore),
+		VolumeKeys:     documentedVolumeKeys(volumes),
 	}
+}
+
+// documentedVolumeKeys is each volume named once, in the order they are first
+// seen
+func documentedVolumeKeys(volumes []DocumentedVolume) []string {
+	keys := []string{}
+	for _, volume := range volumes {
+		if !slices.Contains(keys, volume.Key) {
+			keys = append(keys, volume.Key)
+		}
+	}
+
+	return keys
+}
+
+// documentedVolumes is every volume of every definition of a datastore, in the
+// order its definitions are kept and each declares its volumes.
+func documentedVolumes(datastore *service.Datastore) []DocumentedVolume {
+	volumes := []DocumentedVolume{}
+	for _, found := range datastore.Definitions() {
+		for _, volume := range found.Service.Volumes {
+			volumes = append(volumes, DocumentedVolume{
+				Definition: found.Name,
+				Key:        definition.VolumeKey(volume),
+				Target:     volume.Target,
+			})
+		}
+	}
+
+	return volumes
+}
+
+// documentedVolumeKey is the volume the examples move, which is the data one
+// wherever a datastore has one since that is what moving is usually for.
+func documentedVolumeKey(datastore *service.Datastore) string {
+	keys := datastore.Definition.VolumeKeys()
+	if slices.Contains(keys, "data") {
+		return "data"
+	}
+
+	if len(keys) > 0 {
+		return keys[0]
+	}
+
+	return ""
 }
 
 // documentedFlavors is every image a datastore ships definitions for besides

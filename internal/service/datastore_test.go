@@ -188,7 +188,11 @@ func TestVolumesCarryTheDataAndThePayload(t *testing.T) {
 		t.Fatal("expected redis to be registered")
 	}
 
-	volumes := strings.Join(redis.volumes("lollipop"), " ")
+	mounted, err := redis.volumes("lollipop")
+	if err != nil {
+		t.Fatalf("unable to resolve the volumes: %v", err)
+	}
+	volumes := strings.Join(mounted, " ")
 
 	for _, expected := range []string{
 		"/services/redis/lollipop/data:/data",
@@ -199,6 +203,49 @@ func TestVolumesCarryTheDataAndThePayload(t *testing.T) {
 		if !strings.Contains(volumes, expected) {
 			t.Errorf("expected a mount for %q, got %v", expected, volumes)
 		}
+	}
+}
+
+// A container standing in for the service has to find the data where the
+// service has it, or an import would write a dump the service never reads.
+func TestVolumesFollowAMovedVolume(t *testing.T) {
+	redis := redisDatastore(t)
+	withServiceRoot(t, redis, "lollipop")
+	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
+
+	if err := WriteVolumeTargets(redis, "lollipop", map[string]string{"data": "/redis-data"}); err != nil {
+		t.Fatalf("unable to write the volume targets: %v", err)
+	}
+
+	mounted, err := redis.volumes("lollipop")
+	if err != nil {
+		t.Fatalf("unable to resolve the volumes: %v", err)
+	}
+	volumes := strings.Join(mounted, " ")
+
+	if !strings.Contains(volumes, "/services/redis/lollipop/data:/redis-data") {
+		t.Errorf("expected the data at the moved path, got %v", volumes)
+	}
+
+	if strings.Contains(volumes, "/data:/data") {
+		t.Errorf("expected nothing left at the definition's own path, got %v", volumes)
+	}
+
+	if !strings.Contains(volumes, "/services/redis/lollipop/config:/usr/local/etc/redis") {
+		t.Errorf("expected the config where the definition puts it, got %v", volumes)
+	}
+}
+
+// A scope renders a connection string as well as a container, and the first
+// must not need a dokku to read properties from. Without one the definition's
+// own targets are used rather than the process exiting.
+func TestScopeTargetsWithoutADokku(t *testing.T) {
+	redis := redisDatastore(t)
+	t.Setenv("DOKKU_LIB_ROOT", "")
+
+	scope := redis.scope("lollipop")
+	if scope.Target["data"] != "/data" || scope.Target["config"] != "/usr/local/etc/redis" {
+		t.Errorf("expected the definition's own targets, got %v", scope.Target)
 	}
 }
 

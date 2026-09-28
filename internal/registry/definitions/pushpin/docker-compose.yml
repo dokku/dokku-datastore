@@ -69,8 +69,8 @@ x-dokku:
         # again. Setting it from a container that is already root is also
         # what retires the plugin's sudo chown.
         - >-
-          test -f /seed/pushpin.conf || cp /etc/pushpin/pushpin.conf /seed/pushpin.conf;
-          test -f /seed/routes || cp /etc/pushpin/routes /seed/routes;
+          test -f /seed/pushpin.conf || cp {{ .Target.config }}/pushpin.conf /seed/pushpin.conf;
+          test -f /seed/routes || cp {{ .Target.config }}/routes /seed/routes;
           chown 1001 /seed /seed/pushpin.conf /seed/routes
 
   # pushpin proxies rather than stores, so there is nothing to connect to,

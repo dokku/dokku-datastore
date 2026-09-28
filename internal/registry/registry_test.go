@@ -940,8 +940,26 @@ func TestPostgresTurnsSslOnWithoutRestarting(t *testing.T) {
 		t.Fatal("expected a postgres-18 definition")
 	}
 
-	command := strings.Join(postgres.Service.Command, " ")
+	rendered, err := definition.RenderAll(postgres.Service.Command, postgres.WithTargets(definition.Scope{}))
+	if err != nil {
+		t.Fatalf("unable to render the command: %s", err)
+	}
+
+	command := strings.Join(rendered, " ")
 	for _, expected := range []string{"ssl=on", "ssl_cert_file=/certs/server.crt", "ssl_key_file=/certs/server.key"} {
+		if !strings.Contains(command, expected) {
+			t.Errorf("expected the server to be told %s, got %q", expected, command)
+		}
+	}
+
+	// the certificates are read from wherever the service mounts them
+	rendered, err = definition.RenderAll(postgres.Service.Command, postgres.WithTargets(definition.Scope{Target: map[string]string{"certs": "/tls"}}))
+	if err != nil {
+		t.Fatalf("unable to render the command: %s", err)
+	}
+
+	command = strings.Join(rendered, " ")
+	for _, expected := range []string{"ssl_cert_file=/tls/server.crt", "ssl_key_file=/tls/server.key"} {
 		if !strings.Contains(command, expected) {
 			t.Errorf("expected the server to be told %s, got %q", expected, command)
 		}
@@ -1731,5 +1749,134 @@ func TestReservedNamesAreTheDatastoresOwnDatabases(t *testing.T) {
 				t.Errorf("expected %s reserved to be %t, got %t (%v)", test.name, test.reserved, reserved, parsed.Dokku.ReservedNames)
 			}
 		})
+	}
+}
+
+// A definition naming one of its volumes' paths reads it from the scope, so
+// every template it has must render against the targets every service gets by
+// default. Parsing checks the names; this checks they render.
+func TestEveryDefinitionRendersWithItsDefaultTargets(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	for _, name := range loaded.Names() {
+		t.Run(name, func(t *testing.T) {
+			found, ok := loaded.Definition(name)
+			if !ok {
+				t.Fatalf("expected a %s definition", name)
+			}
+
+			scope := definition.Scope{
+				ServiceName: "lollipop",
+				Database:    "lollipop",
+				Image:       found.DefaultImage,
+				Scheme:      found.Dokku.Scheme,
+				Secret:      map[string]string{},
+				Port:        map[string]int{},
+				Args:        map[string]string{},
+			}
+			for secret := range found.Dokku.Secrets {
+				scope.Secret[secret] = "hunter2"
+			}
+			for _, port := range found.Service.Ports {
+				scope.Port[port.Name] = port.Target
+			}
+
+			bodies := []string{found.Service.Image, found.Dokku.DSN}
+			bodies = append(bodies, found.Service.Command...)
+			for _, value := range found.Service.Environment {
+				bodies = append(bodies, value)
+			}
+
+			commands := []definition.Command{}
+			for _, hook := range []*definition.Command{found.Dokku.Hooks.PreCreate, found.Dokku.Hooks.PostCreate} {
+				if hook != nil {
+					commands = append(commands, *hook)
+				}
+			}
+			for _, group := range []map[string]definition.Command{found.Dokku.Commands, found.Dokku.CustomCommands, found.Dokku.Triggers} {
+				for _, command := range group {
+					commands = append(commands, command)
+				}
+			}
+			for _, command := range commands {
+				for _, argument := range command.Arguments {
+					scope.Args[argument.Name] = "argument"
+				}
+				bodies = append(bodies, command.Exec...)
+				for _, value := range command.Env {
+					bodies = append(bodies, value)
+				}
+			}
+
+			scope = found.WithTargets(scope)
+			for _, body := range bodies {
+				if _, err := definition.Render(body, scope); err != nil {
+					t.Errorf("unable to render %q: %s", body, err)
+				}
+			}
+		})
+	}
+}
+
+// A volume's key is its source under the service root, and a service moves a
+// volume by naming it, so renaming a source strands every service that moved
+// that volume. Pinned here so that doing it is a decision rather than a side
+// effect.
+func TestVolumeKeysArePinned(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	postgres := []string{"data", "certs"}
+	expected := map[string][]string{
+		"clickhouse":                {"config", "data"},
+		"couchdb":                   {"config", "data"},
+		"elasticsearch-7":           {"config", "data"},
+		"elasticsearch-8":           {"config", "data"},
+		"elasticsearch-9":           {"config", "data"},
+		"graphite":                  {"data/grafana", "data/whisper"},
+		"mariadb":                   {"config", "data"},
+		"meilisearch":               {"data"},
+		"memcached":                 {},
+		"mongo":                     {"config", "data", "initdb"},
+		"mysql":                     {"config", "data"},
+		"nats":                      {},
+		"omnisci":                   {"data"},
+		"postgres-17":               postgres,
+		"postgres-18":               postgres,
+		"postgres-pgvector-pg17":    postgres,
+		"postgres-pgvector-pg18":    postgres,
+		"postgres-postgis-pg17":     postgres,
+		"postgres-postgis-pg18":     postgres,
+		"postgres-timescaledb-pg17": postgres,
+		"postgres-timescaledb-pg18": postgres,
+		"pushpin":                   {"config"},
+		"rabbitmq":                  {"config/rabbitmq.conf", "data"},
+		"redis":                     {"config", "data"},
+		"rethinkdb":                 {"data"},
+		"solr-7":                    {"data"},
+		"solr-8":                    {"data"},
+		"typesense":                 {"config", "data"},
+	}
+
+	for _, name := range loaded.Names() {
+		found, ok := loaded.Definition(name)
+		if !ok {
+			t.Fatalf("expected a %s definition", name)
+		}
+
+		keys, pinned := expected[name]
+		if !pinned {
+			t.Errorf("the %s definition's volume keys are not pinned here, got %v", name, found.VolumeKeys())
+			continue
+		}
+
+		if strings.Join(found.VolumeKeys(), " ") != strings.Join(keys, " ") {
+			t.Errorf("expected the %s definition's volumes to be %v, got %v", name, keys, found.VolumeKeys())
+		}
 	}
 }

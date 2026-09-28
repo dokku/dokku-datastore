@@ -3,6 +3,7 @@ package service
 import (
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -211,19 +212,26 @@ func TestVolumeMounts(t *testing.T) {
 }
 
 func TestReservedMountTargets(t *testing.T) {
-	targets := ReservedMountTargets(redisDatastore(t).Definition)
+	targets := ReservedMountTargets(redisDatastore(t).Definition, nil)
 
 	for _, expected := range []string{"/data", "/usr/local/etc/redis", "/usr/local/bin/dokku-redis-export"} {
-		found := false
-		for _, target := range targets {
-			if target == expected {
-				found = true
-			}
-		}
-
-		if !found {
+		if !slices.Contains(targets, expected) {
 			t.Errorf("expected %s to be reserved, got %v", expected, targets)
 		}
+	}
+}
+
+// A moved volume holds its new path and leaves its old one free, so a mount
+// can be put where the definition's volume used to be
+func TestReservedMountTargetsFollowAMovedVolume(t *testing.T) {
+	targets := ReservedMountTargets(redisDatastore(t).Definition, map[string]string{"data": "/redis-data"})
+
+	if !slices.Contains(targets, "/redis-data") {
+		t.Errorf("expected the moved path to be reserved, got %v", targets)
+	}
+
+	if slices.Contains(targets, "/data") {
+		t.Errorf("expected the vacated path to be free, got %v", targets)
 	}
 }
 
@@ -233,13 +241,25 @@ func TestCheckMounts(t *testing.T) {
 	missing := filepath.Join(source, "missing")
 
 	tests := []struct {
-		name     string
-		mounts   []Mount
-		expected string
+		name          string
+		mounts        []Mount
+		volumeTargets map[string]string
+		expected      string
 	}{
 		{
 			name:   "an existing host path and a docker volume",
 			mounts: []Mount{{Source: source, ContainerPath: "/opt/a"}, {Source: "some-volume", ContainerPath: "/opt/b"}},
+		},
+		{
+			name:          "a moved definition volume",
+			mounts:        []Mount{{Source: source, ContainerPath: "/redis-data"}},
+			volumeTargets: map[string]string{"data": "/redis-data"},
+			expected:      "Container path /redis-data is already mounted by the redis definition",
+		},
+		{
+			name:          "the path a moved volume left",
+			mounts:        []Mount{{Source: source, ContainerPath: "/data"}},
+			volumeTargets: map[string]string{"data": "/redis-data"},
 		},
 		{
 			// the case from the issue: a directory added inside one the
@@ -286,7 +306,7 @@ func TestCheckMounts(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			err := CheckMounts(redis.Definition, test.mounts)
+			err := CheckMounts(redis.Definition, test.volumeTargets, test.mounts)
 			if test.expected == "" {
 				if err != nil {
 					t.Errorf("expected the mounts to be accepted, got %v", err)
@@ -312,7 +332,7 @@ func TestCheckMountsLeavesAHostItCannotSeeAlone(t *testing.T) {
 	t.Setenv("DOKKU_LIB_HOST_ROOT", "/srv/dokku")
 
 	mounts := []Mount{{Source: filepath.Join(t.TempDir(), "missing"), ContainerPath: "/opt/a"}}
-	if err := CheckMounts(redisDatastore(t).Definition, mounts); err != nil {
+	if err := CheckMounts(redisDatastore(t).Definition, nil, mounts); err != nil {
 		t.Errorf("expected a host path on a docker-in-docker install not to be checked, got %v", err)
 	}
 }

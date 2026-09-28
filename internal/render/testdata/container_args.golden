@@ -15,6 +15,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--dir
+/data
 
 ### a memory limit
 container
@@ -34,6 +36,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--dir
+/data
 
 ### a shared memory size
 container
@@ -53,6 +57,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--dir
+/data
 
 ### an initial network
 container
@@ -73,6 +79,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--dir
+/data
 
 ### config options
 container
@@ -91,6 +99,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--dir
+/data
 --appendonly
 yes
 
@@ -111,6 +121,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--dir
+/data
 --appendonly
 yes
 
@@ -131,6 +143,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--dir
+/data
 
 ### log options
 container
@@ -152,6 +166,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--dir
+/data
 
 ### log options with no driver
 container
@@ -171,6 +187,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--dir
+/data
 
 ### a restart policy
 container
@@ -189,6 +207,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--dir
+/data
 
 ### mounts
 container
@@ -209,6 +229,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--dir
+/data
 
 ### a volume mounted from a subpath
 container
@@ -230,6 +252,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--dir
+/data
 
 ### no volumes at all
 container
@@ -267,6 +291,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--dir
+/data
 --appendonly
 yes
 

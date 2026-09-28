@@ -204,7 +204,7 @@ func TestResolveRedisExportRunsInASidecar(t *testing.T) {
 		t.Fatalf("unable to resolve export: %s", err)
 	}
 
-	expected := "container run --rm --env=REDISCLI_AUTH=hunter2 --network=container:dokku.redis.lollipop --volume=/var/lib/dokku/services/redis/lollipop/data:/data -i redis:8.8.0 dokku-redis-export"
+	expected := "container run --rm --env=DUMP_FILE=/data/dump.rdb --env=REDISCLI_AUTH=hunter2 --network=container:dokku.redis.lollipop --volume=/var/lib/dokku/services/redis/lollipop/data:/data -i redis:8.8.0 dokku-redis-export"
 	actual := strings.Join(backend.RunArgs(backend.RunInput{
 		Image:   input.Image,
 		Argv:    resolved.Argv,
@@ -261,7 +261,7 @@ func TestResolveRedisImportRunsOffline(t *testing.T) {
 		t.Fatalf("unable to resolve import: %s", err)
 	}
 
-	expected := "container run --rm --volume=/var/lib/dokku/services/redis/lollipop/data:/data -i dokku/datastore-redis:8.8.0 dokku-redis-import"
+	expected := "container run --rm --env=DUMP_FILE=/data/dump.rdb --volume=/var/lib/dokku/services/redis/lollipop/data:/data -i dokku/datastore-redis:8.8.0 dokku-redis-import"
 	actual := strings.Join(backend.RunArgs(backend.RunInput{
 		Image:   input.Image,
 		Argv:    resolved.Argv,
@@ -347,12 +347,12 @@ func TestResolveClickhouseDumpVerbsRunInASidecar(t *testing.T) {
 	}{
 		{
 			name:     "export",
-			expected: "container run --rm --env=DOKKU_CLICKHOUSE_DATABASE=lollipop --env=DOKKU_CLICKHOUSE_PASSWORD=hunter2 --env=DOKKU_CLICKHOUSE_USER=lollipop --network=container:dokku.clickhouse.lollipop --volume=/var/lib/dokku/services/clickhouse/lollipop/config:/etc/clickhouse-server --volume=/var/lib/dokku/services/clickhouse/lollipop/data:/var/lib/clickhouse -i clickhouse/clickhouse-server:26.9.1.1629 dokku-clickhouse-export",
+			expected: "container run --rm --env=BACKUP_CONFIG=/etc/clickhouse-server/config.d/dokku-backups.xml --env=CONFIG_FILE=/etc/clickhouse-server/config.xml --env=DOKKU_CLICKHOUSE_DATABASE=lollipop --env=DOKKU_CLICKHOUSE_PASSWORD=hunter2 --env=DOKKU_CLICKHOUSE_USER=lollipop --network=container:dokku.clickhouse.lollipop --volume=/var/lib/dokku/services/clickhouse/lollipop/config:/etc/clickhouse-server --volume=/var/lib/dokku/services/clickhouse/lollipop/data:/var/lib/clickhouse -i clickhouse/clickhouse-server:26.9.1.1629 dokku-clickhouse-export",
 		},
 		{
 			name:     "import",
 			stdin:    true,
-			expected: "container run --rm --env=DOKKU_CLICKHOUSE_DATABASE=lollipop --env=DOKKU_CLICKHOUSE_PASSWORD=hunter2 --env=DOKKU_CLICKHOUSE_USER=lollipop --network=container:dokku.clickhouse.lollipop --volume=/var/lib/dokku/services/clickhouse/lollipop/config:/etc/clickhouse-server --volume=/var/lib/dokku/services/clickhouse/lollipop/data:/var/lib/clickhouse -i clickhouse/clickhouse-server:26.9.1.1629 dokku-clickhouse-import",
+			expected: "container run --rm --env=BACKUP_CONFIG=/etc/clickhouse-server/config.d/dokku-backups.xml --env=CONFIG_FILE=/etc/clickhouse-server/config.xml --env=DOKKU_CLICKHOUSE_DATABASE=lollipop --env=DOKKU_CLICKHOUSE_PASSWORD=hunter2 --env=DOKKU_CLICKHOUSE_USER=lollipop --network=container:dokku.clickhouse.lollipop --volume=/var/lib/dokku/services/clickhouse/lollipop/config:/etc/clickhouse-server --volume=/var/lib/dokku/services/clickhouse/lollipop/data:/var/lib/clickhouse -i clickhouse/clickhouse-server:26.9.1.1629 dokku-clickhouse-import",
 		},
 	}
 
@@ -742,5 +742,45 @@ func TestResolveRefusesExtraArgsACommandIgnores(t *testing.T) {
 				t.Errorf("expected %q, got %q", expected, err)
 			}
 		})
+	}
+}
+
+// A service that moved its data volume keeps its dump there, and the scripts
+// are told so rather than looking where the image would have put it.
+func TestResolveRedisDumpVerbsFollowAMovedDataVolume(t *testing.T) {
+	for _, name := range []string{"export", "import"} {
+		t.Run(name, func(t *testing.T) {
+			input := redisInput(t, name)
+			input.Scope.Target = map[string]string{"data": "/redis-data"}
+
+			resolved, err := Resolve(input)
+			if err != nil {
+				t.Fatalf("unable to resolve %s: %s", name, err)
+			}
+
+			if actual := resolved.Env["DUMP_FILE"]; actual != "/redis-data/dump.rdb" {
+				t.Errorf("expected the dump in the moved volume, got %q", actual)
+			}
+		})
+	}
+}
+
+// Clickhouse's scripts read the server's config to find where backups go, from
+// wherever the service mounts it.
+func TestResolveClickhouseDumpVerbsFollowAMovedConfigVolume(t *testing.T) {
+	input := clickhouseInput(t, "export")
+	input.Scope.Target = map[string]string{"config": "/etc/clickhouse"}
+
+	resolved, err := Resolve(input)
+	if err != nil {
+		t.Fatalf("unable to resolve export: %s", err)
+	}
+
+	if actual := resolved.Env["CONFIG_FILE"]; actual != "/etc/clickhouse/config.xml" {
+		t.Errorf("expected the config read from the moved volume, got %q", actual)
+	}
+
+	if actual := resolved.Env["BACKUP_CONFIG"]; actual != "/etc/clickhouse/config.d/dokku-backups.xml" {
+		t.Errorf("expected the backup config written to the moved volume, got %q", actual)
 	}
 }

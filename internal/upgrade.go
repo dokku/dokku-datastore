@@ -58,6 +58,10 @@ type UpgradeServiceInput struct {
 	// container
 	Mounts *[]service.Mount
 
+	// VolumeTargets are the container paths the definition's volumes are
+	// mounted at in place of its own, keyed by volume
+	VolumeTargets *map[string]string
+
 	// Datastore is the datastore the service belongs to
 	Datastore *service.Datastore
 
@@ -95,7 +99,8 @@ func (i UpgradeServiceInput) changesSettings() bool {
 		i.LogOptions != nil ||
 		i.RestartPolicy != nil ||
 		i.WaitTimeout != nil ||
-		i.Mounts != nil
+		i.Mounts != nil ||
+		i.VolumeTargets != nil
 }
 
 // upgradeVersion is the version an upgrade moves a service to: the one asked
@@ -404,6 +409,12 @@ func applyUpgradeSettings(input UpgradeServiceInput) error {
 		}
 	}
 
+	if input.VolumeTargets != nil {
+		if err := service.WriteVolumeTargets(input.Datastore, input.ServiceName, *input.VolumeTargets); err != nil {
+			return err
+		}
+	}
+
 	for key, value := range properties {
 		if err := common.PropertyWrite(plugin, input.ServiceName, key, *value); err != nil {
 			return fmt.Errorf("failed to write the %s property: %w", key, err)
@@ -448,8 +459,25 @@ func upgradeTarget(s *service.Datastore, named *service.Datastore, recorded serv
 
 // checkUpgradeMounts reports whether the mounts a service will have after an
 // upgrade can be given to the container it is upgraded to: the ones the upgrade
-// was asked for, and otherwise the ones the service already has.
+// was asked for, and otherwise the ones the service already has. The same goes
+// for where the service has the definition's volumes: a volume moved on one
+// definition has to be one the definition it is upgraded to also mounts.
 func checkUpgradeMounts(ctx context.Context, input UpgradeServiceInput, target *service.Datastore) error {
+	var volumeTargets map[string]string
+	if input.VolumeTargets != nil {
+		volumeTargets = *input.VolumeTargets
+	} else {
+		stored, err := service.ServiceVolumeTargets(input.Datastore, input.ServiceName)
+		if err != nil {
+			return err
+		}
+		volumeTargets = stored
+	}
+
+	if err := service.CheckVolumeTargets(target.Definition, volumeTargets); err != nil {
+		return fmt.Errorf("unable to upgrade %s: %w; clear the %s property or give --volume-target to move it", input.ServiceName, err, service.VolumeTargetsProperty)
+	}
+
 	var mounts []service.Mount
 	if input.Mounts != nil {
 		mounts = *input.Mounts
@@ -461,7 +489,7 @@ func checkUpgradeMounts(ctx context.Context, input UpgradeServiceInput, target *
 		mounts = stored
 	}
 
-	if err := service.CheckMounts(target.Definition, mounts); err != nil {
+	if err := service.CheckMounts(target.Definition, volumeTargets, mounts); err != nil {
 		return fmt.Errorf("unable to upgrade %s: %w", input.ServiceName, err)
 	}
 	if err := service.CheckMountsOnHost(ctx, service.Folders(target, input.ServiceName).HostRoot, mounts); err != nil {

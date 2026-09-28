@@ -11,7 +11,7 @@ import (
 )
 
 // SettableProperties are the properties a service exposes through the set command
-var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.WaitTimeoutProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExportArgsProperty, service.ImportArgsProperty}
+var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.WaitTimeoutProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExportArgsProperty, service.ImportArgsProperty, service.VolumeTargetsProperty}
 
 // InvalidPropertyError reports a property the set command does not manage
 func InvalidPropertyError() error {
@@ -54,9 +54,43 @@ func ValidatePropertyValue(key string, value string) error {
 		return service.ValidatePortSourceRange(value)
 	case service.ExportArgsProperty, service.ImportArgsProperty:
 		return service.ValidateExtraArgs(key, value)
+	case service.VolumeTargetsProperty:
+		_, err := service.ParseVolumeTargets(value)
+		return err
 	}
 
 	return nil
+}
+
+// ValidateServicePropertyValue reports whether a value is one the property
+// accepts for this particular service, which for some properties depends on
+// more than the value: a volume can only be moved if the definition the service
+// runs has it, and only to a path nothing the service mounts already holds.
+// Clearing a property is always allowed.
+func ValidateServicePropertyValue(s *service.Datastore, serviceName string, key string, value string) error {
+	if err := ValidatePropertyValue(key, value); err != nil {
+		return err
+	}
+
+	if key != service.VolumeTargetsProperty || value == "" {
+		return nil
+	}
+
+	targets, err := service.ParseVolumeTargets(value)
+	if err != nil {
+		return err
+	}
+
+	if err := service.CheckVolumeTargets(s.Definition, targets); err != nil {
+		return err
+	}
+
+	mounts, err := service.ServiceMounts(s, serviceName)
+	if err != nil {
+		return err
+	}
+
+	return service.CheckMountTargets(s.Definition, targets, mounts)
 }
 
 // SetProperty writes a property for a service, or deletes it when the value is
@@ -66,8 +100,17 @@ func SetProperty(s *service.Datastore, serviceName string, key string, value str
 		return err
 	}
 
-	if err := ValidatePropertyValue(key, value); err != nil {
+	if err := ValidateServicePropertyValue(s, serviceName, key, value); err != nil {
 		return err
+	}
+
+	// written the way info reports it, so the same targets always read the same
+	if key == service.VolumeTargetsProperty && value != "" {
+		targets, err := service.ParseVolumeTargets(value)
+		if err != nil {
+			return err
+		}
+		value = service.FormatVolumeTargets(targets)
 	}
 
 	// refused here as well as when the verb runs, so that a backup is not the

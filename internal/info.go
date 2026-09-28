@@ -77,6 +77,7 @@ var InfoKeys = []InfoKey{
 	{Name: "shm-size", Description: "show the shared memory size the service container is run with"},
 	{Name: "status", Description: "show the service running status"},
 	{Name: "version", Description: "show the service image version"},
+	{Name: "volume-targets", Description: "show the container paths the service's volumes are mounted at in place of the definition's"},
 	{Name: "wait-timeout", Description: "show the seconds the service is waited on to become ready"},
 }
 
@@ -154,6 +155,10 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	mounts, _ := service.ServiceMounts(input.Datastore, input.ServiceName)
 	info["mounts"] = service.MountSpecs(mounts)
 	info["shm-size"] = common.ReadFirstLine(serviceFiles.ShmSize)
+	// only the volumes the service moved, as it was set. Where the rest are
+	// mounted is the definition's to say, and data-dir and config-dir are where
+	// they live on the host either way
+	info[service.VolumeTargetsProperty] = strings.TrimSpace(common.PropertyGet(commandPrefix, input.ServiceName, service.VolumeTargetsProperty))
 
 	// authenticated only when a backup would find both halves of the pair, since
 	// it refuses to run with either one missing. The secrets are fingerprinted

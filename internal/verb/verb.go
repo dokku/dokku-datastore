@@ -119,9 +119,13 @@ func Resolve(input RunInput) (backend.ExecInput, error) {
 		}
 	}
 
+	// a command naming where a volume is mounted renders against a target for
+	// every volume, whether or not the scope was handed any
+	scope := input.Definition.WithTargets(input.Scope)
+
 	// an element that renders empty is dropped, the way the shell guards the
 	// bash plugins used around an unset value
-	argv, err := definition.RenderAll(command.Exec, input.Scope)
+	argv, err := definition.RenderAll(command.Exec, scope)
 	if err != nil {
 		return backend.ExecInput{}, err
 	}
@@ -145,7 +149,7 @@ func Resolve(input RunInput) (backend.ExecInput, error) {
 
 	env := map[string]string{}
 	for name, value := range command.Env {
-		rendered, err := definition.Render(value, input.Scope)
+		rendered, err := definition.Render(value, scope)
 		if err != nil {
 			return backend.ExecInput{}, err
 		}

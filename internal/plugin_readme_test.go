@@ -288,3 +288,48 @@ func TestReadmeReservedNames(t *testing.T) {
 		})
 	}
 }
+
+// The section is only written for a datastore that mounts volumes, and lists
+// where each of its definitions mounts each one, since that differs between a
+// datastore's major versions.
+func TestReadmeVolumeTargets(t *testing.T) {
+	t.Setenv("DOKKU_NO_COLOR", "1")
+	clearImageEnv(t)
+
+	tests := []struct {
+		name     string
+		present  bool
+		expected []string
+	}{
+		{name: "memcached", present: false},
+		{name: "redis", present: true, expected: []string{"| redis | data | `/data` |", "| redis | config | `/usr/local/etc/redis` |", "`REDIS_VOLUME_TARGETS`"}},
+		{name: "postgres", present: true, expected: []string{"| postgres-17 | data | `/var/lib/postgresql/data` |", "| postgres-18 | data | `/var/lib/postgresql` |"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			readme, err := Readme(ReadmeInput{
+				Commands: helpTestCommands(),
+				Data:     NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores[test.name]}),
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			if actual := strings.Contains(readme, "### Moving where a service's volumes are mounted"); actual != test.present {
+				t.Errorf("expected the volume targets section to be present to be %t, got %t", test.present, actual)
+			}
+
+			for _, expected := range test.expected {
+				if !strings.Contains(readme, expected) {
+					t.Errorf("expected the section to contain %q", expected)
+				}
+			}
+
+			// a blank line inside a table ends it
+			if test.present && !strings.Contains(readme, "| Definition | Volume | Mounted at |\n| --- | --- | --- |\n| ") {
+				t.Error("expected the table rows to follow its header directly")
+			}
+		})
+	}
+}

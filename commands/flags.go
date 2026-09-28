@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/dokku/dokku-datastore/internal"
 	"github.com/dokku/dokku-datastore/internal/execx"
@@ -133,4 +134,21 @@ func changedMounts(f *flag.FlagSet, name string, value []string) (*[]service.Mou
 	}
 
 	return &mounts, nil
+}
+
+// changedVolumeTargets is changedSlice for the --volume-target flag, read into
+// targets, so that --volume-target "" asks for every volume where the
+// definition puts it, which is how a clone or an upgrade drops the ones the
+// service moved.
+func changedVolumeTargets(f *flag.FlagSet, name string, value []string) (*map[string]string, error) {
+	if !f.Changed(name) {
+		return nil, nil
+	}
+
+	targets, err := service.ParseVolumeTargets(strings.Join(value, " "))
+	if err != nil {
+		return nil, err
+	}
+
+	return &targets, nil
 }

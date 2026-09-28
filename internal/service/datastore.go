@@ -220,11 +220,24 @@ func (s *Datastore) CreateServiceContainer(ctx context.Context, input CreateServ
 	// checked again rather than trusted from when it was given: a host path
 	// removed since would otherwise be recreated by docker, empty and owned by
 	// root, and the service would start on that
+	//
+	// the volume targets too, and strictly, since the scope falls back to the
+	// definition's own when the property cannot be read: a container made on
+	// that fallback would put the data somewhere the operator did not ask for
+	volumeTargets, err := ServiceVolumeTargets(input.Datastore, input.ServiceName)
+	if err != nil {
+		return err
+	}
+	if err := CheckVolumeTargets(s.Definition, volumeTargets); err != nil {
+		return fmt.Errorf("unable to mount into %s: %w", input.ServiceName, err)
+	}
+	scope.Target = s.Definition.VolumeTargets(volumeTargets)
+
 	mounts, err := ServiceMounts(input.Datastore, input.ServiceName)
 	if err != nil {
 		return err
 	}
-	if err := CheckMounts(s.Definition, mounts); err != nil {
+	if err := CheckMounts(s.Definition, volumeTargets, mounts); err != nil {
 		return fmt.Errorf("unable to mount into %s: %w", input.ServiceName, err)
 	}
 	if err := CheckMountsOnHost(ctx, Folders(s, input.ServiceName).HostRoot, mounts); err != nil {
@@ -768,6 +781,11 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 		}
 	}
 
+	volumes, err := s.volumes(serviceName)
+	if err != nil {
+		return err
+	}
+
 	if command != nil && command.Image != "" {
 		if err := EnsureTaggedImage(ctx, EnsureTaggedImageInput{
 			Action:      verbAction(name),
@@ -789,7 +807,7 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 			Ambassador: AmbassadorContainerName(s, serviceName),
 		},
 		Image:      s.runTaggedImage(serviceName),
-		Volumes:    s.volumes(serviceName),
+		Volumes:    volumes,
 		ScriptRoot: filepath.Join(Folders(s, serviceName).Root, "bin"),
 		TTY:        options.TTY,
 		Stdin:      options.Stdin,
@@ -799,12 +817,6 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 	})
 }
 
-// volumes are the mounts a throwaway container needs to stand in for the
-// service container: the service's own data, and the payload.
-//
-// The payload is easy to forget here and impossible to miss at runtime: an
-// offline verb is one of the mounted scripts, so without it there is nothing to
-// exec and import fails with "not found".
 // ensureBindSources makes whatever the service's binds mount from that is not
 // there, before a container is made on them.
 //
@@ -952,20 +964,16 @@ func (s *Datastore) bindSources(root string) []string {
 	return directories
 }
 
-func (s *Datastore) volumes(serviceName string) []string {
-	serviceFolders := Folders(s, serviceName)
-
-	volumes := make([]string, 0, len(s.Definition.Service.Volumes))
-	for _, volume := range s.Definition.Service.Volumes {
-		source := strings.Replace(volume.Source, definition.HostRootTemplate, serviceFolders.HostRoot, 1)
-		volumes = append(volumes, source+":"+volume.Target)
-	}
-
-	for _, file := range render.RootfsFiles(render.Input{Definition: s.Definition, Scope: s.scope(serviceName)}) {
-		volumes = append(volumes, file.Mount)
-	}
-
-	return volumes
+// volumes are the mounts a throwaway container needs to stand in for the
+// service container: the service's own data, at the paths the service has it
+// at, and the payload. They are rendered the way the service container's are,
+// so the two cannot disagree on where the data is.
+//
+// The payload is easy to forget here and impossible to miss at runtime: an
+// offline verb is one of the mounted scripts, so without it there is nothing to
+// exec and import fails with "not found".
+func (s *Datastore) volumes(serviceName string) ([]string, error) {
+	return render.ServiceVolumes(render.Input{Definition: s.Definition, Scope: s.scope(serviceName)})
 }
 
 // Properties projects the definition into the shape the rest of the binary
@@ -1179,6 +1187,7 @@ func (s *Datastore) scope(serviceName string) definition.Scope {
 		TaggedImage:   taggedImage,
 		ServiceRoot:   serviceFolders.Root,
 		HostRoot:      serviceFolders.HostRoot,
+		Target:        s.Definition.VolumeTargets(scopeVolumeTargets(s, serviceName)),
 		Scheme:        dokku.Scheme,
 		Secret:        secrets,
 		Port:          ports,

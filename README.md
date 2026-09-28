@@ -134,7 +134,7 @@ If a service names a definition the plugin no longer ships, commands that would 
 
 `upgrade` across a major version moves the service onto the other definition, which moves where its data is mounted along with it. That is the upgrade a major version asks for rather than something to work around, but it is not a tag change and it is not reversible by pointing the version back. A bare `upgrade` never crosses one: with no version named it moves to the newest tag the service's own major version ships, and leaves the data where it is.
 
-`upgrade --definition` moves the service onto the named definition, with the image and version it ships unless `--image` and `--image-version` say otherwise. That moves where its data is mounted in the same way, even when the image stays the same. `<VARIABLE>_DEFINITION` is only read by `create`. `clone` places the new service on the definition the source is pinned to, rather than on the one the source's image resolves to.
+`upgrade --definition` moves the service onto the named definition, with the image and version it ships unless `--image` and `--image-version` say otherwise. That moves where its data is mounted in the same way, even when the image stays the same. A volume the service moved with `volume-targets` stays where it was moved to on the new definition, and an upgrade onto a definition that does not mount that volume is refused before the old container is taken away. `<VARIABLE>_DEFINITION` is only read by `create`. `clone` places the new service on the definition the source is pinned to, rather than on the one the source's image resolves to.
 
 ## Flavors
 
@@ -347,6 +347,39 @@ dokku-datastore create elasticsearch lollipop --volume /srv/hunspell:/usr/share/
 
 The mounts go into the service container only, not into the containers `connect`, `enter`, `export`, `import` and the hooks run in, nor into the ambassador an exposed service runs.
 
+## Moving where a definition's volumes are mounted
+
+Every definition mounts its volumes at a fixed path in the container, which is the path its own image expects. An image that keeps its data somewhere else, such as `bitnami/postgresql` at `/bitnami/postgresql`, had no way to have its data mounted there. Moving the volume is not always all such an image needs - bitnami's postgres, for one, also takes its settings from environment variables of its own - but it is the part nothing else could do. A service may now move any of its definition's volumes with the `volume-targets` property. A volume is named by where it lives under the service's own directory - `data`, `config`, `certs`, `initdb`, `data/grafana` and so on - which stays put however the volume is mounted.
+
+```shell
+# the data volume mounted where the image keeps its data
+dokku postgres:set lollipop volume-targets data=/bitnami/postgresql
+
+# several at once, separated by spaces
+dokku redis:set lollipop volume-targets "data=/srv/redis config=/etc/redis"
+
+# every volume back where the definition mounts it
+dokku postgres:set lollipop volume-targets
+```
+
+They may be given at `create`, `clone` and `upgrade` as well, with `--volume-target`, repeated for each, and `create` reads `<VARIABLE>_VOLUME_TARGETS` - `POSTGRES_VOLUME_TARGETS` for postgres - when the flag is not given. A `clone` not passed it takes the source's, and `--volume-target ""` puts every volume back. `info --volume-targets` reports only the volumes a service moved, sorted and space separated, and is empty for one that moved none. A change reaches a container the next time one is built: `restart` keeps the container it has, so a service already running takes a `stop` and then a `start`.
+
+```shell
+dokku-datastore create redis lollipop --volume-target data=/srv/redis
+```
+
+Moving a volume moves where it is mounted, not where the image reads and writes. Wherever a definition names one of its volumes' paths itself - the config file redis is started with and the directory it writes its dump to, typesense's data and config, the certificates postgres serves, the configs clickhouse's dump scripts read and the image configuration the hooks copy out - it follows the volume. What the image does on its own does not, so an image that keeps writing to its own path writes into the container rather than into the volume, and what it writes is lost when the container is rebuilt. Only move a volume to where the image expects its data. Moving a volume does not move the data on the host, and a config file is seeded into the same directory as before.
+
+Some targets are refused before anything is written:
+
+- a volume the service's definition does not mount, which names the ones it does
+- a path that is not absolute, is `/`, or has a colon or a comma in it, which docker's `-v` and compose's short volume syntax would split on
+- two volumes at one path, including a volume moved onto where another is mounted
+- the path a payload script is mounted at, or a directory above one
+- a path a mount already holds, and the other way round, a mount at the path a volume was moved to
+
+The containers `export` and `import` run in beside or in place of the service are given the moved volumes too, so they read and write where the service does. The hooks keep the mounts they declare, which are their own rather than the service's. `upgrade` checks the targets against the definition it lands on, since a volume moved on one definition has to be one the other mounts, and refuses before the old container is taken away until the target is cleared or replaced with `--volume-target`.
+
 ## Importing a file on the dokku host
 
 `import` read only stdin, so a dump had to be piped in from wherever the command was run. A dump already on the dokku host could not be imported over ssh: `ssh dokku@dokku.me "postgres:import lollipop < /path/to/data.dump"` hands the whole string to dokku, which splits it into words without a shell, so the `<` and the path arrive as arguments rather than as a redirection.
@@ -495,7 +528,7 @@ A datastore with no secret for a flag refuses it before anything is created, rat
 
 A clone was made on the source's image and given its data, but nothing else about the source carried over: every other setting came from the flags passed to `clone`, so a clone made without repeating all of them landed on the defaults rather than on what the source runs with.
 
-A clone now starts from the source's settings - its config options, custom env, memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, mounts, backup keyserver, backup storage class and export and import arguments. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
+A clone now starts from the source's settings - its config options, custom env, memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, mounts, volume targets, backup keyserver, backup storage class and export and import arguments. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
 
 ```shell
 # the same settings as lollipop

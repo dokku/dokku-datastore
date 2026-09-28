@@ -18,7 +18,7 @@ func TestSetPropertyRejectsUnknownKeys(t *testing.T) {
 		t.Fatal("expected an error for an unknown key, got none")
 	}
 
-	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, port-source-range, expose-host, export-args, import-args"
+	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, port-source-range, expose-host, export-args, import-args, volume-targets"
 	if err.Error() != expected {
 		t.Errorf("expected %q, got %q", expected, err)
 	}
@@ -31,8 +31,8 @@ func TestSettableProperties(t *testing.T) {
 	// the two that bound a container's log, the policy docker restarts it by, how
 	// long it is waited on to become ready, where and to whom an exposed service
 	// is published, the host its exposed dsn names, and the arguments its exports
-	// and imports are run with
-	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "port-source-range", "expose-host", "export-args", "import-args"}
+	// and imports are run with, and where the definition's volumes are mounted
+	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "port-source-range", "expose-host", "export-args", "import-args", "volume-targets"}
 	if strings.Join(SettableProperties, ",") != strings.Join(expected, ",") {
 		t.Errorf("expected %v, got %v", expected, SettableProperties)
 	}
@@ -204,6 +204,43 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 			value:    "--init-command=$SQL",
 			expected: `invalid import-args value`,
 		},
+		{
+			name:     "a volume target that is not a pair",
+			key:      service.VolumeTargetsProperty,
+			value:    "/redis-data",
+			expected: `invalid volume-targets value "/redis-data"`,
+		},
+		{
+			name:     "a volume target that is relative",
+			key:      service.VolumeTargetsProperty,
+			value:    "data=redis-data",
+			expected: `must be absolute`,
+		},
+		{
+			name:     "a volume target at the container root",
+			key:      service.VolumeTargetsProperty,
+			value:    "data=/",
+			expected: `must not be mounted at /`,
+		},
+		{
+			// a volume the definition does not mount cannot be moved
+			name:     "a volume target for a volume redis does not have",
+			key:      service.VolumeTargetsProperty,
+			value:    "certs=/certs",
+			expected: `has no volume certs, must be one of [config, data]`,
+		},
+		{
+			name:     "a volume target onto another volume",
+			key:      service.VolumeTargetsProperty,
+			value:    "data=/usr/local/etc/redis",
+			expected: `would both be mounted at /usr/local/etc/redis`,
+		},
+		{
+			name:     "a volume target onto the payload",
+			key:      service.VolumeTargetsProperty,
+			value:    "data=/usr/local/bin",
+			expected: `which holds the /usr/local/bin/dokku-redis-export`,
+		},
 	}
 
 	for _, test := range tests {
@@ -223,7 +260,7 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 // Unsetting is how every other property is cleared, so an empty value has to
 // reach the delete rather than being refused as an unusable one.
 func TestSetPropertyAcceptsAnEmptyValue(t *testing.T) {
-	for _, key := range []string{service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExportArgsProperty, service.ImportArgsProperty} {
+	for _, key := range []string{service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExportArgsProperty, service.ImportArgsProperty, service.VolumeTargetsProperty} {
 		if err := ValidatePropertyValue(key, ""); err != nil {
 			t.Errorf("expected an empty %s to be accepted, got %q", key, err)
 		}
@@ -267,5 +304,56 @@ func TestSetPropertyExtraArgs(t *testing.T) {
 				t.Errorf("expected clearing %s to be allowed, got %q", key, err)
 			}
 		})
+	}
+}
+
+// The targets are stored the way info reports them, so the same targets always
+// read the same however they were written, and a value with nothing in it is
+// no targets rather than an empty one
+func TestSetVolumeTargetsIsStoredCanonically(t *testing.T) {
+	redis := service.Datastores["redis"]
+	withInfoService(t, redis, "lollipop")
+
+	if err := SetProperty(redis, "lollipop", service.VolumeTargetsProperty, "  data=/redis-data//   config=/etc/redis "); err != nil {
+		t.Fatalf("expected the targets to be accepted, got %q", err)
+	}
+
+	info := Info(t.Context(), InfoInput{Datastore: redis, ServiceName: "lollipop"})
+	if actual := info[service.VolumeTargetsProperty]; actual != "config=/etc/redis data=/redis-data" {
+		t.Errorf("expected the targets sorted and cleaned, got %q", actual)
+	}
+
+	if err := SetProperty(redis, "lollipop", service.VolumeTargetsProperty, ""); err != nil {
+		t.Fatalf("expected clearing the targets to be allowed, got %q", err)
+	}
+
+	targets, err := service.ServiceVolumeTargets(redis, "lollipop")
+	if err != nil || targets != nil {
+		t.Errorf("expected no targets once cleared, got %v and %v", targets, err)
+	}
+}
+
+// A volume moved onto a path a mount already holds would give docker two
+// mounts at one path, and the container could not be made
+func TestSetVolumeTargetsRefusesAMountedPath(t *testing.T) {
+	redis := service.Datastores["redis"]
+	withInfoService(t, redis, "lollipop")
+
+	if err := service.WriteMounts(redis, "lollipop", []service.Mount{{Source: "some-volume", ContainerPath: "/opt/extra"}}); err != nil {
+		t.Fatalf("failed to write the mounts: %v", err)
+	}
+
+	err := SetProperty(redis, "lollipop", service.VolumeTargetsProperty, "data=/opt/extra")
+	if err == nil {
+		t.Fatal("expected a volume moved onto a mount to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "Container path /opt/extra is already mounted by the redis definition") {
+		t.Errorf("expected the refusal to name the path, got %q", err)
+	}
+
+	targets, err := service.ServiceVolumeTargets(redis, "lollipop")
+	if err != nil || targets != nil {
+		t.Errorf("expected nothing to be written, got %v and %v", targets, err)
 	}
 }

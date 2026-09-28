@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/service"
@@ -138,6 +139,43 @@ func TestUpdateFlagFromEnvReadsTheDefinition(t *testing.T) {
 
 			if updated.Definition != test.expected {
 				t.Errorf("expected definition %q, got %q", test.expected, updated.Definition)
+			}
+		})
+	}
+}
+
+// The volume targets are read under the same prefix as the image, written the
+// way the property is, and a flag beats them the way a flag beats the image.
+// Graphite's prefix is its variable rather than its name, like its image.
+func TestUpdateFlagFromEnvReadsTheVolumeTargets(t *testing.T) {
+	tests := []struct {
+		name        string
+		datastore   string
+		variable    string
+		environment string
+		flag        []string
+		expected    []string
+	}{
+		{name: "from the environment", datastore: "redis", variable: "REDIS_VOLUME_TARGETS", environment: "data=/redis-data  config=/etc/redis", expected: []string{"data=/redis-data", "config=/etc/redis"}},
+		{name: "a flag beats the environment", datastore: "redis", variable: "REDIS_VOLUME_TARGETS", environment: "data=/redis-data", flag: []string{"config=/etc/redis"}, expected: []string{"config=/etc/redis"}},
+		{name: "under the variable rather than the name", datastore: "graphite", variable: "STATSD_VOLUME_TARGETS", environment: "data/grafana=/grafana", expected: []string{"data/grafana=/grafana"}},
+		{name: "nothing is filled in from the definition", datastore: "redis", variable: "REDIS_VOLUME_TARGETS"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(test.variable, test.environment)
+
+			updated, err := UpdateFlagFromEnv(UpdateFlagFromEnvInput{
+				Datastore:     service.Datastores[test.datastore],
+				VolumeTargets: test.flag,
+			})
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+
+			if strings.Join(updated.VolumeTargets, " ") != strings.Join(test.expected, " ") {
+				t.Errorf("expected volume targets %v, got %v", test.expected, updated.VolumeTargets)
 			}
 		})
 	}
