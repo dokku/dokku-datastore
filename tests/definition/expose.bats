@@ -150,6 +150,19 @@ expected_exposed_dsn() {
   assert_success
 }
 
+@test "($DEFINITION) the exposed dsn names the global domain without an expose-host" {
+  echo "dokku.me other.me" >"$BATS_TEST_TMPDIR/VHOST"
+
+  run --separate-stderr env DOKKU_ROOT="$BATS_TEST_TMPDIR" "$BIN" info "$PLUGIN" "$SERVICE" --exposed-dsn
+  assert_success
+  assert_output "$(expected_exposed_dsn dokku.me)"
+
+  # a host without dokku sets no DOKKU_ROOT, and has no domain to name
+  run --separate-stderr env -u DOKKU_ROOT "$BIN" info "$PLUGIN" "$SERVICE" --exposed-dsn
+  assert_success
+  assert_output ""
+}
+
 @test "($DEFINITION) an exposed service survives a stop and a start" {
   run "$BIN" stop "$PLUGIN" "$SERVICE"
   assert_success

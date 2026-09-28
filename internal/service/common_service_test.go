@@ -462,6 +462,28 @@ func TestExposedURLKeepsTheCredentials(t *testing.T) {
 	}
 }
 
+// A host without dokku sets no DOKKU_ROOT. Reading the global domain there
+// used to stop the process, so info on any exposed service without an
+// expose-host failed rather than reporting an empty exposed dsn.
+func TestExposedURLWithoutADokkuRoot(t *testing.T) {
+	if _, err := os.Stat("/home/dokku/VHOST"); err == nil {
+		t.Skip("the host has a global domain of its own")
+	}
+
+	redis := Datastores["redis"]
+	serviceRoot := withServiceRoot(t, redis, "lollipop")
+	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
+	t.Setenv("DOKKU_ROOT", "")
+
+	if err := os.WriteFile(filepath.Join(serviceRoot, "PORT"), []byte("33201"), 0644); err != nil {
+		t.Fatalf("failed to write port file: %v", err)
+	}
+
+	if actual := redis.ExposedURL("lollipop"); actual != "" {
+		t.Errorf("expected no exposed dsn without a global domain, got %q", actual)
+	}
+}
+
 func ptr(s string) *string {
 	return &s
 }

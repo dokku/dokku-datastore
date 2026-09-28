@@ -1001,9 +1001,10 @@ func exposedHost(s *Datastore, serviceName string) string {
 // globalVhost is the first global domain dokku was given, empty when it has
 // none. It is read from the file dokku keeps them in, as the graphite
 // nginx-expose script does, since reading it through dokku needs a configured
-// dokku that rendering a connection string must not.
+// dokku that rendering a connection string must not. For the same reason an
+// unset DOKKU_ROOT falls back to dokku's default rather than stopping info.
 func globalVhost() string {
-	lines, err := common.FileToSlice(filepath.Join(common.MustGetEnv("DOKKU_ROOT"), "VHOST"))
+	lines, err := common.FileToSlice(filepath.Join(hostenv.Root(), "VHOST"))
 	if err != nil {
 		return ""
 	}
