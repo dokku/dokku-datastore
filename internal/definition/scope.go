@@ -33,6 +33,14 @@ type Scope struct {
 	ServiceRoot string
 	HostRoot    string
 
+	// Target is the container path each of the service's volumes is mounted
+	// at, keyed by the volume's source relative to the service root: the
+	// definition's own, unless the service's volume-targets property moved it.
+	// A definition that names one of its volumes' paths anywhere else reads it
+	// from here, so that moving the volume moves the path too. A key with a
+	// slash or a dot in it is read with {{ index .Target "data/grafana" }}.
+	Target map[string]string
+
 	// values
 	Secret         map[string]string
 	Port           map[string]int

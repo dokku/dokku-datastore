@@ -205,7 +205,7 @@ func (c *SetCommand) Run(args []string) int {
 	}
 
 	value := arguments["value"].StringValue()
-	if err := internal.ValidatePropertyValue(key, value); err != nil {
+	if err := internal.ValidateServicePropertyValue(datastore, serviceName, key, value); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}

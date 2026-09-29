@@ -284,7 +284,7 @@ func (c *CloneCommand) Documentation() string {
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2
 the new service starts from the settings of the one it copies: its config options,
 custom env, memory, shm size, networks, log driver, log options, restart policy,
-mounts, backup keyserver and backup storage class. A flag passed to clone overrides that one setting, and a
+mounts, volume targets, backup keyserver and backup storage class. A flag passed to clone overrides that one setting, and a
 flag passed empty clears it
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --restart no --custom-env ""
 the password, exposed ports, links and backup credentials, schedule and encryption
@@ -376,6 +376,12 @@ dokku {{.CommandPrefix}}:create lollipop --wait-timeout 120
 the config options are handed to the process the container runs, not to docker, so
 a host path or docker volume is mounted with --volume, which may be repeated.
 dokku {{.CommandPrefix}}:create lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro
+{{- if .VolumeKey}}
+the definition's own volumes can be mounted at another path in the container, for an
+image that keeps its data somewhere else, with --volume-target, which may be repeated.
+export {{.PluginVariable}}_VOLUME_TARGETS="{{.VolumeKey}}=/srv/{{.CommandPrefix}}"
+dokku {{.CommandPrefix}}:create lollipop --volume-target {{.VolumeKey}}=/srv/{{.CommandPrefix}}
+{{- end}}
 the service passwords are generated unless they are given. A datastore without a
 root password refuses --root-password rather than dropping it.
 dokku {{.CommandPrefix}}:create lollipop --password <password> --root-password <root-password>`
@@ -802,6 +808,9 @@ mounting the same source at the same directory again rewrites its options
 dokku {{.CommandPrefix}}:mount lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra
 replace every mount the service has with the ones given
 dokku {{.CommandPrefix}}:mount --replace lollipop /srv/a:/opt/a:ro /srv/b:/opt/b
+{{- if .VolumeKey}}
+> NOTE: a mount cannot land where one of the definition's volumes is mounted, which for a volume moved with the volume-targets property is where it was moved to.
+{{- end}}
 > NOTE: a mount reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.`
 }
 
@@ -950,7 +959,13 @@ dokku {{.CommandPrefix}}:set lollipop import-args -- "<import-args...>"
 go back to importing with the datastore's own arguments alone
 dokku {{.CommandPrefix}}:set lollipop import-args
 {{- end}}
-> NOTE: a log setting or a restart policy reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.
+{{- if .VolumeKey}}
+mount one of the definition's volumes at another path in the container, for an image that keeps its data somewhere else. each volume is named by where it lives in the service directory ({{range $index, $key := .VolumeKeys}}{{if $index}}, {{end}}{{$key}}{{end}}), and several are separated by spaces
+dokku {{.CommandPrefix}}:set lollipop volume-targets {{.VolumeKey}}=/srv/{{.CommandPrefix}}
+go back to mounting every volume where the definition does
+dokku {{.CommandPrefix}}:set lollipop volume-targets
+{{- end}}
+> NOTE: a log setting, a restart policy or a volume target reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.
 > NOTE: a port-bind-address or port-source-range reaches an exposed service with {{.CommandPrefix}}:reexpose, which replaces the container publishing its ports and leaves the service container running.`
 }
 
@@ -1128,6 +1143,10 @@ dokku {{.CommandPrefix}}:upgrade lollipop --definition {{index .Definitions 0}}
 {{- end}}
 A service keeps the mounts it has unless --volume is passed, which replaces them, and each one is checked against the new container before the old one is taken away.
 dokku {{.CommandPrefix}}:upgrade lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro
+{{- if .VolumeKey}}
+A service keeps the volume targets it has unless --volume-target is passed, which replaces them, and an upgrade onto a definition that does not mount a volume the service moved is refused before the old container is taken away. --volume-target "" puts every volume back where the new definition mounts it.
+dokku {{.CommandPrefix}}:upgrade lollipop --volume-target ""
+{{- end}}
 A service keeps its memory limit unless --memory is passed, and --memory 0 removes it.
 dokku {{.CommandPrefix}}:upgrade lollipop --memory 512`
 }

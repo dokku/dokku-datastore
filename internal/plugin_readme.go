@@ -289,6 +289,7 @@ func readmeUsage(input ReadmeInput) ([]string, error) {
 	sections = append(sections, readmeExposedDsn(input.Data)...)
 	sections = append(sections, readmeExtraArgs(input.Data)...)
 	sections = append(sections, readmeWaitTimeout(input.Data)...)
+	sections = append(sections, readmeVolumeTargets(input.Data)...)
 	sections = append(sections, readmeReservedNames(input.Data)...)
 	sections = append(sections, readmeDockerPull(input.Data)...)
 	return sections, nil
@@ -443,6 +444,37 @@ func readmeExtraArgs(data DocumentationData) []string {
 			"The property is split the way a shell would split it, so an argument with a space in it is quoted, and a variable in it is refused rather than expanded.", strings.Join(verbs, " or "), strings.Join(properties, " or "), data.CommandPrefix),
 		"Arguments given after `--` replace the property rather than adding to it. " +
 			"Backups and clones are made with the property, and a clone is given the source's.",
+	}
+}
+
+// readmeVolumeTargets explains how to mount a service's volumes somewhere other
+// than where the definition does, for a datastore that mounts any, and what
+// that does not do
+func readmeVolumeTargets(data DocumentationData) []string {
+	if len(data.Volumes) == 0 {
+		return nil
+	}
+
+	// one block, since the sections are joined by blank lines and a table
+	// broken by one is not a table
+	table := []string{
+		"| Definition | Volume | Mounted at |",
+		"| --- | --- | --- |",
+	}
+	for _, volume := range data.Volumes {
+		table = append(table, fmt.Sprintf("| %s | %s | `%s` |", volume.Definition, volume.Key, volume.Target))
+	}
+
+	return []string{
+		"### Moving where a service's volumes are mounted",
+		fmt.Sprintf("Each volume a service mounts is named by the directory it lives in under the service's own directory, and is mounted where the datastore's definition says. "+
+			"To mount one somewhere else in the container, for an image that keeps its data at another path, set the service's `volume-targets` property with `dokku %s:set`, pass `--volume-target` to `create`, `clone` or `upgrade`, or set the `%s_VOLUME_TARGETS` environment variable before `create`. "+
+			"Each is written as `<volume>=<container-path>`, several separated by spaces, and `dokku %s:info lollipop --volume-targets` shows the ones a service moved.", data.CommandPrefix, data.PluginVariable, data.CommandPrefix),
+		strings.Join(table, "\n"),
+		"Moving a volume changes where it is mounted, not where the image reads and writes. " +
+			"The datastore's own commands and the paths it is started with follow the volume, but an image that keeps writing to its own path writes into the container rather than into the volume, and what it writes is lost when the container is rebuilt, so only move a volume to where the image expects its data. " +
+			fmt.Sprintf("The data stays in the same directory on the host, and a move reaches the container the next time one is built, so use `dokku %s:stop` and then `dokku %s:start` on a running service. ", data.CommandPrefix, data.CommandPrefix) +
+			"An upgrade onto a definition that does not mount a volume the service moved is refused until the move is cleared or replaced.",
 	}
 }
 

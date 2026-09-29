@@ -21,9 +21,9 @@ services:
       - -c
       - ssl=on
       - -c
-      - ssl_cert_file=/certs/server.crt
+      - "ssl_cert_file={{ .Target.certs }}/server.crt"
       - -c
-      - ssl_key_file=/certs/server.key
+      - "ssl_key_file={{ .Target.certs }}/server.key"
       - -c
       - ssl_ciphers=AES256+EECDH:AES256+EDH
 

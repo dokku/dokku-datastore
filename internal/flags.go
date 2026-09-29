@@ -35,6 +35,9 @@ type UpdateFlagFromEnvInput struct {
 	Image string
 	// ImageVersion is the image version to update from the environment
 	ImageVersion string
+	// VolumeTargets are the volume targets to update from the environment, each
+	// a <volume>=<container-path> pair
+	VolumeTargets []string
 	// Datastore is the service to update the flags for
 	Datastore *service.Datastore
 }
@@ -71,6 +74,10 @@ func UpdateFlagFromEnv(input UpdateFlagFromEnvInput) (UpdateFlagFromEnvInput, er
 
 	if input.ImageVersion == "" {
 		input.ImageVersion = ImageVersionFromEnv(properties)
+	}
+
+	if len(input.VolumeTargets) == 0 {
+		input.VolumeTargets = strings.Fields(VolumeTargetsFromEnv(properties))
 	}
 
 	return input, nil

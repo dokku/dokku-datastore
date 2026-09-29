@@ -27,6 +27,7 @@ func cloneSource() serviceSettings {
 		PostStartNetworks:  []string{"started"},
 		RestartPolicy:      "unless-stopped",
 		ShmSize:            "128m",
+		VolumeTargets:      map[string]string{"data": "/redis-data"},
 		WaitTimeout:        "120",
 	}
 }
@@ -47,6 +48,7 @@ func TestCloneFlagOverridesOneSetting(t *testing.T) {
 	networks := []string{"elsewhere"}
 	memory := 1024
 	mounts := []service.Mount{{Source: "other", ContainerPath: "/opt/other"}}
+	volumeTargets := map[string]string{"config": "/etc/redis"}
 
 	tests := []struct {
 		name     string
@@ -78,6 +80,11 @@ func TestCloneFlagOverridesOneSetting(t *testing.T) {
 			input:    CloneServiceInput{Mounts: &mounts},
 			expected: func(s *serviceSettings) { s.Mounts = mounts },
 		},
+		{
+			name:     "the volume targets",
+			input:    CloneServiceInput{VolumeTargets: &volumeTargets},
+			expected: func(s *serviceSettings) { s.VolumeTargets = volumeTargets },
+		},
 	}
 
 	for _, test := range tests {
@@ -99,6 +106,7 @@ func TestCloneCanClearASetting(t *testing.T) {
 	none := []string{}
 	unlimited := 0
 	unmounted := []service.Mount{}
+	unmoved := map[string]string{}
 
 	actual := cloneSource().withOverrides(CloneServiceInput{
 		ConfigOptions:      &empty,
@@ -112,6 +120,7 @@ func TestCloneCanClearASetting(t *testing.T) {
 		PostStartNetworks:  &none,
 		RestartPolicy:      &empty,
 		ShmSize:            &empty,
+		VolumeTargets:      &unmoved,
 		WaitTimeout:        &empty,
 	})
 
@@ -126,6 +135,7 @@ func TestCloneCanClearASetting(t *testing.T) {
 		Mounts:             unmounted,
 		PostCreateNetworks: none,
 		PostStartNetworks:  none,
+		VolumeTargets:      unmoved,
 	}
 	if !reflect.DeepEqual(actual, expected) {
 		t.Errorf("expected %+v, got %+v", expected, actual)
@@ -155,6 +165,7 @@ func TestReadServiceSettings(t *testing.T) {
 		service.LogDriverProperty:          "json-file",
 		service.LogOptProperty:             "max-size=20m,max-file=3",
 		service.RestartPolicyProperty:      "unless-stopped",
+		service.VolumeTargetsProperty:      "data=/redis-data",
 		service.WaitTimeoutProperty:        "120",
 	} {
 		if err := SetProperty(datastore, "lollipop", key, value); err != nil {

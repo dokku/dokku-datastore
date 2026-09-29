@@ -52,6 +52,9 @@ type CloneCommand struct {
 	// volume are the host paths and docker volumes to mount into the service
 	// container
 	volume []string
+	// volumeTarget are the container paths the definition's volumes are mounted
+	// at in place of its own
+	volumeTarget []string
 }
 
 // Name returns the name of the command
@@ -131,6 +134,7 @@ func (c *CloneCommand) FlagSet() *flag.FlagSet {
 	// an array rather than a slice, since a slice flag splits on the comma a
 	// mount's own option list is separated by
 	f.StringArrayVar(&c.volume, "volume", []string{}, "a host path or docker volume to mount into the service container, as <source>:<container-dir>[:<options>], repeatable")
+	f.StringArrayVar(&c.volumeTarget, "volume-target", []string{}, "mount one of the definition's volumes at another container path, as <volume>=<container-dir>, repeatable")
 	return f
 }
 
@@ -154,6 +158,7 @@ func (c *CloneCommand) AutocompleteFlags() complete.Flags {
 			"--restart":             complete.PredictSet("no", "always", "unless-stopped", "on-failure"),
 			"--wait-timeout":        complete.PredictAnything,
 			"--volume":              complete.PredictAnything,
+			"--volume-target":       complete.PredictAnything,
 		},
 	)
 }
@@ -278,6 +283,12 @@ func (c *CloneCommand) Run(args []string) int {
 		return 1
 	}
 
+	volumeTargets, err := changedVolumeTargets(flags, "volume-target", c.volumeTarget)
+	if err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
+	}
+
 	if err := internal.CloneService(ctx, internal.CloneServiceInput{
 		Datastore:      datastore,
 		Logger:         logger,
@@ -297,6 +308,7 @@ func (c *CloneCommand) Run(args []string) int {
 		LogOptions:         changedSlice(flags, "log-opt", c.logOpt),
 		Memory:             changedInt(flags, "memory", c.memory),
 		Mounts:             mounts,
+		VolumeTargets:      volumeTargets,
 		PostCreateNetworks: changedSlice(flags, "post-create-network", c.postCreateNetwork),
 		PostStartNetworks:  changedSlice(flags, "post-start-network", c.postStartNetwork),
 		RestartPolicy:      changedString(flags, "restart", c.restart),

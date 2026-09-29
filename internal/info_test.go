@@ -134,6 +134,7 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		service.PortBindAddressProperty: "10.0.0.5",
 		service.PortSourceRangeProperty: "10.0.0.0/8",
 		service.ExposeHostProperty:      "db.example.com",
+		service.VolumeTargetsProperty:   "data=/redis-data",
 	} {
 		if err := SetProperty(datastore, "lollipop", key, value); err != nil {
 			t.Fatalf("failed to set the %s property: %s", key, err)
@@ -174,6 +175,7 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		"service":           "lollipop",
 		"shm-size":          "128m",
 		"wait-timeout":      "120",
+		"volume-targets":    "data=/redis-data",
 	} {
 		if info[key] != expected {
 			t.Errorf("expected %s to be %q, got %q", key, expected, info[key])

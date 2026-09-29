@@ -150,6 +150,41 @@ func TestParseRejects(t *testing.T) {
 			expected: "must be rooted at {{ .HostRoot }}",
 		},
 		{
+			// a volume is moved by naming it, and the service root has no name
+			name:     "a volume of the whole service root",
+			compose:  strings.Replace(validCompose, `source: "{{ .HostRoot }}/data"`, `source: "{{ .HostRoot }}"`, 1),
+			expected: "has no name to be moved by",
+		},
+		{
+			name:     "a volume whose name cannot be written as a volume target",
+			compose:  strings.Replace(validCompose, `source: "{{ .HostRoot }}/data"`, `source: "{{ .HostRoot }}/data=1"`, 1),
+			expected: `names the volume "data=1", which cannot be written as a volume-targets key`,
+		},
+		{
+			name:     "two volumes from one source",
+			compose:  strings.Replace(validCompose, "        target: /data\n", "        target: /data\n      - type: bind\n        source: \"{{ .HostRoot }}/data\"\n        target: /other\n", 1),
+			expected: `two volumes are mounted from "data"`,
+		},
+		{
+			// caught when the definition loads rather than when a service is
+			// made, where it would fail the create part way through
+			name:     "a command naming the target of a volume that does not exist",
+			compose:  strings.Replace(validCompose, "command: [thingd]", `command: [thingd, "--dir={{ .Target.logs }}"]`, 1),
+			expected: `names the target of the volume "logs", which is not declared`,
+		},
+		{
+			name:     "an env naming the target of a volume that does not exist, through index",
+			compose:  validCompose + "\n  commands:\n    export:\n      exec: [thing-dump]\n      env:\n        DUMP: '{{ index .Target \"data/dump\" }}'\n",
+			expected: `names the target of the volume "data/dump", which is not declared`,
+		},
+		{
+			// seeded once and never rewritten, so the path would be the one the
+			// volume had when the service was made
+			name:     "a config naming a volume target",
+			compose:  withConfigEntry(validCompose, "      - source: thing_conf\n        target: /data/thing.conf\n") + "      dir = {{ .Target.data }}\n",
+			expected: `config "thing_conf" names a volume target`,
+		},
+		{
 			name:     "a wait naming a port that does not exist",
 			compose:  strings.Replace(validCompose, "  wait: native", "  wait: nonsense", 1),
 			expected: "which is not declared",
@@ -649,5 +684,86 @@ func TestServicesDirectoryIsDeclarable(t *testing.T) {
 
 	if actual := parsed.ServicesDirectory(); actual != "somewhere-else" {
 		t.Errorf("expected somewhere-else, got %s", actual)
+	}
+}
+
+// A volume is named by where it lives under the service root, and a template
+// may name it either way a template can.
+func TestParseAcceptsTargetReferences(t *testing.T) {
+	compose := strings.Replace(validCompose, "command: [thingd]", `command: [thingd, "--dir={{ .Target.data }}", "--also={{ index .Target \"data\" }}"]`, 1)
+	parsed, err := parseCompose(t, compose)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if keys := parsed.VolumeKeys(); strings.Join(keys, ",") != "data" {
+		t.Errorf("expected the one volume to be named data, got %v", keys)
+	}
+
+	rendered, err := RenderAll(parsed.Service.Command, parsed.WithTargets(Scope{}))
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	if strings.Join(rendered, " ") != "thingd --dir=/data --also=/data" {
+		t.Errorf("expected the definition's own target, got %v", rendered)
+	}
+
+	rendered, err = RenderAll(parsed.Service.Command, parsed.WithTargets(Scope{Target: map[string]string{"data": "/srv/thing"}}))
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	if strings.Join(rendered, " ") != "thingd --dir=/srv/thing --also=/srv/thing" {
+		t.Errorf("expected the moved target, got %v", rendered)
+	}
+}
+
+func TestTargetReferences(t *testing.T) {
+	tests := []struct {
+		body     string
+		expected []string
+	}{
+		{body: "thingd", expected: []string{}},
+		{body: "{{ .Target.data }}/dump.rdb", expected: []string{"data"}},
+		{body: `{{ index .Target "data/grafana" }} {{ .Target.config }}`, expected: []string{"data/grafana", "config"}},
+		{body: "{{ .HostRoot }}/data", expected: []string{}},
+	}
+
+	for _, test := range tests {
+		if actual := TargetReferences(test.body); strings.Join(actual, ",") != strings.Join(test.expected, ",") {
+			t.Errorf("expected %q to name %v, got %v", test.body, test.expected, actual)
+		}
+	}
+}
+
+// Overrides are laid over the definition's own targets, and one for a volume
+// the definition does not have is left out rather than made up
+func TestVolumeTargets(t *testing.T) {
+	parsed, err := parseCompose(t, strings.Replace(validCompose, "        target: /data\n", "        target: /data\n      - type: bind\n        source: \"{{ .HostRoot }}/config\"\n        target: /etc/thing\n", 1))
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if keys := parsed.VolumeKeys(); strings.Join(keys, ",") != "data,config" {
+		t.Errorf("expected the volumes in the order they are declared, got %v", keys)
+	}
+
+	targets := parsed.VolumeTargets(map[string]string{"data": "/srv/thing", "logs": "/logs"})
+	if targets["data"] != "/srv/thing" || targets["config"] != "/etc/thing" || len(targets) != 2 {
+		t.Errorf("expected data moved and config where it was, got %v", targets)
+	}
+
+	scope := parsed.WithTargets(Scope{Target: map[string]string{"config": "/opt/thing"}})
+	if scope.Target["data"] != "/data" || scope.Target["config"] != "/opt/thing" {
+		t.Errorf("expected the scope's own target kept and the rest filled in, got %v", scope.Target)
+	}
+
+	if target := scope.TargetOf(parsed.Service.Volumes[1]); target != "/opt/thing" {
+		t.Errorf("expected the moved target, got %q", target)
+	}
+
+	if target := (Scope{}).TargetOf(parsed.Service.Volumes[1]); target != "/etc/thing" {
+		t.Errorf("expected the definition's own target for a scope without one, got %q", target)
 	}
 }

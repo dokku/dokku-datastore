@@ -90,6 +90,12 @@ type Service struct {
 	// Environment are environment variables, values templated.
 	Environment map[string]string `yaml:"environment"`
 
+	// WorkingDir is the directory the container starts in, templated, and the
+	// image's own when empty. An image whose entrypoint takes ownership of its
+	// working directory for the user it runs as, as redis's does, is pointed at
+	// its data volume here so that it can write to it wherever it is mounted.
+	WorkingDir string `yaml:"working_dir"`
+
 	// Volumes are bind mounts. Every source must be rooted at {{ .HostRoot }},
 	// which is validated, so a mount is always absolute and always inside the
 	// service's own directory.
@@ -522,9 +528,76 @@ func (d Definition) Implements(subcommand string) bool {
 // docker in docker install.
 const HostRootTemplate = "{{ .HostRoot }}"
 
+// VolumeKey is the name a service volume is addressed by: its source relative to
+// the service root, such as "data", "config" or "data/grafana". The source rather
+// than the target, because the target is what a service may move and the source
+// is what stays put on the host.
+func VolumeKey(volume Volume) string {
+	return strings.TrimPrefix(strings.TrimPrefix(volume.Source, HostRootTemplate), "/")
+}
+
+// VolumeKeys are the keys of the service's volumes, in the order the definition
+// declares them.
+func (d Definition) VolumeKeys() []string {
+	keys := make([]string, 0, len(d.Service.Volumes))
+	for _, volume := range d.Service.Volumes {
+		keys = append(keys, VolumeKey(volume))
+	}
+
+	return keys
+}
+
+// VolumeTargets are the container paths the service's volumes are mounted at:
+// the definition's own, with a service's overrides laid over them. An override
+// for a key the definition does not have is left out rather than refused, which
+// is the job of whatever accepted the override.
+func (d Definition) VolumeTargets(overrides map[string]string) map[string]string {
+	targets := make(map[string]string, len(d.Service.Volumes))
+	for _, volume := range d.Service.Volumes {
+		key := VolumeKey(volume)
+		targets[key] = volume.Target
+		if override, ok := overrides[key]; ok && override != "" {
+			targets[key] = override
+		}
+	}
+
+	return targets
+}
+
+// WithTargets returns the scope with a target for every one of the service's
+// volumes, taking the definition's own for any the scope does not carry. A
+// template naming a volume's target then renders against a scope assembled
+// before targets existed as it always did.
+func (d Definition) WithTargets(scope Scope) Scope {
+	targets := d.VolumeTargets(scope.Target)
+	for key, target := range scope.Target {
+		if _, ok := targets[key]; !ok {
+			targets[key] = target
+		}
+	}
+
+	scope.Target = targets
+	return scope
+}
+
+// TargetOf is the container path a volume is mounted at under this scope: the
+// one the scope carries for it, or the definition's own.
+func (s Scope) TargetOf(volume Volume) string {
+	if target, ok := s.Target[VolumeKey(volume)]; ok && target != "" {
+		return target
+	}
+
+	return volume.Target
+}
+
 // ServicePath maps a path inside the container back to a path relative to the
 // service root, by walking the bind mounts. It is what lets a config declare
 // where the file goes in the container and the tool work out where to write it.
+//
+// It walks the definition's own targets even for a service that moved one. A
+// config is placed by where its volume lives on the host, which moving the
+// volume inside the container does not change, so the file lands in the same
+// place and the container sees it wherever the volume now is.
 func (d Definition) ServicePath(target string) (string, bool) {
 	mount := ""
 	resolved := ""

@@ -56,7 +56,9 @@ x-dokku:
       # the image's own configuration, copied out before the mount hides it.
       # It runs in the service's own image, so the files are exactly the ones
       # that image ships rather than a copy this repo would have to keep up to
-      # date with every version.
+      # date with every version. Copied from where the image keeps it, which a
+      # service moving its config volume does not change, since the hook runs
+      # in a container of its own without the service's volumes.
       volumes:
         - type: bind
           source: "{{ .HostRoot }}/config"
@@ -104,6 +106,8 @@ x-dokku:
       mode: sidecar
       exec: ["dokku-clickhouse-export"]
       env:
+        BACKUP_CONFIG: "{{ .Target.config }}/config.d/dokku-backups.xml"
+        CONFIG_FILE: "{{ .Target.config }}/config.xml"
         DOKKU_CLICKHOUSE_DATABASE: "{{ .Database }}"
         DOKKU_CLICKHOUSE_PASSWORD: "{{ .Secret.password }}"
         DOKKU_CLICKHOUSE_USER: "{{ .ServiceName }}"
@@ -115,6 +119,8 @@ x-dokku:
       stdin: true
       exec: ["dokku-clickhouse-import"]
       env:
+        BACKUP_CONFIG: "{{ .Target.config }}/config.d/dokku-backups.xml"
+        CONFIG_FILE: "{{ .Target.config }}/config.xml"
         DOKKU_CLICKHOUSE_DATABASE: "{{ .Database }}"
         DOKKU_CLICKHOUSE_PASSWORD: "{{ .Secret.password }}"
         DOKKU_CLICKHOUSE_USER: "{{ .ServiceName }}"

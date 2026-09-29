@@ -3,6 +3,7 @@ package definition
 import (
 	"fmt"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -196,6 +197,42 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 
 		if volume.Target == "" {
 			return fail("volume with source %q needs a target", volume.Source)
+		}
+	}
+
+	// a volume is addressed by its key wherever a service moves it, both in the
+	// volume-targets property and in a template, so a key has to be something
+	// both of those can say
+	seenKey := map[string]bool{}
+	for _, volume := range definition.Service.Volumes {
+		key := VolumeKey(volume)
+		if key == "" {
+			return fail("volume source %q is the service root itself, so the volume has no name to be moved by", volume.Source)
+		}
+
+		if strings.ContainsAny(key, " \t\n=:,") || strings.Contains(key, "{{") {
+			return fail("volume source %q names the volume %q, which cannot be written as a volume-targets key", volume.Source, key)
+		}
+
+		if seenKey[key] {
+			return fail("two volumes are mounted from %q", key)
+		}
+		seenKey[key] = true
+	}
+
+	for _, body := range templateBodies(definition) {
+		for _, key := range TargetReferences(body) {
+			if !seenKey[key] {
+				return fail("%q names the target of the volume %q, which is not declared", body, key)
+			}
+		}
+	}
+
+	// a config is seeded once and never rewritten, so a target baked into one
+	// would go on naming the old path after the service moved the volume
+	for name, config := range definition.Configs {
+		if strings.Contains(config.Content, ".Target") {
+			return fail("config %q names a volume target, which would go stale once the file is seeded", name)
 		}
 	}
 
@@ -442,6 +479,50 @@ func CutImage(reference string) (string, string, bool) {
 	}
 
 	return reference[:colon], reference[colon+1:], true
+}
+
+// targetReference matches a template naming a volume's target, in either of the
+// two ways a template can: as a field, or through index for a key a field
+// cannot spell.
+var targetReference = regexp.MustCompile(`\.Target\.([A-Za-z0-9_]+)|index\s+\.Target\s+"([^"]*)"`)
+
+// TargetReferences returns the volume keys a template names the target of.
+func TargetReferences(body string) []string {
+	keys := []string{}
+	for _, match := range targetReference.FindAllStringSubmatch(body, -1) {
+		if match[1] != "" {
+			keys = append(keys, match[1])
+			continue
+		}
+
+		keys = append(keys, match[2])
+	}
+
+	return keys
+}
+
+// templateBodies is every template a definition renders against a service's
+// scope, for the checks that hold for all of them.
+func templateBodies(definition Definition) []string {
+	bodies := []string{definition.Service.Image, definition.Service.WorkingDir, definition.Dokku.DSN}
+	bodies = append(bodies, definition.Service.Command...)
+	for _, value := range definition.Service.Environment {
+		bodies = append(bodies, value)
+	}
+
+	if definition.Service.Healthcheck != nil {
+		bodies = append(bodies, definition.Service.Healthcheck.Test...)
+	}
+
+	for _, command := range allCommands(definition) {
+		bodies = append(bodies, command.Image)
+		bodies = append(bodies, command.Exec...)
+		for _, value := range command.Env {
+			bodies = append(bodies, value)
+		}
+	}
+
+	return bodies
 }
 
 // allCommands is every command a definition declares, base and custom, for the

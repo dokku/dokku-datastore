@@ -10,6 +10,7 @@ create
 --restart=always
 --volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
 --volume=/var/lib/dokku/services/redis/lollipop/data:/data
+--workdir=/data
 redis:8.8.0
 redis-server
 /usr/local/etc/redis/redis.conf
@@ -29,6 +30,7 @@ create
 --volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
 --volume=/var/lib/dokku/services/redis/lollipop/data:/data
 --memory=512m
+--workdir=/data
 redis:8.8.0
 redis-server
 /usr/local/etc/redis/redis.conf
@@ -48,6 +50,7 @@ create
 --volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
 --volume=/var/lib/dokku/services/redis/lollipop/data:/data
 --shm-size=128m
+--workdir=/data
 redis:8.8.0
 redis-server
 /usr/local/etc/redis/redis.conf
@@ -66,6 +69,7 @@ create
 --restart=always
 --volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
 --volume=/var/lib/dokku/services/redis/lollipop/data:/data
+--workdir=/data
 --network=custom-network
 --network-alias=dokku-redis-lollipop
 redis:8.8.0
@@ -86,6 +90,7 @@ create
 --restart=always
 --volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
 --volume=/var/lib/dokku/services/redis/lollipop/data:/data
+--workdir=/data
 redis:8.8.0
 redis-server
 /usr/local/etc/redis/redis.conf
@@ -106,6 +111,7 @@ create
 --restart=always
 --volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
 --volume=/var/lib/dokku/services/redis/lollipop/data:/data
+--workdir=/data
 redis:8.8.0
 redis-server
 /usr/local/etc/redis/redis.conf
@@ -126,6 +132,7 @@ create
 --restart=always
 --volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
 --volume=/var/lib/dokku/services/redis/lollipop/data:/data
+--workdir=/data
 valkey/valkey:9.0.0
 redis-server
 /usr/local/etc/redis/redis.conf
@@ -144,6 +151,7 @@ create
 --restart=always
 --volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
 --volume=/var/lib/dokku/services/redis/lollipop/data:/data
+--workdir=/data
 --log-driver=json-file
 --log-opt=max-file=3
 --log-opt=max-size=20m
@@ -165,6 +173,7 @@ create
 --restart=always
 --volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
 --volume=/var/lib/dokku/services/redis/lollipop/data:/data
+--workdir=/data
 --log-opt=max-size=10m
 redis:8.8.0
 redis-server
@@ -184,6 +193,7 @@ create
 --restart=on-failure:3
 --volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
 --volume=/var/lib/dokku/services/redis/lollipop/data:/data
+--workdir=/data
 redis:8.8.0
 redis-server
 /usr/local/etc/redis/redis.conf
@@ -204,6 +214,7 @@ create
 --volume=/var/lib/dokku/services/redis/lollipop/data:/data
 --volume=/srv/extra:/data/extra:ro,z
 --volume=some-volume:/opt/extra
+--workdir=/data
 redis:8.8.0
 redis-server
 /usr/local/etc/redis/redis.conf
@@ -225,6 +236,7 @@ create
 --volume=some-volume:/opt/extra
 --mount=type=volume,source=some-volume,target=/opt/sub,volume-subpath=one/two
 --mount=type=volume,source=other-volume,target=/opt/other,volume-subpath=three,readonly,volume-nocopy
+--workdir=/data
 redis:8.8.0
 redis-server
 /usr/local/etc/redis/redis.conf
@@ -241,6 +253,7 @@ create
 --label=dokku=service
 --name=dokku.redis.lollipop
 --restart=always
+--workdir=/data
 redis:8.8.0
 
 ### everything at once
@@ -257,6 +270,7 @@ create
 --volume=/var/lib/dokku/services/redis/lollipop/data:/data
 --memory=512m
 --shm-size=128m
+--workdir=/data
 --log-driver=json-file
 --log-opt=max-file=3
 --log-opt=max-size=20m

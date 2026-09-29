@@ -81,6 +81,10 @@ type CreateServiceInput struct {
 	// container beyond the definition's own
 	Mounts []service.Mount
 
+	// VolumeTargets are the container paths the definition's volumes are
+	// mounted at in place of its own, keyed by volume
+	VolumeTargets map[string]string
+
 	// Memory is the memory limit to use for the service
 	Memory int
 
@@ -172,8 +176,11 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	}
 
 	// against the definition the version settled on, which is the one whose
-	// volumes a mount must not land on
-	if err := service.CheckMounts(input.Datastore.Definition, input.Mounts); err != nil {
+	// volumes are moved and whose volumes a mount must not land on
+	if err := service.CheckVolumeTargets(input.Datastore.Definition, input.VolumeTargets); err != nil {
+		return err
+	}
+	if err := service.CheckMounts(input.Datastore.Definition, input.VolumeTargets, input.Mounts); err != nil {
 		return err
 	}
 	if err := service.CheckMountsOnHost(ctx, service.Folders(input.Datastore, input.ServiceName).HostRoot, input.Mounts); err != nil {
@@ -289,6 +296,7 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		RestartPolicy:      input.RestartPolicy,
 		WaitTimeout:        input.WaitTimeout,
 		Mounts:             input.Mounts,
+		VolumeTargets:      input.VolumeTargets,
 		ServiceName:        input.ServiceName,
 		ShmSize:            input.ShmSize,
 	}); err != nil {

@@ -318,3 +318,37 @@ func TestNewDocumentationDataExtraArgs(t *testing.T) {
 		}
 	}
 }
+
+// Every volume of every definition is documented with where that definition
+// mounts it, and the examples move the data volume where there is one
+func TestNewDocumentationDataVolumes(t *testing.T) {
+	postgres := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["postgres"]})
+	if postgres.VolumeKey != "data" {
+		t.Errorf("expected the examples to move the data volume, got %q", postgres.VolumeKey)
+	}
+
+	found := map[string]string{}
+	for _, volume := range postgres.Volumes {
+		found[volume.Definition+" "+volume.Key] = volume.Target
+	}
+
+	for key, expected := range map[string]string{
+		"postgres-17 data":  "/var/lib/postgresql/data",
+		"postgres-18 data":  "/var/lib/postgresql",
+		"postgres-18 certs": "/certs",
+	} {
+		if found[key] != expected {
+			t.Errorf("expected %s to be mounted at %s, got %q", key, expected, found[key])
+		}
+	}
+
+	// graphite has no plain data volume, so its first one is used
+	if graphite := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["graphite"]}); graphite.VolumeKey != "data/grafana" {
+		t.Errorf("expected graphite's examples to move its first volume, got %q", graphite.VolumeKey)
+	}
+
+	memcached := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["memcached"]})
+	if memcached.VolumeKey != "" || len(memcached.Volumes) != 0 {
+		t.Errorf("expected memcached to document no volumes, got %q and %v", memcached.VolumeKey, memcached.Volumes)
+	}
+}

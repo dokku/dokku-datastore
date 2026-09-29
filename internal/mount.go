@@ -54,7 +54,14 @@ func MountService(ctx context.Context, input MountServiceInput) (string, error) 
 		return "", err
 	}
 
-	if err := service.CheckMounts(input.Datastore.Definition, mounts); err != nil {
+	// against where the service has the definition's volumes, which is not
+	// always where the definition puts them
+	volumeTargets, err := service.ServiceVolumeTargets(input.Datastore, input.ServiceName)
+	if err != nil {
+		return "", err
+	}
+
+	if err := service.CheckMounts(input.Datastore.Definition, volumeTargets, mounts); err != nil {
 		return "", err
 	}
 	if err := service.CheckMountsOnHost(ctx, service.Folders(input.Datastore, input.ServiceName).HostRoot, mounts); err != nil {

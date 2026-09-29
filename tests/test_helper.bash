@@ -210,6 +210,53 @@ service_root() {
   echo "$DOKKU_LIB_ROOT/services/$DATA_DIR/${1:-$SERVICE}"
 }
 
+# the service root as dockerd sees it, which is what a mount's source is
+host_service_root() {
+  echo "$DOKKU_LIB_HOST_ROOT/services/$DATA_DIR/${1:-$SERVICE}"
+}
+
+# the variable prefix the definition's environment variables are read under,
+# which is the uppercased plugin name unless the definition says otherwise.
+# Graphite's is STATSD
+plugin_variable() {
+  local variable
+  variable="$(awk '/^  variable:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose.yml")"
+  [[ -n "$variable" ]] || variable="$(echo "$PLUGIN" | tr '[:lower:]' '[:upper:]')"
+  echo "$variable"
+}
+
+# the service's volumes, one "<key> <target>" per line in the order the
+# definition declares them: each keyed by its source under the service root,
+# at the target the definition mounts it. The hooks' own volumes are indented
+# further and left out
+volume_targets() {
+  awk '
+    /^    volumes:/ { volumes = 1; next }
+    volumes && /^    [^ -]/ { volumes = 0 }
+    volumes && /^[^ ]/ { volumes = 0 }
+    volumes && /source:/ { key = $0; sub(/.*\{\{ \.HostRoot \}\}\//, "", key); gsub(/"/, "", key) }
+    volumes && /target:/ { target = $0; sub(/.*target: */, "", target); print key " " target }
+  ' "$DEFINITION_ROOT/docker-compose.yml"
+}
+
+# the volume the tests move: the data one where there is one, and otherwise the
+# first the definition mounts. Empty for a definition that mounts none
+volume_key() {
+  local keys
+  keys="$(volume_targets | awk '{ print $1 }')"
+  if grep -qx data <<<"$keys"; then
+    echo data
+    return
+  fi
+
+  head -n 1 <<<"$keys"
+}
+
+# where the definition mounts a volume
+default_target_of() {
+  volume_targets | awk -v key="$1" '$1 == key { print $2; exit }'
+}
+
 service_container() {
   echo "dokku.$PLUGIN.${1:-$SERVICE}"
 }

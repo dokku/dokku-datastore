@@ -100,6 +100,10 @@ type CommitServiceConfigInput struct {
 
 	// Mounts are the mounts for the service container beyond the definition's
 	Mounts []Mount
+
+	// VolumeTargets are the container paths the definition's volumes are
+	// mounted at in place of its own, keyed by volume
+	VolumeTargets map[string]string
 }
 
 // CommitServiceConfig commits the service config for a given service
@@ -196,6 +200,10 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	}
 
 	if err := WriteMounts(input.Datastore, input.ServiceName, input.Mounts); err != nil {
+		return err
+	}
+
+	if err := WriteVolumeTargets(input.Datastore, input.ServiceName, input.VolumeTargets); err != nil {
 		return err
 	}
 

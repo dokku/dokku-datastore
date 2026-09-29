@@ -43,12 +43,22 @@ type Input struct {
 func ContainerArgs(input Input) (ContainerArgsInput, error) {
 	service := input.Definition.Service
 
+	// every template sees a target for every volume, including a scope put
+	// together without any, so a definition naming one renders the same either
+	// way
+	input.Scope = input.Definition.WithTargets(input.Scope)
+
 	image, err := definition.Render(service.Image, input.Scope)
 	if err != nil {
 		return ContainerArgsInput{}, err
 	}
 
 	command, err := definition.RenderAll(service.Command, input.Scope)
+	if err != nil {
+		return ContainerArgsInput{}, err
+	}
+
+	workingDir, err := definition.Render(service.WorkingDir, input.Scope)
 	if err != nil {
 		return ContainerArgsInput{}, err
 	}
@@ -70,24 +80,9 @@ func ContainerArgs(input Input) (ContainerArgsInput, error) {
 		environment[name] = rendered
 	}
 
-	volumes := make([]string, 0, len(service.Volumes))
-	for _, volume := range service.Volumes {
-		source, err := definition.Render(volume.Source, input.Scope)
-		if err != nil {
-			return ContainerArgsInput{}, err
-		}
-
-		if source == "" {
-			return ContainerArgsInput{}, fmt.Errorf("volume for %s rendered an empty source", volume.Target)
-		}
-
-		volumes = append(volumes, source+":"+volume.Target)
-	}
-
-	// the payload is mounted rather than baked into an image, which is what
-	// keeps a definition that vendors a script on the pull path
-	for _, file := range RootfsFiles(input) {
-		volumes = append(volumes, file.Mount)
+	volumes, err := ServiceVolumes(input)
+	if err != nil {
+		return ContainerArgsInput{}, err
 	}
 
 	// what the operator mounted comes last, and was checked against the two
@@ -112,7 +107,40 @@ func ContainerArgs(input Input) (ContainerArgsInput, error) {
 		TaggedImage:    image,
 		Volumes:        volumes,
 		VolumeMounts:   input.Scope.VolumeMounts,
+		WorkingDir:     workingDir,
 	}, nil
+}
+
+// ServiceVolumes are the docker -v arguments for what every container run for a
+// service mounts: the definition's volumes, each at the target the service has
+// it at, and the payload. It is what the service container and a container run
+// beside it or in its place share, so the two cannot disagree on where the data
+// is. What the operator mounted is left out, since only the service gets it.
+func ServiceVolumes(input Input) ([]string, error) {
+	scope := input.Definition.WithTargets(input.Scope)
+
+	volumes := make([]string, 0, len(input.Definition.Service.Volumes)+len(input.Definition.Rootfs))
+	for _, volume := range input.Definition.Service.Volumes {
+		source, err := definition.Render(volume.Source, scope)
+		if err != nil {
+			return nil, err
+		}
+
+		target := scope.TargetOf(volume)
+		if source == "" {
+			return nil, fmt.Errorf("volume for %s rendered an empty source", target)
+		}
+
+		volumes = append(volumes, source+":"+target)
+	}
+
+	// the payload is mounted rather than baked into an image, which is what
+	// keeps a definition that vendors a script on the pull path
+	for _, file := range RootfsFiles(input) {
+		volumes = append(volumes, file.Mount)
+	}
+
+	return volumes, nil
 }
 
 // MemoryLimit drops a limit of zero.
