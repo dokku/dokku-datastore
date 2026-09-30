@@ -11,7 +11,7 @@ import (
 )
 
 // SettableProperties are the properties a service exposes through the set command
-var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.WaitTimeoutProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExposeModeProperty, service.ExportArgsProperty, service.ImportArgsProperty, service.VolumeTargetsProperty}
+var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.BackupStorageClassProperty, service.BackupObjectNameProperty, service.BackupTimestampProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.WaitTimeoutProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExposeModeProperty, service.ExportArgsProperty, service.ImportArgsProperty, service.VolumeTargetsProperty}
 
 // InvalidPropertyError reports a property the set command does not manage
 func InvalidPropertyError() error {
@@ -38,6 +38,10 @@ func ValidatePropertyValue(key string, value string) error {
 	switch key {
 	case service.BackupStorageClassProperty:
 		return service.ValidateBackupStorageClass(value)
+	case service.BackupObjectNameProperty:
+		return service.ValidateBackupObjectName(value)
+	case service.BackupTimestampProperty:
+		return service.ValidateBackupTimestamp(value)
 	case service.LogDriverProperty:
 		return service.ValidateLogDriver(value)
 	case service.LogOptProperty:

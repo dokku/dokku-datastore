@@ -21,6 +21,8 @@ setup_file() {
     --volume "$(mount_source clone):$MOUNT_TARGET:ro"
   "$BIN" set "$PLUGIN" "$SERVICE" backup-keyserver keys.example.com
   "$BIN" set "$PLUGIN" "$SERVICE" backup-storage-class STANDARD_IA
+  "$BIN" set "$PLUGIN" "$SERVICE" backup-timestamp false
+  "$BIN" set "$PLUGIN" "$SERVICE" backup-object-name "$SERVICE/latest"
 }
 
 teardown_file() {
@@ -70,7 +72,7 @@ clone_or_skip() {
   clone_or_skip "$COPY"
 
   local key expected
-  for key in memory shm-size custom-env restart-policy wait-timeout mounts backup-keyserver backup-storage-class; do
+  for key in memory shm-size custom-env restart-policy wait-timeout mounts backup-keyserver backup-storage-class backup-timestamp; do
     run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" "--$key"
     assert_success
     expected="$output"
@@ -79,6 +81,12 @@ clone_or_skip() {
     assert_success
     assert_output "$expected"
   done
+
+  # issue 17: backed up to the same bucket, a clone under the source's object
+  # name would replace the source's backups
+  run --separate-stderr "$BIN" info "$PLUGIN" "$COPY" --backup-object-name
+  assert_success
+  assert_output ""
 
   run container_inspect "$(service_container "$COPY")" '{{ .HostConfig.RestartPolicy.Name }}'
   assert_success

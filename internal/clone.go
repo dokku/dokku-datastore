@@ -89,9 +89,12 @@ type CloneServiceInput struct {
 // service unless the clone is given its own, the database name comes from the service name, an exposed port
 // would clash with the source's on the host, links belong to the apps, and the
 // backup credentials, schedule and encryption are secrets whose copy would
-// ship a second set of backups to the same bucket.
+// ship a second set of backups to the same bucket. The backup object name is
+// left out for the same reason: a clone backed up to the source's bucket under
+// the source's name would replace the source's backups with its own.
 type serviceSettings struct {
 	BackupStorageClass string
+	BackupTimestamp    string
 	ConfigOptions      string
 	CustomEnv          string
 	ExportArgs         string
@@ -141,6 +144,7 @@ func readServiceSettings(datastore *service.Datastore, serviceName string) (serv
 
 	return serviceSettings{
 		BackupStorageClass: service.BackupStorageClass(datastore, serviceName),
+		BackupTimestamp:    strings.TrimSpace(common.PropertyGet(commandPrefix, serviceName, service.BackupTimestampProperty)),
 		ConfigOptions:      service.ConfigOptions(datastore, serviceName),
 		CustomEnv:          customEnv(serviceFiles.Env),
 		ExportArgs:         service.ServiceExtraArgs(datastore, serviceName, service.ExportArgsProperty),
@@ -297,6 +301,7 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 	for property, value := range map[string]string{
 		service.KeyserverProperty:          settings.Keyserver,
 		service.BackupStorageClassProperty: settings.BackupStorageClass,
+		service.BackupTimestampProperty:    settings.BackupTimestamp,
 	} {
 		if value == "" {
 			continue

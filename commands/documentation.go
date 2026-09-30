@@ -45,6 +45,8 @@ func (c *BackupCommand) Usage() string {
 func (c *BackupCommand) Documentation() string {
 	return `backup the 'lollipop' service to the 'my-s3-bucket' bucket on AWS
 dokku {{.CommandPrefix}}:backup lollipop my-s3-bucket --use-iam
+backup the 'lollipop' service under a path in the bucket
+dokku {{.CommandPrefix}}:backup lollipop my-s3-bucket/{{.CommandPrefix}}-backups
 restore a backup file (assuming it was extracted via 'tar -xf backup.tgz')
 dokku {{.CommandPrefix}}:import lollipop < backup-folder/export`
 }
@@ -284,10 +286,10 @@ func (c *CloneCommand) Documentation() string {
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2
 the new service starts from the settings of the one it copies: its config options,
 custom env, memory, shm size, networks, log driver, log options, restart policy,
-mounts, volume targets, backup keyserver and backup storage class. A flag passed to clone overrides that one setting, and a
+mounts, volume targets, backup keyserver, backup storage class and backup timestamp. A flag passed to clone overrides that one setting, and a
 flag passed empty clears it
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --restart no --custom-env ""
-the password, exposed ports, links and backup credentials, schedule and encryption
+the password, exposed ports, links and backup credentials, schedule, encryption and object name
 are not copied. The clone's passwords are generated unless they are given.
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --password <password>`
 }
@@ -926,6 +928,12 @@ set the s3 storage class backups are uploaded with, one of STANDARD, REDUCED_RED
 dokku {{.CommandPrefix}}:set lollipop backup-storage-class STANDARD_IA
 go back to uploading backups with the bucket's default storage class
 dokku {{.CommandPrefix}}:set lollipop backup-storage-class
+upload backups under a name of your own rather than {{.CommandPrefix}}-lollipop
+dokku {{.CommandPrefix}}:set lollipop backup-object-name db/latest
+upload every backup to the same key, without a timestamp, so bucket versioning and lifecycle rules can keep and rotate them
+dokku {{.CommandPrefix}}:set lollipop backup-timestamp false
+go back to timestamped backups
+dokku {{.CommandPrefix}}:set lollipop backup-timestamp
 cap the container log at a size of your own rather than the one it inherits
 dokku {{.CommandPrefix}}:set lollipop log-opt max-size=20m,max-file=3
 keep the log unbounded, which is what a service had before there was anything to say here
