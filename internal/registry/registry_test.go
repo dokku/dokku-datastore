@@ -975,6 +975,58 @@ func TestPostgresTurnsSslOnWithoutRestarting(t *testing.T) {
 	}
 }
 
+// Every postgres definition turns ssl on, so every one of them has to hand out
+// its certificate and document how a client uses it. The certificate is read
+// from wherever the service mounts it, as the server does.
+func TestEveryPostgresDefinitionDocumentsItsCertificate(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	names := loaded.NamesFor("postgres")
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			postgres, _ := loaded.Definition(name)
+			certificate, ok := postgres.Dokku.CustomCommands["certificate"]
+			if !ok {
+				t.Fatal("expected a certificate command")
+			}
+
+			for target, expected := range map[string]string{"": "/certs/server.crt", "/tls": "/tls/server.crt"} {
+				scope := definition.Scope{}
+				if target != "" {
+					scope.Target = map[string]string{"certs": target}
+				}
+
+				rendered, err := definition.RenderAll(certificate.Exec, postgres.WithTargets(scope))
+				if err != nil {
+					t.Fatalf("unable to render the command: %s", err)
+				}
+
+				if strings.Join(rendered, " ") != "cat "+expected {
+					t.Errorf("expected the certificate to be read from %s, got %q", expected, rendered)
+				}
+			}
+
+			documented := false
+			for _, section := range postgres.Dokku.Documentation {
+				if section.Title == "Encrypting connections with TLS" {
+					documented = true
+				}
+			}
+
+			if !documented {
+				t.Error("expected the tls section")
+			}
+		})
+	}
+
+	if len(names) != 8 {
+		t.Errorf("expected eight postgres definitions, got %v", names)
+	}
+}
+
 // Rethinkdb is the first definition with more ports than a name to spare, and
 // the one everything addresses is neither the lowest numbered nor the first the
 // bash plugin listed. Naming them is what stops readiness waiting on the

@@ -228,6 +228,20 @@ func TestForServiceWithASingleDefinition(t *testing.T) {
 	}
 }
 
+// Every postgres definition declares the same section, and the readme is
+// written once for the plugin, so it is documented once.
+func TestDocumentationIsDeclaredOnceAcrossTheMajors(t *testing.T) {
+	sections := postgresDatastore(t).Documentation()
+
+	if len(sections) != 1 || sections[0].Title != "Encrypting connections with TLS" {
+		t.Errorf("expected the tls section once, got %v", sections)
+	}
+
+	if sections := Datastores["redis"].Documentation(); len(sections) != 0 {
+		t.Errorf("expected no sections for redis, got %v", sections)
+	}
+}
+
 // What a datastore can do is what any of its definitions can do: dokku asks
 // before a service is named, so answering for the newest alone would report a
 // command as unimplemented for the services that have it.
