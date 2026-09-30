@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -177,6 +178,12 @@ type BackupAuthInput struct {
 // settings are replaced as a whole, so an optional setting that is not passed
 // is removed rather than left over from an earlier call.
 func BackupAuth(ctx context.Context, input BackupAuthInput) error {
+	// checked before anything is written, so a refused call leaves the stored
+	// settings as they were
+	if err := ValidateEndpointURL(input.EndpointURL); err != nil {
+		return err
+	}
+
 	folder := service.Folders(input.Datastore, input.ServiceName).Backup
 
 	// the pair is written first, which also creates the folder
@@ -314,15 +321,107 @@ func ValidateBackupSchedule(schedule string) error {
 	return nil
 }
 
-// ValidateBucketName reports whether a bucket can be written into the command
-// a scheduled backup runs
-func ValidateBucketName(bucketName string) error {
+// validateBucketForCrontab reports whether a bucket can be written into the
+// command a scheduled backup runs. It is looser than ValidateBucketName, so a
+// schedule recorded before the s3 naming rules were checked keeps its crontab
+// entry, and the backup it runs reports why the bucket is refused.
+func validateBucketForCrontab(bucketName string) error {
 	if bucketName == "" {
 		return errors.New("Please specify an aws bucket for the backup") //nolint:staticcheck // matches the bash datastore plugins
 	}
 
 	if !bucketNamePattern.MatchString(bucketName) {
 		return fmt.Errorf("invalid bucket name %q: only letters, numbers, dots, dashes, underscores and slashes are allowed", bucketName)
+	}
+
+	return nil
+}
+
+// s3BucketPattern is what an s3 general purpose bucket may be made of: lowercase
+// letters, numbers, dots and dashes, starting and ending with a letter or number
+var s3BucketPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*[a-z0-9]$`)
+
+// s3BucketIPPattern matches a bucket formatted as an ip address, which s3 refuses
+var s3BucketIPPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$`)
+
+// s3ReservedBucketPrefixes and s3ReservedBucketSuffixes are what s3 keeps for
+// itself at either end of a general purpose bucket name
+var (
+	s3ReservedBucketPrefixes = []string{"xn--", "sthree-", "amzn-s3-demo-"}
+	s3ReservedBucketSuffixes = []string{"-s3alias", "--ol-s3", ".mrap", "--x-s3", "--table-s3"}
+)
+
+// ValidateBucketName reports whether a bucket given to a backup follows the s3
+// general purpose bucket naming rules. The bucket may end in a path the backup
+// is uploaded under, which is checked the way an object name is.
+func ValidateBucketName(bucketName string) error {
+	if bucketName == "" {
+		return errors.New("Please specify an aws bucket for the backup") //nolint:staticcheck // matches the bash datastore plugins
+	}
+
+	// the aws cli adds the s3:// scheme itself, so a bucket named with one is
+	// uploaded to s3://s3://
+	if strings.Contains(bucketName, "://") {
+		return fmt.Errorf("invalid bucket name %q: name the bucket without a scheme such as s3://, the endpoint of an s3 compatible service is set with backup-auth", bucketName)
+	}
+
+	bucket, path, hasPath := strings.Cut(bucketName, "/")
+	if len(bucket) < 3 || len(bucket) > 63 {
+		return fmt.Errorf("invalid bucket name %q: must be between 3 and 63 characters", bucket)
+	}
+
+	if !s3BucketPattern.MatchString(bucket) {
+		return fmt.Errorf("invalid bucket name %q: only lowercase letters, numbers, dots and dashes are allowed, and it must start and end with a letter or number", bucket)
+	}
+
+	if strings.Contains(bucket, "..") {
+		return fmt.Errorf("invalid bucket name %q: must not contain two adjacent dots", bucket)
+	}
+
+	if s3BucketIPPattern.MatchString(bucket) {
+		return fmt.Errorf("invalid bucket name %q: must not be formatted as an ip address", bucket)
+	}
+
+	for _, prefix := range s3ReservedBucketPrefixes {
+		if strings.HasPrefix(bucket, prefix) {
+			return fmt.Errorf("invalid bucket name %q: must not start with the reserved prefix %s", bucket, prefix)
+		}
+	}
+
+	for _, suffix := range s3ReservedBucketSuffixes {
+		if strings.HasSuffix(bucket, suffix) {
+			return fmt.Errorf("invalid bucket name %q: must not end with the reserved suffix %s", bucket, suffix)
+		}
+	}
+
+	if !hasPath {
+		return nil
+	}
+
+	if !bucketNamePattern.MatchString(path) {
+		return fmt.Errorf("invalid bucket path %q: only letters, numbers, dots, dashes, underscores and slashes are allowed", path)
+	}
+
+	// a trailing or doubled slash would leave an empty segment in the key
+	for _, segment := range strings.Split(path, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return fmt.Errorf("invalid bucket path %q: must not end with a slash, or hold an empty, . or .. segment", path)
+		}
+	}
+
+	return nil
+}
+
+// ValidateEndpointURL reports whether an endpoint backups can be shipped to is
+// an http or https url. An empty value is valid and means aws s3.
+func ValidateEndpointURL(value string) error {
+	if value == "" {
+		return nil
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil || strings.ContainsAny(value, " \t\r\n") || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("invalid endpoint url %q: must be an http or https url such as https://nyc3.digitaloceanspaces.com", value)
 	}
 
 	return nil
@@ -352,7 +451,7 @@ func (b BackupSchedule) Validate() error {
 		return err
 	}
 
-	if err := ValidateBucketName(b.BucketName); err != nil {
+	if err := validateBucketForCrontab(b.BucketName); err != nil {
 		return err
 	}
 
@@ -639,6 +738,14 @@ func ScheduleBackup(ctx context.Context, input ScheduleBackupInput) error {
 		BucketName: input.BucketName,
 		UseIAM:     input.UseIAM,
 	}
+
+	// the crontab takes looser bucket names than a backup does, so that a schedule
+	// recorded before they were checked keeps its entry, but a new one must be
+	// one the backup it runs would accept
+	if err := ValidateBucketName(input.BucketName); err != nil {
+		return err
+	}
+
 	if err := schedule.Validate(); err != nil {
 		return err
 	}

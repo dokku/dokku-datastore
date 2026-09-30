@@ -78,17 +78,44 @@ func TestValidateBackupSchedule(t *testing.T) {
 	}
 }
 
-// The bucket is written into a shell command and a semicolon separated line, so
-// anything either reads specially is refused
+// A bucket given to a backup follows the s3 general purpose bucket naming rules,
+// and anything a shell or the crontab reads specially is refused
 func TestValidateBucketName(t *testing.T) {
 	tests := []struct {
 		bucketName string
 		valid      bool
 	}{
 		{bucketName: "my-bucket", valid: true},
-		{bucketName: "my.bucket_2", valid: true},
+		{bucketName: "my.bucket", valid: true},
+		{bucketName: "abc", valid: true},
+		{bucketName: strings.Repeat("a", 63), valid: true},
 		{bucketName: "my-bucket/with/a/prefix", valid: true},
+		{bucketName: "my-bucket/With_A.prefix", valid: true},
 		{bucketName: "", valid: false},
+		{bucketName: "ab", valid: false},
+		{bucketName: strings.Repeat("a", 64), valid: false},
+		{bucketName: "My-Bucket", valid: false},
+		{bucketName: "my_bucket", valid: false},
+		{bucketName: "-my-bucket", valid: false},
+		{bucketName: "my-bucket-", valid: false},
+		{bucketName: ".my-bucket", valid: false},
+		{bucketName: "my-bucket.", valid: false},
+		{bucketName: "my..bucket", valid: false},
+		{bucketName: "192.168.5.4", valid: false},
+		{bucketName: "xn--my-bucket", valid: false},
+		{bucketName: "sthree-my-bucket", valid: false},
+		{bucketName: "amzn-s3-demo-my-bucket", valid: false},
+		{bucketName: "my-bucket-s3alias", valid: false},
+		{bucketName: "my-bucket--ol-s3", valid: false},
+		{bucketName: "my-bucket.mrap", valid: false},
+		{bucketName: "my-bucket--x-s3", valid: false},
+		{bucketName: "my-bucket--table-s3", valid: false},
+		{bucketName: "s3://my-bucket", valid: false},
+		{bucketName: "my-bucket/", valid: false},
+		{bucketName: "my-bucket//backups", valid: false},
+		{bucketName: "my-bucket/./backups", valid: false},
+		{bucketName: "my-bucket/../backups", valid: false},
+		{bucketName: "my-bucket/a b", valid: false},
 		{bucketName: "my bucket", valid: false},
 		{bucketName: "my-bucket;true", valid: false},
 		{bucketName: "my-bucket$(true)", valid: false},
@@ -106,6 +133,25 @@ func TestValidateBucketName(t *testing.T) {
 				t.Errorf("expected %q to be refused", test.bucketName)
 			}
 		})
+	}
+}
+
+// A bucket named with a scheme is told apart from any other invalid name, since
+// it is what someone pointing a backup at an s3 compatible service tries first
+func TestValidateBucketNameExplainsTheScheme(t *testing.T) {
+	err := ValidateBucketName("s3://my-space")
+	if err == nil || !strings.Contains(err.Error(), "s3://") || !strings.Contains(err.Error(), "backup-auth") {
+		t.Errorf("expected the error to explain the scheme, got %v", err)
+	}
+}
+
+// A schedule recorded before the s3 naming rules were checked keeps its crontab
+// entry, so the backup it runs reports why the bucket is refused rather than
+// the schedule disappearing
+func TestBackupScheduleValidateKeepsLegacyBucketNames(t *testing.T) {
+	schedule := BackupSchedule{Schedule: "@daily", BucketName: "My_Bucket"}
+	if err := schedule.Validate(); err != nil {
+		t.Errorf("expected %+v to be written into the crontab, got %s", schedule, err)
 	}
 }
 
@@ -369,6 +415,8 @@ func TestScheduleBackupRefusesAnInvalidSchedule(t *testing.T) {
 	for _, input := range []ScheduleBackupInput{
 		{BucketName: "my-bucket", Schedule: "daily"},
 		{BucketName: "my bucket", Schedule: "@daily"},
+		{BucketName: "My_Bucket", Schedule: "@daily"},
+		{BucketName: "s3://my-bucket", Schedule: "@daily"},
 	} {
 		input.Datastore = datastore
 		input.ServiceName = "lollipop"
@@ -1054,6 +1102,78 @@ func TestBackupAuthReplacesEarlierSettings(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The endpoint of an s3 compatible service is handed to the aws cli, which only
+// takes an http or https url
+func TestValidateEndpointURL(t *testing.T) {
+	tests := []struct {
+		endpointURL string
+		valid       bool
+	}{
+		{endpointURL: "", valid: true},
+		{endpointURL: "https://nyc3.digitaloceanspaces.com", valid: true},
+		{endpointURL: "http://127.0.0.1:9000", valid: true},
+		{endpointURL: "https://gw.example.com/s3", valid: true},
+		{endpointURL: "nyc3.digitaloceanspaces.com", valid: false},
+		{endpointURL: "s3://my-bucket", valid: false},
+		{endpointURL: "https://", valid: false},
+		{endpointURL: "ftp://example.com", valid: false},
+		{endpointURL: "https://a b", valid: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.endpointURL, func(t *testing.T) {
+			err := ValidateEndpointURL(test.endpointURL)
+			if test.valid && err != nil {
+				t.Errorf("expected %q to be valid, got %s", test.endpointURL, err)
+			}
+			if !test.valid && err == nil {
+				t.Errorf("expected %q to be refused", test.endpointURL)
+			}
+		})
+	}
+}
+
+// A refused endpoint leaves the settings stored earlier as they were
+func TestBackupAuthRefusesAnInvalidEndpointURL(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withDataRoot(t)
+
+	if err := BackupAuth(t.Context(), BackupAuthInput{
+		AccessKeyID:     "AKIAEXAMPLE",
+		Datastore:       datastore,
+		EndpointURL:     "http://10.0.0.3:9000",
+		SecretAccessKey: "wJalrXUtnFEMI",
+		ServiceName:     "lollipop",
+	}); err != nil {
+		t.Fatalf("failed to store the credentials: %s", err)
+	}
+
+	if err := BackupAuth(t.Context(), BackupAuthInput{
+		AccessKeyID:     "AKIANEW",
+		Datastore:       datastore,
+		EndpointURL:     "nyc3.digitaloceanspaces.com",
+		SecretAccessKey: "newsecret",
+		ServiceName:     "lollipop",
+	}); err == nil {
+		t.Fatal("expected an endpoint url without a scheme to be refused")
+	}
+
+	folder := service.Folders(datastore, "lollipop").Backup
+	for name, value := range map[string]string{
+		accessKeyIDFile:     "AKIAEXAMPLE",
+		secretAccessKeyFile: "wJalrXUtnFEMI",
+		endpointURLFile:     "http://10.0.0.3:9000",
+	} {
+		contents, err := os.ReadFile(filepath.Join(folder, name))
+		if err != nil {
+			t.Fatalf("failed to read %s: %s", name, err)
+		}
+		if string(contents) != value {
+			t.Errorf("expected %s to be kept as %q, got %q", name, value, contents)
+		}
 	}
 }
 

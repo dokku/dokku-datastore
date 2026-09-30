@@ -77,7 +77,9 @@ dokku {{.CommandPrefix}}:backup-auth lollipop AWS_ACCESS_KEY_ID AWS_SECRET_ACCES
 setup s3 backup authentication with different signature version and endpoint
 dokku {{.CommandPrefix}}:backup-auth lollipop AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION AWS_SIGNATURE_VERSION ENDPOINT_URL
 more specific example for minio auth
-dokku {{.CommandPrefix}}:backup-auth lollipop MINIO_ACCESS_KEY_ID MINIO_SECRET_ACCESS_KEY us-east-1 s3v4 https://YOURMINIOSERVICE`
+dokku {{.CommandPrefix}}:backup-auth lollipop MINIO_ACCESS_KEY_ID MINIO_SECRET_ACCESS_KEY us-east-1 s3v4 https://YOURMINIOSERVICE
+more specific example for digitalocean spaces auth, where the endpoint does not include the space name
+dokku {{.CommandPrefix}}:backup-auth lollipop SPACES_ACCESS_KEY SPACES_SECRET_KEY nyc3 s3v4 https://nyc3.digitaloceanspaces.com`
 }
 
 // Group is the readme usage section the command is documented under

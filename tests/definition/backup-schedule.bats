@@ -224,6 +224,24 @@ assert_crontab_regenerated() {
   assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE my-bucket;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
 }
 
+@test "($DEFINITION) a bucket that breaks the s3 naming rules is refused" {
+  schedule_backup "$SERVICE" "0 3 * * *" my-bucket
+  assert_success
+
+  schedule_backup "$SERVICE" "0 3 * * *" My_Bucket
+  assert_failure
+  assert_output --partial "invalid bucket name"
+
+  schedule_backup "$SERVICE" "0 3 * * *" s3://my-bucket
+  assert_failure
+  assert_output --partial "without a scheme such as s3://"
+
+  # and the schedule the service already had is kept
+  run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local
+  assert_success
+  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE my-bucket;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+}
+
 @test "($DEFINITION) an unscheduled backup is taken back from dokku" {
   schedule_backup "$SERVICE" "0 3 * * *" my-bucket
   assert_success

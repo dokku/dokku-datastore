@@ -75,6 +75,36 @@ teardown_file() {
   assert_success
 }
 
+@test "($DEFINITION) backup-auth refuses an endpoint url without a scheme" {
+  run "$BIN" backup-auth "$PLUGIN" "$SERVICE" AKIAEXAMPLE wJalrXUtnFEMI nyc3 s3v4 nyc3.digitaloceanspaces.com
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup-auth"
+  fi
+  assert_failure
+  assert_output --partial "must be an http or https url"
+  [[ ! -e "$(service_root)/backup/ENDPOINT_URL" ]] || fail "backup-auth stored the endpoint url it refused"
+}
+
+@test "($DEFINITION) backup refuses a bucket named with a scheme" {
+  run "$BIN" backup "$PLUGIN" "$SERVICE" s3://backups
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup"
+  fi
+  assert_failure
+  assert_output --partial "without a scheme such as s3://"
+  refute_output --partial "Backing up"
+}
+
+@test "($DEFINITION) backup refuses a bucket that breaks the s3 naming rules" {
+  run "$BIN" backup "$PLUGIN" "$SERVICE" My_Bucket
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup"
+  fi
+  assert_failure
+  assert_output --partial "invalid bucket name"
+  refute_output --partial "Backing up"
+}
+
 @test "($DEFINITION) the backup passphrase is reported as a fingerprint" {
   run "$BIN" backup-set-encryption "$PLUGIN" "$SERVICE" "correct horse battery staple"
   if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
