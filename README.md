@@ -520,6 +520,35 @@ The accepted values are the ones `aws s3 cp --storage-class` takes in the backup
 
 It is read when a backup runs, so it applies to the next backup, scheduled ones included, without a rebuild. `info` reports it under `--backup-storage-class`, empty when nothing was set, and `clone` copies it. A backup stored as `GLACIER` or `DEEP_ARCHIVE` has to be restored in S3 before it can be downloaded and imported.
 
+## Backup object name
+
+Backups were always uploaded to `<prefix>-<service>-<timestamp>.tgz`, so every backup landed on a new key and bucket versioning and lifecycle rules had nothing to rotate. A service may now name the key its backups are uploaded to through the `backup-object-name` property, and drop the timestamp through the `backup-timestamp` property.
+
+```shell
+# upload every backup to db/latest.tgz
+dokku redis:set lollipop backup-object-name db/latest
+dokku redis:set lollipop backup-timestamp false
+
+# and back to the default name and a timestamp
+dokku redis:set lollipop backup-object-name
+dokku redis:set lollipop backup-timestamp
+```
+
+| `backup-object-name` | `backup-timestamp` | key                              |
+| -------------------- | ------------------ | -------------------------------- |
+| unset                | unset or `true`    | `redis-lollipop-<timestamp>.tgz` |
+| `db/latest`          | unset or `true`    | `db/latest-<timestamp>.tgz`      |
+| unset                | `false`            | `redis-lollipop.tgz`             |
+| `db/latest`          | `false`            | `db/latest.tgz`                  |
+
+An encrypted backup ends in `.tgz.gpg` instead. The bucket given to `backup` and `backup-schedule` may also end in a path, such as `my-bucket/redis-backups`, which the key is placed under.
+
+The object name may hold letters, numbers, dots, dashes, underscores and slashes, and may not start or end with a slash or hold an empty, `.` or `..` path segment. `backup-timestamp` takes `true` or `false`. Anything else is refused before it is written.
+
+Without a timestamp, each backup replaces the one before it unless the bucket has [versioning](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Versioning.html) turned on, which is the intended pairing. A backup that fails after it started uploading removes only what it uploaded, so on a versioned bucket the previous backup stays current. An older backup is restored by downloading that version of the object, for instance with `aws s3api get-object --version-id`, and importing it as before.
+
+Both are read when a backup runs, so they apply to the next backup, scheduled ones included, without rescheduling. `info` reports them under `--backup-object-name`, empty when nothing was set, and `--backup-timestamp`, `true` unless it was turned off. `clone` copies `backup-timestamp` but not `backup-object-name`, since a clone backed up to the same bucket under the source's name would replace the source's backups.
+
 ## Backups when dokku runs in a container
 
 `backup` exported a service into a temporary directory and mounted it into the container that ships it to s3. The mount is resolved by dockerd, and when dokku is installed in docker that directory is inside the dokku container, where dockerd cannot see it. Docker mounted an empty directory in its place, and an archive holding nothing but an empty `backup` directory was uploaded and reported as a success.
@@ -554,7 +583,7 @@ A datastore with no secret for a flag refuses it before anything is created, rat
 
 A clone was made on the source's image and given its data, but nothing else about the source carried over: every other setting came from the flags passed to `clone`, so a clone made without repeating all of them landed on the defaults rather than on what the source runs with.
 
-A clone now starts from the source's settings - its config options, custom env, memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, mounts, volume targets, backup keyserver, backup storage class and export and import arguments. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
+A clone now starts from the source's settings - its config options, custom env, memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, mounts, volume targets, backup keyserver, backup storage class, backup timestamp and export and import arguments. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
 
 ```shell
 # the same settings as lollipop
@@ -566,7 +595,7 @@ dokku-datastore clone redis lollipop lollipop-3 --restart no --custom-env ""
 
 The `<VARIABLE>_CONFIG_OPTIONS` and `<VARIABLE>_CUSTOM_ENV` environment variables are not read by `clone`. They fill in a new service, and the source already says what its clone should have. The networks are copied as well, since a container joins a network under its own service name and a clone next to its source does not clash with it.
 
-The password, the exposed ports and the `port-bind-address`, `port-source-range` and `expose-host` that go with them, the app links and the backup credentials, schedule and encryption are not copied. The password is generated for each service unless `--password` or `--root-password` gives one, an exposed port would clash with the source's on the host, links belong to the apps, and a copied backup schedule would ship a second set of backups to the source's bucket.
+The password, the exposed ports and the `port-bind-address`, `port-source-range` and `expose-host` that go with them, the app links and the backup credentials, schedule, encryption and object name are not copied. The password is generated for each service unless `--password` or `--root-password` gives one, an exposed port would clash with the source's on the host, links belong to the apps, a copied backup schedule would ship a second set of backups to the source's bucket, and a copied object name would have those backups replace the source's.
 
 ## Exposed services
 

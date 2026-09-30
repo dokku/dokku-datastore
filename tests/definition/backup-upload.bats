@@ -33,11 +33,18 @@ aws_cli() {
     "$S3BACKUP_IMAGE" --endpoint-url "$(s3_endpoint)" "$@"
 }
 
+# the keys at the top of the bucket, one per line. The s3 server keeps a path
+# around once the objects under it are removed, which is listed as a directory
+# and skipped
+bucket_keys() {
+  aws_cli s3 ls "s3://$S3_BUCKET/" | awk '$1 != "PRE" { print $4 }'
+}
+
 # downloads the only backup in the bucket and unpacks it into the test's own
 # directory, failing unless it holds a dump with something in it
 download_backup() {
   local key
-  key="$(aws_cli s3 ls "s3://$S3_BUCKET/" | awk '{ print $4 }')"
+  key="$(bucket_keys)"
   [[ -n "$key" ]] || fail "no backup was uploaded"
   [[ "$(wc -l <<<"$key")" -eq 1 ]] || fail "expected one backup, got: $key"
 
@@ -131,12 +138,49 @@ setup() {
   [[ "$backup_status" -eq 0 ]] || fail "the backup failed: $backup_output"
 
   local key
-  key="$(aws_cli s3 ls "s3://$S3_BUCKET/" | awk '{ print $4 }')"
+  key="$(bucket_keys)"
   [[ -n "$key" ]] || fail "no backup was uploaded"
 
   run aws_cli s3api head-object --bucket "$S3_BUCKET" --key "$key" --query StorageClass --output text
   assert_success
   assert_output "STANDARD_IA"
+}
+
+# issue 17: every backup landed on a new key ending in a timestamp, so bucket
+# versioning and lifecycle rules had nothing to rotate
+@test "($DEFINITION) backup uploads to the fixed key the service names" {
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-object-name db/latest
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-timestamp false
+  assert_success
+
+  run "$BIN" backup "$PLUGIN" "$SERVICE" "$S3_BUCKET"
+  local first_status="$status" first_output="$output"
+  run "$BIN" backup "$PLUGIN" "$SERVICE" "$S3_BUCKET"
+  local second_status="$status" second_output="$output"
+
+  # cleared before anything is asserted, so the other tests upload as before
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-object-name
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-timestamp
+  assert_success
+
+  if [[ "$first_status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup"
+  fi
+  [[ "$first_status" -eq 0 ]] || fail "the first backup failed: $first_output"
+  [[ "$second_status" -eq 0 ]] || fail "the second backup failed: $second_output"
+
+  # the second backup replaced the first rather than landing beside it
+  run aws_cli s3 ls --recursive "s3://$S3_BUCKET/"
+  assert_success
+  [[ "$(wc -l <<<"$output")" -eq 1 ]] || fail "expected one backup, got: $output"
+  assert_output --regexp ' db/latest\.tgz$'
+
+  aws_cli s3 cp "s3://$S3_BUCKET/db/latest.tgz" - >"$BATS_TEST_TMPDIR/backup.tgz"
+  mkdir -p "$BATS_TEST_TMPDIR/extracted"
+  tar -xzf "$BATS_TEST_TMPDIR/backup.tgz" -C "$BATS_TEST_TMPDIR/extracted"
+  [[ -s "$BATS_TEST_TMPDIR/extracted/backup/export" ]] || fail "the backup holds no dump"
 }
 
 # issue 18: with dokku installed in docker, the dump was written to a directory

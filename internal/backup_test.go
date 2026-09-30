@@ -355,7 +355,7 @@ func TestBackupArgsCarriesTheKeyserverOnlyWhenSet(t *testing.T) {
 		SecretAccessKey: "secret",
 		BucketName:      "bucket",
 		BackupName:      "redis-lollipop",
-		Image:           "dokku/s3backup:0.19.2",
+		Image:           "dokku/s3backup:0.20.0",
 	}
 
 	withKeyserver := base
@@ -387,7 +387,7 @@ func TestBackupArgsCarriesTheStorageClassOnlyWhenSet(t *testing.T) {
 		SecretAccessKey: "secret",
 		BucketName:      "bucket",
 		BackupName:      "redis-lollipop",
-		Image:           "dokku/s3backup:0.19.2",
+		Image:           "dokku/s3backup:0.20.0",
 	}
 
 	withStorageClass := base
@@ -410,6 +410,40 @@ func TestBackupArgsCarriesTheStorageClassOnlyWhenSet(t *testing.T) {
 	}
 }
 
+// issue 17: the timestamp is turned off only when a service asks for it, since
+// the image keeps it by default and every backup before this had one
+func TestBackupArgsOmitsTheTimestampOnlyWhenAsked(t *testing.T) {
+	base := BackupArgsInput{
+		AccessKeyID:     "key",
+		SecretAccessKey: "secret",
+		BucketName:      "bucket",
+		BackupName:      "db/latest",
+		Image:           "dokku/s3backup:0.20.0",
+	}
+
+	withoutTimestamp := base
+	withoutTimestamp.OmitTimestamp = true
+
+	args, env := BackupArgs(withoutTimestamp)
+	if joined := strings.Join(args, " "); !strings.Contains(joined, "-e BACKUP_TIMESTAMP") {
+		t.Errorf("expected the timestamp setting to be passed, got %s", joined)
+	}
+	if env["BACKUP_TIMESTAMP"] != "false" {
+		t.Errorf("expected the timestamp to be turned off, got %q", env["BACKUP_TIMESTAMP"])
+	}
+	if env["BACKUP_NAME"] != "db/latest" {
+		t.Errorf("expected the backup to be named db/latest, got %q", env["BACKUP_NAME"])
+	}
+
+	args, env = BackupArgs(base)
+	if joined := strings.Join(args, " "); strings.Contains(joined, "BACKUP_TIMESTAMP") {
+		t.Errorf("expected no timestamp setting by default, got %s", joined)
+	}
+	if _, ok := env["BACKUP_TIMESTAMP"]; ok {
+		t.Errorf("expected no timestamp setting in the environment by default")
+	}
+}
+
 // The settings are read from files named after the variables they become, and
 // the image is always last because everything after it would be its command.
 func TestBackupArgsPassesTheSettingsItIsGiven(t *testing.T) {
@@ -418,7 +452,7 @@ func TestBackupArgsPassesTheSettingsItIsGiven(t *testing.T) {
 		SecretAccessKey: "secret",
 		BucketName:      "bucket",
 		BackupName:      "redis-lollipop",
-		Image:           "dokku/s3backup:0.19.2",
+		Image:           "dokku/s3backup:0.20.0",
 		Settings: map[string]string{
 			"ENCRYPT_WITH_PUBLIC_KEY_ID": "DEADBEEF",
 			"ENDPOINT_URL":               "http://10.0.0.3:9000",
@@ -453,7 +487,7 @@ func TestBackupArgsPassesTheSettingsItIsGiven(t *testing.T) {
 		}
 	}
 
-	if args[len(args)-1] != "dokku/s3backup:0.19.2" {
+	if args[len(args)-1] != "dokku/s3backup:0.20.0" {
 		t.Errorf("expected the image last, got %s", args[len(args)-1])
 	}
 }
@@ -464,7 +498,7 @@ func TestBackupArgsOmitsCredentialsForAnInstanceRole(t *testing.T) {
 	args, env := BackupArgs(BackupArgsInput{
 		BucketName: "bucket",
 		BackupName: "redis-lollipop",
-		Image:      "dokku/s3backup:0.19.2",
+		Image:      "dokku/s3backup:0.20.0",
 	})
 
 	if joined := strings.Join(args, " "); strings.Contains(joined, "AWS_ACCESS_KEY_ID") || strings.Contains(joined, "AWS_SECRET_ACCESS_KEY") {
@@ -487,7 +521,7 @@ func TestBackupArgsKeepsValuesOutOfTheArgv(t *testing.T) {
 		SecretAccessKey: "wJalrXUtnFEMI",
 		BucketName:      "bucket",
 		BackupName:      "redis-lollipop",
-		Image:           "dokku/s3backup:0.19.2",
+		Image:           "dokku/s3backup:0.20.0",
 		Keyserver:       "http://10.0.0.2:11371",
 		StorageClass:    "GLACIER_IR",
 		Settings: map[string]string{
@@ -515,7 +549,7 @@ func TestBackupArgsIsStable(t *testing.T) {
 	input := BackupArgsInput{
 		BucketName: "bucket",
 		BackupName: "redis-lollipop",
-		Image:      "dokku/s3backup:0.19.2",
+		Image:      "dokku/s3backup:0.20.0",
 		Settings: map[string]string{
 			"AWS_DEFAULT_REGION":         "us-east-1",
 			"AWS_SIGNATURE_VERSION":      "s3v4",
@@ -545,7 +579,7 @@ func TestBackupArgsMountsNothing(t *testing.T) {
 		SecretAccessKey: "secret",
 		BucketName:      "bucket",
 		BackupName:      "redis-lollipop",
-		Image:           "dokku/s3backup:0.19.2",
+		Image:           "dokku/s3backup:0.20.0",
 	})
 
 	for _, arg := range args {
@@ -618,7 +652,7 @@ func TestBackupArgsCarriesTheExpectedSizeOnlyWhenKnown(t *testing.T) {
 	base := BackupArgsInput{
 		BucketName: "bucket",
 		BackupName: "redis-lollipop",
-		Image:      "dokku/s3backup:0.19.2",
+		Image:      "dokku/s3backup:0.20.0",
 	}
 
 	withSize := base

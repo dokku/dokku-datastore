@@ -66,6 +66,7 @@ var readmeSections = []struct {
 			"You may skip the `backup-auth` step if your dokku install is running within EC2 and has access to the bucket via an IAM profile. In that case, use the `--use-iam` option with the `backup` command.",
 			"If both passphrase and public key forms of encryption are set, the public key encryption will take precedence.",
 			"Backups are uploaded with the bucket's default storage class unless the service sets the `backup-storage-class` property with the `set` command.",
+			"Backups are uploaded to `<prefix>-<service>-<timestamp>.tgz`. The service may name the key with the `backup-object-name` property and drop the timestamp by setting the `backup-timestamp` property to `false`, so that every backup is uploaded to the same key and bucket versioning and lifecycle rules can keep and rotate them. The bucket name may end in a path to upload under, such as `my-s3-bucket/backups`.",
 			"The underlying core backup script is present [here](https://github.com/dokku/docker-s3backup/blob/main/backup.sh).",
 			"Scheduled backups are added to the dokku crontab, and are listed by `dokku cron:list --global`.",
 			"Backups can be performed using the backup commands:",

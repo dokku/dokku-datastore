@@ -49,6 +49,12 @@ const keyserverEnv = "KEYSERVER"
 // when a service has one, so that the bucket's default applies otherwise.
 const storageClassEnv = "S3_STORAGE_CLASS"
 
+// backupTimestampEnv is what the backup image reads to decide whether the
+// object key ends in a timestamp. The property that sets it is
+// service.BackupTimestampProperty, and it is passed only to turn the timestamp
+// off, so the image keeps its own default otherwise.
+const backupTimestampEnv = "BACKUP_TIMESTAMP"
+
 // backupSourceEnv tells the backup image where to read the backup from, and
 // backupSourceStdin has it read a tar stream on stdin
 const (
@@ -579,8 +585,12 @@ type BackupArgsInput struct {
 	BucketName string
 
 	// BackupName is what the object is named after, ahead of the timestamp the
-	// image appends
+	// image appends and the extension
 	BackupName string
+
+	// OmitTimestamp has the image upload to BackupName with no timestamp, so
+	// every backup lands on the same key
+	OmitTimestamp bool
 
 	// ExpectedSize is an overestimate of the upload in bytes, passed only when
 	// known. A stream on stdin is otherwise uploaded in parts sized for one no
@@ -634,6 +644,9 @@ func BackupArgs(input BackupArgsInput) ([]string, map[string]string) {
 
 	setenv("BUCKET_NAME", input.BucketName)
 	setenv("BACKUP_NAME", input.BackupName)
+	if input.OmitTimestamp {
+		setenv(backupTimestampEnv, "false")
+	}
 	setenv(backupSourceEnv, backupSourceStdin)
 	if input.ExpectedSize > 0 {
 		setenv(expectedSizeEnv, strconv.FormatInt(input.ExpectedSize, 10))
@@ -674,13 +687,19 @@ func Backup(ctx context.Context, input BackupInput) error {
 	serviceFolders := service.Folders(input.Datastore, input.ServiceName)
 	commandPrefix := input.Datastore.Properties().CommandPrefix
 
+	backupName := service.BackupObjectName(input.Datastore, input.ServiceName)
+	if backupName == "" {
+		backupName = fmt.Sprintf("%s-%s", commandPrefix, input.ServiceName)
+	}
+
 	arguments := BackupArgsInput{
-		BucketName:   input.BucketName,
-		BackupName:   fmt.Sprintf("%s-%s", commandPrefix, input.ServiceName),
-		Keyserver:    service.Keyserver(input.Datastore, input.ServiceName),
-		StorageClass: service.BackupStorageClass(input.Datastore, input.ServiceName),
-		Image:        hostenv.S3BackupImage,
-		Settings:     map[string]string{},
+		BucketName:    input.BucketName,
+		BackupName:    backupName,
+		OmitTimestamp: !service.BackupTimestamp(input.Datastore, input.ServiceName),
+		Keyserver:     service.Keyserver(input.Datastore, input.ServiceName),
+		StorageClass:  service.BackupStorageClass(input.Datastore, input.ServiceName),
+		Image:         hostenv.S3BackupImage,
+		Settings:      map[string]string{},
 	}
 
 	if !input.UseIAM {

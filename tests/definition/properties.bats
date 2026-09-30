@@ -81,6 +81,62 @@ skip_unless_log_is_capped() {
   assert_output ""
 }
 
+@test "($DEFINITION) a backup object name and timestamp are set, read back and unset" {
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-timestamp
+  assert_success
+  assert_output "true"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-object-name db/latest
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-timestamp false
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-object-name
+  assert_success
+  assert_output "db/latest"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --format json
+  assert_success
+  assert_output --partial '"backup-object-name":"db/latest"'
+  assert_output --partial '"backup-timestamp":"false"'
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-object-name
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-timestamp
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-object-name
+  assert_success
+  assert_output ""
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-timestamp
+  assert_success
+  assert_output "true"
+}
+
+@test "($DEFINITION) a backup object name or timestamp the key cannot hold is refused" {
+  local value
+  for value in /latest latest/ db//latest db/../latest "db latest"; do
+    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" backup-object-name "$value"
+    assert_failure
+    assert_stderr --partial "backup-object-name"
+  done
+
+  for value in no 0 FALSE; do
+    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" backup-timestamp "$value"
+    assert_failure
+    assert_stderr --partial "backup-timestamp"
+  done
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-object-name
+  assert_success
+  assert_output ""
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-timestamp
+  assert_success
+  assert_output "true"
+}
+
 @test "($DEFINITION) the container log is bounded" {
   # the bug this closes: a container was made with nothing to say how large its log
   # was allowed to get, and on the default driver it grew until the host ran out of

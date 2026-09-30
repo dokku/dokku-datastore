@@ -233,6 +233,49 @@ func TestInfoReportsTheBackupStorageClass(t *testing.T) {
 	}
 }
 
+// issue 17: the object name is reported as it was set, and the timestamp as
+// whether the next backup will have one, which it does unless turned off
+func TestInfoReportsTheBackupObjectKey(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withInfoService(t, datastore, "lollipop")
+
+	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if info[service.BackupObjectNameProperty] != "" {
+		t.Errorf("expected an unset object name to report empty, got %q", info[service.BackupObjectNameProperty])
+	}
+	if info[service.BackupTimestampProperty] != "true" {
+		t.Errorf("expected backups to be timestamped by default, got %q", info[service.BackupTimestampProperty])
+	}
+
+	for key, value := range map[string]string{
+		service.BackupObjectNameProperty: "db/latest",
+		service.BackupTimestampProperty:  "false",
+	} {
+		if err := SetProperty(datastore, "lollipop", key, value); err != nil {
+			t.Fatalf("failed to set the %s property: %s", key, err)
+		}
+	}
+
+	info = Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if info[service.BackupObjectNameProperty] != "db/latest" {
+		t.Errorf("expected the object name to be reported, got %q", info[service.BackupObjectNameProperty])
+	}
+	if info[service.BackupTimestampProperty] != "false" {
+		t.Errorf("expected the timestamp to be reported as off, got %q", info[service.BackupTimestampProperty])
+	}
+
+	for _, key := range []string{service.BackupObjectNameProperty, service.BackupTimestampProperty} {
+		if err := SetProperty(datastore, "lollipop", key, ""); err != nil {
+			t.Fatalf("failed to unset the %s property: %s", key, err)
+		}
+	}
+
+	info = Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if info[service.BackupObjectNameProperty] != "" || info[service.BackupTimestampProperty] != "true" {
+		t.Errorf("expected cleared properties to report the defaults, got %q and %q", info[service.BackupObjectNameProperty], info[service.BackupTimestampProperty])
+	}
+}
+
 // Backup settings are reported as being present and as a fingerprint rather
 // than as their values, because the credentials and the passphrase are secrets.
 func TestInfoReportsBackupStateWithoutItsSecrets(t *testing.T) {
@@ -248,10 +291,12 @@ func TestInfoReportsBackupStateWithoutItsSecrets(t *testing.T) {
 		"backup-encrypted":              "false",
 		"backup-encryption-fingerprint": "",
 		"backup-endpoint-url":           "",
+		"backup-object-name":            "",
 		"backup-public-key-id":          "",
 		"backup-schedule":               "",
 		"backup-signature-version":      "",
 		"backup-storage-class":          "",
+		"backup-timestamp":              "true",
 		"backup-use-iam":                "false",
 	} {
 		if info[key] != expected {

@@ -40,10 +40,12 @@ var InfoKeys = []InfoKey{
 	{Name: "backup-encryption-fingerprint", Description: "show a sha256 fingerprint of the stored backup passphrase"},
 	{Name: "backup-endpoint-url", Description: "show the s3-compatible endpoint backups are shipped to"},
 	{Name: "backup-keyserver", Description: "show the keyserver backup public keys are fetched from"},
+	{Name: "backup-object-name", Description: "show the name backups are uploaded under in place of the default"},
 	{Name: "backup-public-key-id", Description: "show the gpg public key id backups are encrypted with"},
 	{Name: "backup-schedule", Description: "show the cron schedule backups run on"},
 	{Name: "backup-signature-version", Description: "show the signature version backups authenticate with"},
 	{Name: "backup-storage-class", Description: "show the s3 storage class backups are uploaded with"},
+	{Name: "backup-timestamp", Description: "show whether backups are uploaded under a key ending in the time they started"},
 	{Name: "backup-use-iam", Description: "show whether scheduled backups authenticate with an instance role"},
 	{Name: "config-dir", Description: "show the service configuration directory"},
 	{Name: "config-options", Description: "show the config options the service container is run with"},
@@ -129,6 +131,8 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info["backend"] = common.ReadFirstLine(serviceFiles.Backend)
 	info[service.KeyserverProperty] = service.Keyserver(input.Datastore, input.ServiceName)
 	info[service.BackupStorageClassProperty] = service.BackupStorageClass(input.Datastore, input.ServiceName)
+	info[service.BackupObjectNameProperty] = service.BackupObjectName(input.Datastore, input.ServiceName)
+	info[service.BackupTimestampProperty] = strconv.FormatBool(service.BackupTimestamp(input.Datastore, input.ServiceName))
 	info["custom-env"] = customEnv(serviceFiles.Env)
 	info["database-name"] = service.DatabaseName(input.Datastore, input.ServiceName)
 	info["definition"] = common.ReadFirstLine(serviceFiles.Definition)

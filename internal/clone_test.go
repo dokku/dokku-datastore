@@ -13,6 +13,7 @@ import (
 func cloneSource() serviceSettings {
 	return serviceSettings{
 		BackupStorageClass: "STANDARD_IA",
+		BackupTimestamp:    "false",
 		ConfigOptions:      "--appendonly yes",
 		CustomEnv:          "ONE=1;TWO=2",
 		ExportArgs:         "--hex-blob",
@@ -124,10 +125,11 @@ func TestCloneCanClearASetting(t *testing.T) {
 		WaitTimeout:        &empty,
 	})
 
-	// the keyserver, the storage class and the extra arguments have no flag, so
-	// they are the settings that are always copied
+	// the keyserver, the storage class, the backup timestamp and the extra
+	// arguments have no flag, so they are the settings that are always copied
 	expected := serviceSettings{
 		BackupStorageClass: "STANDARD_IA",
+		BackupTimestamp:    "false",
 		ExportArgs:         "--hex-blob",
 		ImportArgs:         "--force",
 		Keyserver:          "keys.example.com",
@@ -161,12 +163,16 @@ func TestReadServiceSettings(t *testing.T) {
 		"post-create-network":              "created-one,created-two",
 		"post-start-network":               "started",
 		service.BackupStorageClassProperty: "STANDARD_IA",
-		service.KeyserverProperty:          "keys.example.com",
-		service.LogDriverProperty:          "json-file",
-		service.LogOptProperty:             "max-size=20m,max-file=3",
-		service.RestartPolicyProperty:      "unless-stopped",
-		service.VolumeTargetsProperty:      "data=/redis-data",
-		service.WaitTimeoutProperty:        "120",
+		service.BackupTimestampProperty:    "false",
+		// not a setting a clone starts from, so reading it back would be a
+		// difference from cloneSource
+		service.BackupObjectNameProperty: "db/latest",
+		service.KeyserverProperty:        "keys.example.com",
+		service.LogDriverProperty:        "json-file",
+		service.LogOptProperty:           "max-size=20m,max-file=3",
+		service.RestartPolicyProperty:    "unless-stopped",
+		service.VolumeTargetsProperty:    "data=/redis-data",
+		service.WaitTimeoutProperty:      "120",
 	} {
 		if err := SetProperty(datastore, "lollipop", key, value); err != nil {
 			t.Fatalf("failed to set the %s property: %s", key, err)
