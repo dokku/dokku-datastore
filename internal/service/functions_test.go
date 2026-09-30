@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -703,6 +704,8 @@ func TestActionForAmbassador(t *testing.T) {
 		{name: "exposed, forced over one that could be kept", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", Force: true}, expected: ambassadorReplace},
 		{name: "exposed, forced with no ambassador", state: ambassadorState{Exposed: true, Status: "missing", ServiceID: "abc", Force: true}, expected: ambassadorCreate},
 		{name: "not exposed, forced", state: ambassadorState{Status: "missing", ServiceID: "abc", Force: true}, expected: ambassadorNone},
+		{name: "exposed, forwarding the udp ports the service has", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", FrontedSettings: ambassadorSettings{UDPPorts: "8125"}, Settings: ambassadorSettings{UDPPorts: "8125"}}, expected: ambassadorKeep},
+		{name: "exposed, made before udp ports were published", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", Settings: ambassadorSettings{UDPPorts: "8125"}}, expected: ambassadorReplace},
 	}
 
 	for _, test := range tests {
@@ -721,7 +724,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 		options.Addresses = []string{portforward.AllInterfaces}
 		options.Detach = true
 		options.RestartPolicy = portforward.RestartAlways
-		options.HelperImage = "dokku/ambassador:0.8.2"
+		options.HelperImage = "dokku/ambassador:0.8.4"
 		options.Pull = portforward.PullNever
 		options.TCPHalfCloseTimeout = 100000000 * time.Second
 		options.SkipPreflight = true
@@ -741,7 +744,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "abc123",
 				ContainerPorts: []int{5432},
 				HostPorts:      []string{"5678"},
-				Image:          "dokku/ambassador:0.8.2",
+				Image:          "dokku/ambassador:0.8.4",
 				LogConfig:      LogConfig{Options: map[string]string{"max-size": "10m"}},
 			},
 			expected: base(portforward.Options{
@@ -764,7 +767,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "def456",
 				ContainerPorts: []int{5672, 4369, 35197, 15672},
 				HostPorts:      []string{"1", "2", "3", "4"},
-				Image:          "dokku/ambassador:0.8.2",
+				Image:          "dokku/ambassador:0.8.4",
 			},
 			expected: base(portforward.Options{
 				Target: "container/def456",
@@ -785,7 +788,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "def456",
 				ContainerPorts: []int{5672, 4369, 35197, 15672},
 				HostPorts:      []string{"127.0.0.1:1", "[::1]:2", "3", "10.0.0.2:4"},
-				Image:          "dokku/ambassador:0.8.2",
+				Image:          "dokku/ambassador:0.8.4",
 				LogConfig:      LogConfig{Driver: "local", Options: map[string]string{"max-size": "5m", "max-file": "2"}},
 			},
 			expected: base(portforward.Options{
@@ -810,7 +813,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "abc123",
 				ContainerPorts: []int{5432},
 				HostPorts:      []string{"5678"},
-				Image:          "dokku/ambassador:0.8.2",
+				Image:          "dokku/ambassador:0.8.4",
 				RestartPolicy:  "on-failure:3",
 			},
 			expected: func() portforward.Options {
@@ -838,7 +841,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "def456",
 				ContainerPorts: []int{5672, 4369},
 				HostPorts:      []string{"127.0.0.1:1", "2"},
-				Image:          "dokku/ambassador:0.8.2",
+				Image:          "dokku/ambassador:0.8.4",
 				Settings:       ambassadorSettings{Address: "10.0.0.5", SourceRange: "10.0.0.0/8"},
 			},
 			expected: func() portforward.Options {
@@ -860,6 +863,57 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 			}(),
 		},
 		{
+			// statsd speaks udp, and is forwarded and published as udp beside the
+			// tcp ports, which keep the spec they always had
+			name: "a udp port among tcp ones",
+			input: ambassadorForwardOptionsInput{
+				AmbassadorName:     "dokku.graphite.metrics.ambassador",
+				CommandPrefix:      "graphite",
+				ContainerID:        "ghi789",
+				ContainerPorts:     []int{8125, 8126, 80},
+				ContainerProtocols: []string{"udp", "tcp", "tcp"},
+				HostPorts:          []string{"1", "127.0.0.1:2", "3"},
+				Image:              "dokku/ambassador:0.8.4",
+				Settings:           ambassadorSettings{UDPPorts: "8125"},
+			},
+			expected: base(portforward.Options{
+				Target: "container/ghi789",
+				Ports:  []string{"1:8125/udp", "127.0.0.1:2:8126", "3:80"},
+				Name:   "dokku.graphite.metrics.ambassador",
+				Labels: map[string]string{
+					"dokku":                         "ambassador",
+					"dokku.ambassador":              "graphite",
+					"dokku.ambassador.container-id": "ghi789",
+					"dokku.ambassador.udp-ports":    "8125",
+				},
+			}),
+		},
+		{
+			// a port with an address of its own keeps it, and its protocol
+			name: "a udp port on an address of its own",
+			input: ambassadorForwardOptionsInput{
+				AmbassadorName:     "dokku.graphite.metrics.ambassador",
+				CommandPrefix:      "graphite",
+				ContainerID:        "ghi789",
+				ContainerPorts:     []int{8125},
+				ContainerProtocols: []string{"udp"},
+				HostPorts:          []string{"[::1]:1"},
+				Image:              "dokku/ambassador:0.8.4",
+				Settings:           ambassadorSettings{UDPPorts: "8125"},
+			},
+			expected: base(portforward.Options{
+				Target: "container/ghi789",
+				Ports:  []string{"[::1]:1:8125/udp"},
+				Name:   "dokku.graphite.metrics.ambassador",
+				Labels: map[string]string{
+					"dokku":                         "ambassador",
+					"dokku.ambassador":              "graphite",
+					"dokku.ambassador.container-id": "ghi789",
+					"dokku.ambassador.udp-ports":    "8125",
+				},
+			}),
+		},
+		{
 			name: "a port-source-range alone",
 			input: ambassadorForwardOptionsInput{
 				AmbassadorName: "dokku.postgres.lake.ambassador",
@@ -867,7 +921,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "abc123",
 				ContainerPorts: []int{5432},
 				HostPorts:      []string{"5678"},
-				Image:          "dokku/ambassador:0.8.2",
+				Image:          "dokku/ambassador:0.8.4",
 				Settings:       ambassadorSettings{SourceRange: "2001:db8::/32"},
 			},
 			expected: base(portforward.Options{
@@ -1094,25 +1148,50 @@ func TestDatabaseNameWritesNothingForAMissingService(t *testing.T) {
 // published, and an address the host does not have is reported by name rather
 // than as a port that could not be found.
 func TestGetAvailablePort(t *testing.T) {
-	for _, address := range []string{"", "127.0.0.1"} {
-		port, err := GetAvailablePort(address)
-		if err != nil {
-			t.Fatalf("%q: unexpected error: %v", address, err)
+	for _, protocol := range []string{"tcp", "udp"} {
+		for _, address := range []string{"", "127.0.0.1"} {
+			port, err := GetAvailablePort(address, protocol)
+			if err != nil {
+				t.Fatalf("%s %q: unexpected error: %v", protocol, address, err)
+			}
+			if port < 1025 || port > 65535 {
+				t.Errorf("%s %q: expected an unprivileged port, got %d", protocol, address, port)
+			}
 		}
-		if port < 1025 || port > 65535 {
-			t.Errorf("%q: expected an unprivileged port, got %d", address, port)
+
+		// a documentation address, which no host has
+		_, err := GetAvailablePort("192.0.2.1", protocol)
+		if err == nil || !strings.Contains(err.Error(), "failed to get an available port on 192.0.2.1") {
+			t.Errorf("%s: expected the address to be named, got %v", protocol, err)
 		}
 	}
 
-	// a documentation address, which no host has
-	_, err := GetAvailablePort("192.0.2.1")
-	if err == nil || !strings.Contains(err.Error(), "failed to get an available port on 192.0.2.1") {
-		t.Errorf("expected the address to be named, got %v", err)
-	}
-
-	if _, err := GenerateRandomPorts("192.0.2.1", 2); err == nil {
+	if _, err := GenerateRandomPorts("192.0.2.1", []string{"tcp", "udp"}); err == nil {
 		t.Error("expected no ports to be generated on an address the host does not have")
 	}
+}
+
+// A udp port is given a port no udp socket holds, which a tcp check cannot
+// see: one bound over udp alone is free as far as tcp is concerned.
+func TestGetAvailablePortChecksUDPOverUDP(t *testing.T) {
+	ports, err := GenerateRandomPorts("127.0.0.1", []string{"tcp", "udp", "tcp"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ports) != 3 {
+		t.Fatalf("expected a port for each protocol, got %v", ports)
+	}
+
+	port, err := GetAvailablePort("127.0.0.1", "udp")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: port})
+	if err != nil {
+		t.Fatalf("expected port %d to be free over udp: %v", port, err)
+	}
+	conn.Close() //nolint:errcheck
 }
 
 // An atomic file is created, with its mode, before anything is written into it,

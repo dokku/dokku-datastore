@@ -178,8 +178,9 @@ type Port struct {
 	// Target is the port inside the container.
 	Target int `yaml:"target"`
 
-	// Protocol is tcp or udp, defaulting to tcp. graphite's statsd port is udp
-	// and has always been exposed as tcp, which this can finally say.
+	// Protocol is tcp or udp, defaulting to tcp. It is what an exposed service
+	// publishes the port over, so graphite's statsd port, which is udp, is
+	// reachable from off the host rather than published as tcp.
 	Protocol string `yaml:"protocol"`
 
 	// Primary marks the port the dsn and the readiness probe use when neither

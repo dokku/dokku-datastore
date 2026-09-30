@@ -622,3 +622,61 @@ func TestEnsureBindSourcesLeavesADirectoryWithSomethingInIt(t *testing.T) {
 		t.Errorf("expected what was in the directory to be kept, got %v", err)
 	}
 }
+
+// Every port carries the protocol its definition declares, tcp when it
+// declares none, and graphite's statsd is the only udp port shipped. It is what
+// the ambassador publishes each port over, so a udp port read as tcp is one no
+// client off the host can reach.
+func TestPropertiesCarryEachPortsProtocol(t *testing.T) {
+	for name, found := range Datastores {
+		t.Run(name, func(t *testing.T) {
+			properties := found.Properties()
+			if len(properties.Protocols) != len(properties.Ports) {
+				t.Fatalf("expected a protocol for each of %v, got %v", properties.Ports, properties.Protocols)
+			}
+
+			for i, port := range properties.Ports {
+				expected := "tcp"
+				if name == "graphite" && port == 8125 {
+					expected = "udp"
+				}
+
+				if properties.Protocols[i] != expected {
+					t.Errorf("expected port %d to speak %s, got %q", port, expected, properties.Protocols[i])
+				}
+			}
+		})
+	}
+}
+
+// The udp ports label names every udp port and nothing else, and is empty for
+// a datastore with none, which is what an ambassador made before udp ports
+// were published carries.
+func TestUDPPorts(t *testing.T) {
+	tests := []struct {
+		name       string
+		properties ServiceStruct
+		expected   string
+	}{
+		{name: "none", properties: ServiceStruct{Ports: []int{5432}, Protocols: []string{"tcp"}}, expected: ""},
+		{name: "one among tcp ports", properties: ServiceStruct{Ports: []int{8125, 8126, 80}, Protocols: []string{"udp", "tcp", "tcp"}}, expected: "8125"},
+		{name: "several", properties: ServiceStruct{Ports: []int{53, 80, 123}, Protocols: []string{"udp", "tcp", "udp"}}, expected: "53,123"},
+		{name: "no protocols", properties: ServiceStruct{Ports: []int{5432}}, expected: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if actual := udpPorts(test.properties); actual != test.expected {
+				t.Errorf("expected %q, got %q", test.expected, actual)
+			}
+		})
+	}
+
+	graphite, ok := Datastores["graphite"]
+	if !ok {
+		t.Fatal("expected graphite to be registered")
+	}
+	if actual := udpPorts(graphite.Properties()); actual != "8125" {
+		t.Errorf("expected graphite to forward 8125 over udp, got %q", actual)
+	}
+}

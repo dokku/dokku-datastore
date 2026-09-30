@@ -55,6 +55,34 @@ assert_ambassador() {
   host_port="$(awk '{ print $1 }' "$PORT_FILE")"
   host_port="${host_port##*:}"
   [[ "$published" == *":$host_port"* ]] || fail "$step: expected port $host_port to be published, got '$published'"
+
+  assert_protocols "$step"
+}
+
+# every port is published and forwarded over the protocol its definition
+# declares. Graphite's statsd is the only udp port shipped; the rest are tcp
+assert_protocols() {
+  local step="$1" expected_udp="" bindings forwarded label port
+  [[ "$DEFINITION" == "graphite" ]] && expected_udp="8125"
+
+  label="$(container_inspect "$AMBASSADOR" '{{ index .Config.Labels "dokku.ambassador.udp-ports" }}')"
+  [[ "$label" == "$expected_udp" ]] || fail "$step: expected the ambassador to record udp ports '$expected_udp', got '$label'"
+
+  # shellcheck disable=SC2016
+  bindings="$(container_inspect "$AMBASSADOR" '{{ range $port, $_ := .HostConfig.PortBindings }}{{ $port }} {{ end }}')"
+  forwarded="$(container_inspect "$AMBASSADOR" '{{ index .Config.Labels "com.dokku.port-forward.ports" }}')"
+
+  if [[ -z "$expected_udp" ]]; then
+    [[ "$bindings" != *"/udp"* ]] || fail "$step: expected nothing published over udp, got '$bindings'"
+    [[ "$forwarded" != *"/udp"* ]] || fail "$step: expected nothing forwarded over udp, got '$forwarded'"
+    return
+  fi
+
+  for port in ${expected_udp//,/ }; do
+    [[ " $bindings" == *" $port/udp "* ]] || fail "$step: expected $port to be published over udp, got '$bindings'"
+    [[ " $bindings" != *" $port/tcp "* ]] || fail "$step: expected $port not to be published over tcp, got '$bindings'"
+    [[ ",$forwarded," == *":$port/udp,"* ]] || fail "$step: expected $port to be forwarded over udp, got '$forwarded'"
+  done
 }
 
 # every port the ambassador publishes is bound on one host address, empty for
@@ -135,6 +163,28 @@ expected_exposed_dsn() {
 
   "$BIN" info "$PLUGIN" "$SERVICE" --exposed-ports >"$EXPOSED_PORTS_FILE"
   [[ -s "$EXPOSED_PORTS_FILE" ]] || fail "expected the exposed ports to be reported"
+}
+
+@test "($DEFINITION) an exposed udp port takes udp from off the host" {
+  [[ "$DEFINITION" == "graphite" ]] || skip "$PLUGIN has no udp port"
+
+  # statsd, and its admin interface, which lists the counters it has been sent.
+  # Sent again on every attempt, since a datagram that arrives before socat is
+  # listening is gone rather than refused
+  local statsd admin metric="dokku_datastore_expose_$RANDOM" counters=""
+  statsd="$(awk '{ print $1 }' "$PORT_FILE")"
+  admin="$(awk '{ print $2 }' "$PORT_FILE")"
+  statsd="${statsd##*:}"
+  admin="${admin##*:}"
+
+  for _ in $(seq 1 30); do
+    printf '%s:1|c' "$metric" >"/dev/udp/127.0.0.1/$statsd"
+    counters="$(printf 'counters\n' | nc -w 2 127.0.0.1 "$admin" 2>/dev/null || true)"
+    [[ "$counters" == *"$metric"* ]] && return 0
+    sleep 1
+  done
+
+  fail "expected statsd to count $metric sent over udp to port $statsd, got '$counters'"
 }
 
 @test "($DEFINITION) the exposed dsn names the expose-host and the exposed port" {
