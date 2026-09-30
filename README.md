@@ -179,6 +179,18 @@ psql "postgres://postgres:<password>@db.example.com:5432/lollipop?sslmode=verify
 
 The certificate names no host, so `verify-full` fails where `verify-ca` succeeds. It is made once and kept when the service is rebuilt or upgraded. A certificate of your own is written over the service's `certs/server.crt` and `certs/server.key` as root, which keeps the owner and mode the server needs to read its key, and is served once the service is restarted.
 
+## Postgres database encoding and locale
+
+The bash plugin made a postgres service's database itself with `createdb -E utf8`. A custom env that set the locale to `C`, such as `LC_ALL=C`, had the image make its template databases in `SQL_ASCII`, which refused a utf8 copy, and the error was swallowed, so the service was created without its database. There was also no way to ask for a utf8 database with the `C` collation some applications require.
+
+The image now makes the database the first time the service starts, in the encoding and locale its cluster was made with, so a service created with `LC_ALL=C` has its database, in `SQL_ASCII`. The encoding and locale are chosen by handing `initdb` its arguments through the image's `POSTGRES_INITDB_ARGS`, which every postgres definition's image reads, flavors included.
+
+```shell
+dokku postgres:create lollipop --custom-env "POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C"
+```
+
+They are only read when the data directory is first made, so changing the custom env of an existing service leaves its database as it was. A database is moved to another encoding or locale by importing an export of it into a service created with the new ones, and the plugin readme says so.
+
 ## The version a service runs
 
 A service records the image it runs in `IMAGE` and `IMAGE_VERSION` beside its data, and that record is what it is placed by every time its container has to be made again. A release that ships a newer image does not move a service that already exists onto it - only `upgrade` changes the version a service runs.

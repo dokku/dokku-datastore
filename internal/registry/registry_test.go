@@ -1009,15 +1009,19 @@ func TestEveryPostgresDefinitionDocumentsItsCertificate(t *testing.T) {
 				}
 			}
 
-			documented := false
+			documented := map[string]bool{}
 			for _, section := range postgres.Dokku.Documentation {
-				if section.Title == "Encrypting connections with TLS" {
-					documented = true
-				}
+				documented[section.Title] = true
 			}
 
-			if !documented {
+			if !documented["Encrypting connections with TLS"] {
 				t.Error("expected the tls section")
+			}
+
+			// the flavors' images share the official image's entrypoint, so
+			// every one of them reads the initdb arguments the section names
+			if !documented["Choosing the database encoding and locale"] {
+				t.Error("expected the encoding section")
 			}
 		})
 	}

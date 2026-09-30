@@ -346,8 +346,21 @@ func TestReadmeDefinitionSections(t *testing.T) {
 				}
 			}
 
+			for _, want := range []string{
+				"leaves the database in the `SQL_ASCII` encoding",
+				"```shell\ndokku postgres:create lollipop --custom-env \"POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C\"\n```",
+			} {
+				if !strings.Contains(readme, want) {
+					t.Errorf("expected the encoding section to contain %q", want)
+				}
+			}
+
 			if strings.Index(readme, "### Reserved service names") > strings.Index(readme, "### Encrypting connections with TLS") {
 				t.Error("expected the definition's sections after the ones every datastore has")
+			}
+
+			if strings.Index(readme, "### Encrypting connections with TLS") > strings.Index(readme, "### Choosing the database encoding and locale") {
+				t.Error("expected the definition's sections in the order it declares them")
 			}
 		})
 	}

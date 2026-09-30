@@ -228,13 +228,19 @@ func TestForServiceWithASingleDefinition(t *testing.T) {
 	}
 }
 
-// Every postgres definition declares the same section, and the readme is
-// written once for the plugin, so it is documented once.
+// Every postgres definition declares the same sections, and the readme is
+// written once for the plugin, so each is documented once.
 func TestDocumentationIsDeclaredOnceAcrossTheMajors(t *testing.T) {
 	sections := postgresDatastore(t).Documentation()
 
-	if len(sections) != 1 || sections[0].Title != "Encrypting connections with TLS" {
-		t.Errorf("expected the tls section once, got %v", sections)
+	titles := []string{}
+	for _, section := range sections {
+		titles = append(titles, section.Title)
+	}
+
+	expected := []string{"Encrypting connections with TLS", "Choosing the database encoding and locale"}
+	if strings.Join(titles, "\n") != strings.Join(expected, "\n") {
+		t.Errorf("expected %q once each, got %q", expected, titles)
 	}
 
 	if sections := Datastores["redis"].Documentation(); len(sections) != 0 {
