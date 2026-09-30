@@ -49,6 +49,10 @@ type ServiceStruct struct {
 	// Ports is the ports for a service
 	Ports []int
 
+	// Protocols are the protocol each of Ports speaks, tcp or udp, in the same
+	// order
+	Protocols []string
+
 	// Scheme is the scheme for a service
 	Scheme string
 

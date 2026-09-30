@@ -982,8 +982,10 @@ func (s *Datastore) Properties() ServiceStruct {
 	dokku := s.Definition.Dokku
 
 	ports := make([]int, 0, len(s.Definition.Service.Ports))
+	protocols := make([]string, 0, len(s.Definition.Service.Ports))
 	for _, port := range s.Definition.Service.Ports {
 		ports = append(ports, port.Target)
+		protocols = append(protocols, portProtocol(port))
 	}
 
 	// parsing refuses a definition whose readiness would land on a udp port, so
@@ -1009,11 +1011,22 @@ func (s *Datastore) Properties() ServiceStruct {
 		ImagePullVariable: strings.ToUpper(dokku.Plugin) + "_DISABLE_PULL",
 		PluginVariable:    dokku.Variable,
 		Ports:             ports,
+		Protocols:         protocols,
 		Scheme:            dokku.Scheme,
 		WaitPort:          waitPort,
 		// derived from the variable, like the image and env variables beside it
 		WaitTimeoutVariable: dokku.Variable + "_WAIT_TIMEOUT",
 	}
+}
+
+// portProtocol is the protocol a port speaks, tcp when the definition names
+// none
+func portProtocol(port definition.Port) string {
+	if port.Protocol == "" {
+		return definition.ProtocolTCP
+	}
+
+	return port.Protocol
 }
 
 // ServiceType returns the type of service.

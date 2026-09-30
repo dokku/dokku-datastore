@@ -1272,7 +1272,8 @@ func TestGraphiteNamesEveryPortItNeeds(t *testing.T) {
 		t.Errorf("expected readiness on grafana, got %d", wait.Target)
 	}
 
-	// recorded rather than acted on: nothing reads the protocol yet
+	// what an exposed service publishes it over, so a client off the host that
+	// sends metrics reaches it
 	statsd, _ := graphite.PortFor("statsd")
 	if statsd.Protocol != "udp" {
 		t.Errorf("expected statsd to be recorded as udp, got %q", statsd.Protocol)

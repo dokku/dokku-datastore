@@ -52,7 +52,7 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 		// picked where they will be published, and written without the address,
 		// so a later port-bind-address moves them rather than leaving them behind
 		address := service.ServicePortBindAddress(input.Datastore, input.ServiceName)
-		ports, err := service.GenerateRandomPorts(address, len(input.Datastore.Properties().Ports))
+		ports, err := service.GenerateRandomPorts(address, input.Datastore.Properties().Protocols)
 		if err != nil {
 			return fmt.Errorf("failed to generate random ports: %w", err)
 		}

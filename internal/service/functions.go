@@ -505,13 +505,14 @@ func GenerateRandomHexString(length int) (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
-// GenerateRandomPorts generates random ports that are free on an address, or
-// on localhost when it is empty. A port free on localhost may already be taken
-// on another address, so a service exposed on one is given ports checked there.
-func GenerateRandomPorts(address string, iterations int) ([]int, error) {
+// GenerateRandomPorts generates one random port for each protocol, free over
+// that protocol on an address, or on localhost when it is empty. A port free on
+// localhost may already be taken on another address, so a service exposed on
+// one is given ports checked there.
+func GenerateRandomPorts(address string, protocols []string) ([]int, error) {
 	var ports []int
-	for i := 0; i < iterations; i++ {
-		port, err := GetAvailablePort(address)
+	for _, protocol := range protocols {
+		port, err := GetAvailablePort(address, protocol)
 		if err != nil {
 			return nil, err
 		}
@@ -520,30 +521,59 @@ func GenerateRandomPorts(address string, iterations int) ([]int, error) {
 	return ports, nil
 }
 
-// GetAvailablePort gets a port that is free on an address, or on localhost
-// when it is empty
-func GetAvailablePort(address string) (int, error) {
+// GetAvailablePort gets a port that is free over a protocol on an address, or
+// on localhost when it is empty. A udp port is checked over udp, since a port
+// no tcp listener holds may still be bound by a udp one; anything else is
+// checked over tcp
+func GetAvailablePort(address string, protocol string) (int, error) {
 	if address == "" {
 		address = "localhost"
 	}
 
-	addr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(address, "0"))
-	if err != nil {
-		return 0, fmt.Errorf("failed to get an available port on %s: %w", address, err)
-	}
-
 	for {
-		l, err := net.ListenTCP("tcp", addr)
+		port, err := listenOnAvailablePort(address, protocol)
 		if err != nil {
 			return 0, fmt.Errorf("failed to get an available port on %s: %w", address, err)
 		}
-		defer l.Close()
 
-		port := l.Addr().(*net.TCPAddr).Port
 		if port >= 1025 && port <= 65535 {
 			return port, nil
 		}
 	}
+}
+
+// listenOnAvailablePort has the kernel pick a free port over a protocol on an
+// address, and lets it go again
+func listenOnAvailablePort(address string, protocol string) (int, error) {
+	hostPort := net.JoinHostPort(address, "0")
+
+	if protocol == definition.ProtocolUDP {
+		addr, err := net.ResolveUDPAddr("udp", hostPort)
+		if err != nil {
+			return 0, err
+		}
+
+		conn, err := net.ListenUDP("udp", addr)
+		if err != nil {
+			return 0, err
+		}
+		defer conn.Close() //nolint:errcheck
+
+		return conn.LocalAddr().(*net.UDPAddr).Port, nil
+	}
+
+	addr, err := net.ResolveTCPAddr("tcp", hostPort)
+	if err != nil {
+		return 0, err
+	}
+
+	l, err := net.ListenTCP("tcp", addr)
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close() //nolint:errcheck
+
+	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
 // RecordedImage is what a service's files say it runs, with no fallback of any
@@ -928,6 +958,12 @@ const AmbassadorAddressLabel = "dokku.ambassador.address"
 // port-source-range it was made with. Unset when it was made with none.
 const AmbassadorSourceRangeLabel = "dokku.ambassador.source-range"
 
+// AmbassadorUDPPortsLabel is the label an ambassador carries naming the
+// container ports it forwards over udp, comma separated. Unset when it
+// forwards none, which is also what an ambassador made before udp ports were
+// published carries, so one of those fronting a udp port is replaced.
+const AmbassadorUDPPortsLabel = "dokku.ambassador.udp-ports"
+
 // ambassadorSettings are the service properties an ambassador is made from
 // that a running one cannot take on: a change to either only reaches the
 // service through a new ambassador.
@@ -937,6 +973,10 @@ type ambassadorSettings struct {
 
 	// SourceRange is the port-source-range, empty for every client
 	SourceRange string
+
+	// UDPPorts are the container ports forwarded over udp, comma separated,
+	// empty when there are none
+	UDPPorts string
 }
 
 // serviceAmbassadorSettings are the settings a service's ambassador should be
@@ -945,7 +985,20 @@ func serviceAmbassadorSettings(s *Datastore, serviceName string) ambassadorSetti
 	return ambassadorSettings{
 		Address:     ServicePortBindAddress(s, serviceName),
 		SourceRange: ServicePortSourceRange(s, serviceName),
+		UDPPorts:    udpPorts(s.Properties()),
 	}
+}
+
+// udpPorts are a datastore's container ports that speak udp, comma separated
+func udpPorts(properties ServiceStruct) string {
+	var ports []string
+	for i, port := range properties.Ports {
+		if i < len(properties.Protocols) && properties.Protocols[i] == definition.ProtocolUDP {
+			ports = append(ports, strconv.Itoa(port))
+		}
+	}
+
+	return strings.Join(ports, ",")
 }
 
 // ambassadorLabel reads one of an ambassador's labels, empty when it has none
@@ -1036,7 +1089,10 @@ type ambassadorState struct {
 // Nor is one kept that was made with a port-bind-address or port-source-range
 // the service no longer has, since it would go on publishing the service where
 // or to whom it was told not to. One made before those labels existed carries
-// neither, which is what a service that has set neither expects. A forced
+// neither, which is what a service that has set neither expects. Nor is one
+// kept that forwards a different set of ports over udp: one made before udp
+// ports were published forwards a udp port over tcp, where its clients send
+// nothing, and carries no udp ports label to say so. A forced
 // reconcile replaces even one that could be kept.
 func actionForAmbassador(state ambassadorState) ambassadorAction {
 	if !state.Exposed {
@@ -1072,6 +1128,10 @@ type ambassadorForwardOptionsInput struct {
 	// ContainerPorts are the ports the service listens on
 	ContainerPorts []int
 
+	// ContainerProtocols are the protocol each container port speaks, in the
+	// same order. A port with none, or tcp, is forwarded over tcp
+	ContainerProtocols []string
+
 	// HostPorts are the host ports each container port is published on, in the
 	// same order. Each is a port, or an ip:port that publishes it on that
 	// address alone
@@ -1103,7 +1163,14 @@ func ambassadorForwardOptions(input ambassadorForwardOptionsInput) portforward.O
 	// a plain --publish was, when it has none
 	ports := make([]string, 0, len(input.HostPorts))
 	for i, hostPort := range input.HostPorts {
-		ports = append(ports, fmt.Sprintf("%s:%d", hostPort, input.ContainerPorts[i]))
+		spec := fmt.Sprintf("%s:%d", hostPort, input.ContainerPorts[i])
+		// a udp port is forwarded over udp, and published as udp, only when the
+		// spec says so. Without the suffix it is forwarded over tcp, where a
+		// client of the port sends nothing
+		if i < len(input.ContainerProtocols) && input.ContainerProtocols[i] == definition.ProtocolUDP {
+			spec += "/udp"
+		}
+		ports = append(ports, spec)
 	}
 
 	addresses := []string{portforward.AllInterfaces}
@@ -1124,6 +1191,9 @@ func ambassadorForwardOptions(input ambassadorForwardOptionsInput) portforward.O
 	}
 	if input.Settings.SourceRange != "" {
 		labels[AmbassadorSourceRangeLabel] = input.Settings.SourceRange
+	}
+	if input.Settings.UDPPorts != "" {
+		labels[AmbassadorUDPPortsLabel] = input.Settings.UDPPorts
 	}
 
 	return portforward.Options{
@@ -1193,6 +1263,7 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		state.FrontedSettings = ambassadorSettings{
 			Address:     ambassadorLabel(ambassadorName, AmbassadorAddressLabel),
 			SourceRange: ambassadorLabel(ambassadorName, AmbassadorSourceRangeLabel),
+			UDPPorts:    ambassadorLabel(ambassadorName, AmbassadorUDPPortsLabel),
 		}
 
 		var err error
@@ -1246,15 +1317,16 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 	}
 
 	result, err := portforward.Forward(ctx, ambassadorForwardOptions(ambassadorForwardOptionsInput{
-		AmbassadorName: ambassadorName,
-		CommandPrefix:  serviceProperties.CommandPrefix,
-		ContainerID:    state.ServiceID,
-		ContainerPorts: serviceProperties.Ports,
-		HostPorts:      hostPorts,
-		Image:          hostenv.AmbassadorImage,
-		LogConfig:      logConfig,
-		RestartPolicy:  ServiceRestartPolicy(input.Datastore, input.ServiceName),
-		Settings:       state.Settings,
+		AmbassadorName:     ambassadorName,
+		CommandPrefix:      serviceProperties.CommandPrefix,
+		ContainerID:        state.ServiceID,
+		ContainerPorts:     serviceProperties.Ports,
+		ContainerProtocols: serviceProperties.Protocols,
+		HostPorts:          hostPorts,
+		Image:              hostenv.AmbassadorImage,
+		LogConfig:          logConfig,
+		RestartPolicy:      ServiceRestartPolicy(input.Datastore, input.ServiceName),
+		Settings:           state.Settings,
 	}))
 	if err != nil {
 		return fmt.Errorf("failed to run container %s: %w", ambassadorName, err)
