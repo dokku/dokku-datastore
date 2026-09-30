@@ -122,6 +122,20 @@ x-dokku:
             sudo sh -c 'cat server.key > /var/lib/dokku/services/{{.CommandPrefix}}/lollipop/certs/server.key'
         dokku {{.CommandPrefix}}:restart lollipop
 
+    # the image makes the database from the environment its first start sees,
+    # so the only way to choose these is the custom env the service is made with
+    - title: Choosing the database encoding and locale
+      body: |
+        the database is made the first time the service starts, with the encoding and locale of its container, which are utf8 and 'en_US.utf8' unless the custom environment says otherwise.
+        a custom environment that only sets 'LC_ALL=C' leaves the database in the SQL_ASCII encoding, which stores bytes rather than utf8 text.
+        to choose both, give the arguments 'initdb' takes in POSTGRES_INITDB_ARGS when the service is created:
+        dokku {{.CommandPrefix}}:create lollipop --custom-env "POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C"
+        they are only read when the data directory is first made, so changing the custom environment of an existing service leaves its database as it was.
+        to move a database to another encoding or locale, create a service with the new ones and import an export of the old service into it:
+        dokku {{.CommandPrefix}}:export lollipop > lollipop.dump
+        dokku {{.CommandPrefix}}:create lollipop-utf8 --custom-env "POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C"
+        dokku {{.CommandPrefix}}:import lollipop-utf8 < lollipop.dump
+
   commands:
     # the password goes in PGPASSWORD rather than on the command line, which is
     # what the bash plugin does too
