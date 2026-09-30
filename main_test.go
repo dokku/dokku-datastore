@@ -235,7 +235,7 @@ func TestPluginCommandsCoverEveryDocumentedSubcommand(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		"app-links", "backup", "backup-auth", "backup-deauth", "backup-schedule",
+		"app-links", "backup", "backup-auth", "backup-deauth", "backup-logs", "backup-schedule",
 		"backup-schedule-cat", "backup-set-encryption", "backup-set-public-key-encryption",
 		"backup-unschedule", "backup-unset-encryption", "backup-unset-public-key-encryption",
 		"clone", "connect", "create", "destroy", "enter", "exists", "export", "expose",

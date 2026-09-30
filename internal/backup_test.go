@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dokku/dokku-datastore/internal/service"
 )
@@ -25,6 +26,9 @@ func withScheduleService(t *testing.T, serviceNames ...string) *service.Datastor
 	t.Setenv("DOKKU_LIB_ROOT", service.DokkuLibRoot)
 	// no plugins to trigger, so regenerating the crontab does nothing
 	t.Setenv("PLUGIN_PATH", "")
+	// the log file is named after the logs directory of the host the tests
+	// run on, so the default is what they expect
+	t.Setenv("DOKKU_LOGS_DIR", "")
 
 	datastore := service.Datastores["redis"]
 	for _, serviceName := range serviceNames {
@@ -119,6 +123,8 @@ func TestBackupScheduleValidateChecksTheMailto(t *testing.T) {
 }
 
 func TestCronEntry(t *testing.T) {
+	t.Setenv("DOKKU_LOGS_DIR", "")
+
 	tests := []struct {
 		name     string
 		schedule BackupSchedule
@@ -129,23 +135,23 @@ func TestCronEntry(t *testing.T) {
 		{
 			name:     "a plain schedule",
 			schedule: BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket"},
-			expected: CronTask{Schedule: "0 3 * * *", Command: "dokku redis:backup lollipop my-bucket", LogFile: "/var/log/dokku/redis.log"},
-			text:     "0 3 * * *;dokku redis:backup lollipop my-bucket;/var/log/dokku/redis.log",
-			json:     `{"schedule":"0 3 * * *","command":"dokku redis:backup lollipop my-bucket","log-file":"/var/log/dokku/redis.log"}`,
+			expected: CronTask{Schedule: "0 3 * * *", Command: "dokku redis:backup lollipop my-bucket", LogFile: "/var/log/dokku/redis.lollipop.backup.log"},
+			text:     "0 3 * * *;dokku redis:backup lollipop my-bucket;/var/log/dokku/redis.lollipop.backup.log",
+			json:     `{"schedule":"0 3 * * *","command":"dokku redis:backup lollipop my-bucket","log-file":"/var/log/dokku/redis.lollipop.backup.log"}`,
 		},
 		{
 			name:     "using an iam profile",
 			schedule: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", UseIAM: true},
-			expected: CronTask{Schedule: "@daily", Command: "dokku redis:backup lollipop my-bucket --use-iam", LogFile: "/var/log/dokku/redis.log"},
-			text:     "@daily;dokku redis:backup lollipop my-bucket --use-iam;/var/log/dokku/redis.log",
-			json:     `{"schedule":"@daily","command":"dokku redis:backup lollipop my-bucket --use-iam","log-file":"/var/log/dokku/redis.log"}`,
+			expected: CronTask{Schedule: "@daily", Command: "dokku redis:backup lollipop my-bucket --use-iam", LogFile: "/var/log/dokku/redis.lollipop.backup.log"},
+			text:     "@daily;dokku redis:backup lollipop my-bucket --use-iam;/var/log/dokku/redis.lollipop.backup.log",
+			json:     `{"schedule":"@daily","command":"dokku redis:backup lollipop my-bucket --use-iam","log-file":"/var/log/dokku/redis.lollipop.backup.log"}`,
 		},
 		{
 			name:     "with a mailto",
 			schedule: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", Mailto: "ops@example.com"},
-			expected: CronTask{Schedule: "@daily", Command: "dokku redis:backup lollipop my-bucket", LogFile: "/var/log/dokku/redis.log", Mailto: "ops@example.com"},
-			text:     "@daily;dokku redis:backup lollipop my-bucket;/var/log/dokku/redis.log",
-			json:     `{"schedule":"@daily","command":"dokku redis:backup lollipop my-bucket","log-file":"/var/log/dokku/redis.log","mailto":"ops@example.com"}`,
+			expected: CronTask{Schedule: "@daily", Command: "dokku redis:backup lollipop my-bucket", LogFile: "/var/log/dokku/redis.lollipop.backup.log", Mailto: "ops@example.com"},
+			text:     "@daily;dokku redis:backup lollipop my-bucket;/var/log/dokku/redis.lollipop.backup.log",
+			json:     `{"schedule":"@daily","command":"dokku redis:backup lollipop my-bucket","log-file":"/var/log/dokku/redis.lollipop.backup.log","mailto":"ops@example.com"}`,
 		},
 	}
 
@@ -188,8 +194,40 @@ func TestCronEntry(t *testing.T) {
 	}
 }
 
+// Each service's backups are logged to a file of their own, so that one
+// service's output can be read without every other service's, and the file
+// follows dokku's logs directory
+func TestBackupLogFile(t *testing.T) {
+	t.Setenv("DOKKU_LOGS_DIR", "")
+	if actual := BackupLogFile("redis", "lollipop"); actual != "/var/log/dokku/redis.lollipop.backup.log" {
+		t.Errorf("expected the default logs directory, got %q", actual)
+	}
+	if BackupLogFile("redis", "lollipop") == BackupLogFile("redis", "grape") {
+		t.Error("expected two services not to share a log file")
+	}
+	if BackupLogFile("redis", "lollipop") == BackupLogFile("postgres", "lollipop") {
+		t.Error("expected two datastores not to share a log file")
+	}
+
+	t.Setenv("DOKKU_LOGS_DIR", "/srv/dokku/logs")
+	if actual := BackupLogFile("redis", "lollipop"); actual != "/srv/dokku/logs/redis.lollipop.backup.log" {
+		t.Errorf("expected the logs directory dokku was given, got %q", actual)
+	}
+}
+
+// The time a backup starts and ends is printed in utc, so that runs logged by
+// hosts in different zones read the same
+func TestBackupTimestamp(t *testing.T) {
+	zone := time.FixedZone("UTC-5", -5*60*60)
+	if actual := BackupTimestamp(time.Date(2026, 9, 29, 22, 0, 0, 0, zone)); actual != "2026-09-30T03:00:00Z" {
+		t.Errorf("expected the time in utc, got %q", actual)
+	}
+}
+
 // What dokku writes into its crontab for a task handed to it with a log file
 func TestCrontabLine(t *testing.T) {
+	t.Setenv("DOKKU_LOGS_DIR", "")
+
 	tests := []struct {
 		name     string
 		schedule BackupSchedule
@@ -198,17 +236,17 @@ func TestCrontabLine(t *testing.T) {
 		{
 			name:     "a plain schedule",
 			schedule: BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket"},
-			expected: "0 3 * * * dokku redis:backup lollipop my-bucket &>> /var/log/dokku/redis.log",
+			expected: "0 3 * * * dokku redis:backup lollipop my-bucket &>> /var/log/dokku/redis.lollipop.backup.log",
 		},
 		{
 			name:     "using an iam profile",
 			schedule: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", UseIAM: true},
-			expected: "@daily dokku redis:backup lollipop my-bucket --use-iam &>> /var/log/dokku/redis.log",
+			expected: "@daily dokku redis:backup lollipop my-bucket --use-iam &>> /var/log/dokku/redis.lollipop.backup.log",
 		},
 		{
 			name:     "with a mailto",
 			schedule: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", Mailto: "ops@example.com"},
-			expected: "@daily dokku redis:backup lollipop my-bucket 2>&1 | tee -a /var/log/dokku/redis.log",
+			expected: "@daily dokku redis:backup lollipop my-bucket 2>&1 | tee -a /var/log/dokku/redis.lollipop.backup.log",
 		},
 	}
 
@@ -264,7 +302,7 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to cat the schedule: %s", err)
 	}
-	if contents != "0 3 * * * dokku redis:backup lollipop my-bucket --use-iam 2>&1 | tee -a /var/log/dokku/redis.log\n" {
+	if contents != "0 3 * * * dokku redis:backup lollipop my-bucket --use-iam 2>&1 | tee -a /var/log/dokku/redis.lollipop.backup.log\n" {
 		t.Errorf("unexpected cat output %q", contents)
 	}
 

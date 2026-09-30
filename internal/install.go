@@ -297,6 +297,14 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 		}
 		crontabChanged = crontabChanged || changed
 
+		// a scheduled backup is written into the dokku crontab the way this
+		// version builds it only once dokku writes the crontab again, and until
+		// then it keeps whatever an earlier version handed dokku, such as the
+		// log file every service of the datastore used to share
+		if _, ok := ReadBackupSchedule(input.Datastore, serviceName); ok {
+			crontabChanged = true
+		}
+
 		// older services recorded the image only on the container, so recover it
 		// onto disk where everything else now looks for it. Gated on what the
 		// files say rather than on whether they exist, because an empty file is

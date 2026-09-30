@@ -53,6 +53,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"backup-deauth": func() (cli.Command, error) {
 			return &commands.BackupDeauthCommand{Meta: meta}, nil
 		},
+		"backup-logs": func() (cli.Command, error) {
+			return &commands.BackupLogsCommand{Meta: meta}, nil
+		},
 		"backup-schedule": func() (cli.Command, error) {
 			return &commands.BackupScheduleCommand{Meta: meta}, nil
 		},

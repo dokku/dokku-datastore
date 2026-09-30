@@ -122,7 +122,7 @@ func (c *BackupScheduleCommand) Usage() string {
 func (c *BackupScheduleCommand) Documentation() string {
 	return `schedule a backup
 > 'schedule' is a crontab expression, eg. "0 3 * * *" for each day at 3am, or a descriptor such as "@daily". A schedule cron cannot run is refused.
-> the backup is added to the dokku crontab through the cron-entries plugin trigger, so it is listed by "dokku cron:list --global" and its output is appended to /var/log/dokku/{{.CommandPrefix}}.log
+> the backup is added to the dokku crontab through the cron-entries plugin trigger, so it is listed by "dokku cron:list --global" and its output is appended to /var/log/dokku/{{.CommandPrefix}}.<service>.backup.log, which "dokku {{.CommandPrefix}}:backup-logs <service>" prints
 > NOTE: dokku only writes a crontab when the global scheduler or at least one app uses the docker-local scheduler, so a scheduled backup does not run on a host that only uses k3s or null
 dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket
 schedule a backup and authenticate via iam
@@ -153,6 +153,33 @@ dokku {{.CommandPrefix}}:backup-schedule-cat lollipop`
 
 // Group is the readme usage section the command is documented under
 func (c *BackupScheduleCatCommand) Group() string {
+	return definition.GroupBackups
+}
+
+// Description returns the one line description of the command, in the idiom of the
+// plugin rather than of the binary
+func (c *BackupLogsCommand) Description() string {
+	return `print the most recent output of the scheduled backups of the service`
+}
+
+// Usage returns the argument sketch rendered after the command name
+func (c *BackupLogsCommand) Usage() string {
+	return `<service> [-t|--tail [<tail-num>]]`
+}
+
+// Documentation returns the long form documentation for the command
+func (c *BackupLogsCommand) Documentation() string {
+	return `print the most recent output of the scheduled backups of the service
+> each service's scheduled backups append their output to /var/log/dokku/{{.CommandPrefix}}.<service>.backup.log, or to the same file under DOKKU_LOGS_DIR when dokku keeps its logs elsewhere. Every run starts and ends with a line marked with the time in utc.
+dokku {{.CommandPrefix}}:backup-logs lollipop
+by default, the log will not be tailed, but you can do this with the --tail flag:
+dokku {{.CommandPrefix}}:backup-logs lollipop --tail
+by default the last 100 lines are shown, but a different count can be specified
+dokku {{.CommandPrefix}}:backup-logs lollipop --tail=5`
+}
+
+// Group is the readme usage section the command is documented under
+func (c *BackupLogsCommand) Group() string {
 	return definition.GroupBackups
 }
 

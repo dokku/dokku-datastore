@@ -2,12 +2,11 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
-	"time"
 
 	"github.com/dokku/dokku-datastore/internal"
 	"github.com/dokku/dokku-datastore/internal/service"
@@ -17,83 +16,87 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
-// BackupCommand is the command for unexposing a service
-type BackupCommand struct {
+// BackupLogsCommand is the command for showing the log of a service's scheduled
+// backups
+type BackupLogsCommand struct {
 	// Meta is the command meta
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
-	// useIAM uses the iam profile attached to the server instead of stored credentials
-	useIAM bool
+
+	// tail is the number of lines to display, and its presence is what asks for
+	// the log to be followed, the same as on the logs command
+	tail int
 }
 
 // Name returns the name of the command
-func (c *BackupCommand) Name() string {
-	return "backup"
+func (c *BackupLogsCommand) Name() string {
+	return "backup-logs"
 }
 
 // Synopsis returns the synopsis of the command
-func (c *BackupCommand) Synopsis() string {
-	return "Backs a service up to an s3 bucket"
+func (c *BackupLogsCommand) Synopsis() string {
+	return "Shows the log of a service's scheduled backups"
 }
 
 // Help returns the help text for the command
-func (c *BackupCommand) Help() string {
+func (c *BackupLogsCommand) Help() string {
 	return command.CommandHelp(c)
 }
 
 // Examples returns the examples for the command
-func (c *BackupCommand) Examples() map[string]string {
+func (c *BackupLogsCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Backs a redis service named test up to a bucket": fmt.Sprintf("%s %s redis test my-bucket", appName, c.Name()),
+		"Shows the backup log of a redis service named test":                          fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Follows the backup log of a redis service named test":                        fmt.Sprintf("%s %s redis test --tail", appName, c.Name()),
+		"Follows the backup log of a redis service named test from its last 50 lines": fmt.Sprintf("%s %s redis test --tail=50", appName, c.Name()),
 	}
 }
 
 // Arguments returns the arguments for the command
-func (c *BackupCommand) Arguments() []command.Argument {
+func (c *BackupLogsCommand) Arguments() []command.Argument {
 	args := []command.Argument{}
 	args = append(args, command.Argument{
 		Name:        "datastore-type",
-		Description: "the type of datastore to back up",
+		Description: "the type of datastore to show the backup log of",
 		Optional:    false,
 		Type:        command.ArgumentString,
 	})
 	args = append(args, command.Argument{
 		Name:        "service-name",
-		Description: "the name of the service to back up",
+		Description: "the name of the service to show the backup log of",
 		Optional:    false,
-		Type:        command.ArgumentString,
-	})
-	args = append(args, command.Argument{
-		Name:        "bucket-name",
-		Description: "the name of the s3 bucket to upload the backup to",
-		Optional:    true,
 		Type:        command.ArgumentString,
 	})
 	return args
 }
 
 // AutocompleteArgs returns the autocomplete arguments for the command
-func (c *BackupCommand) AutocompleteArgs() complete.Predictor {
+func (c *BackupLogsCommand) AutocompleteArgs() complete.Predictor {
 	return complete.PredictSet("redis")
 }
 
 // ParsedArguments parses the arguments for the command
-func (c *BackupCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
+func (c *BackupLogsCommand) ParsedArguments(args []string) (map[string]command.Argument, error) {
 	return internal.ParseArguments(args, c.Arguments())
 }
 
 // FlagSet returns the flag set for the command
-func (c *BackupCommand) FlagSet() *flag.FlagSet {
+func (c *BackupLogsCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
-	f.BoolVarP(&c.useIAM, "use-iam", "u", false, "use the IAM profile associated with the current server")
+	f.IntVarP(&c.tail, "tail", "t", defaultLogLines, "follow the log, optionally showing this many lines")
+
+	// makes the value optional, the same as on the logs command: --tail follows
+	// with the default number of lines and --tail=50 says how many
+	f.Lookup("tail").NoOptDefVal = strconv.Itoa(defaultLogLines)
+
 	return f
 }
 
 // AutocompleteFlags returns the autocomplete flags for the command
-func (c *BackupCommand) AutocompleteFlags() complete.Flags {
+func (c *BackupLogsCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
@@ -102,7 +105,7 @@ func (c *BackupCommand) AutocompleteFlags() complete.Flags {
 }
 
 // Run runs the command
-func (c *BackupCommand) Run(args []string) int {
+func (c *BackupLogsCommand) Run(args []string) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGHUP,
@@ -155,7 +158,7 @@ func (c *BackupCommand) Run(args []string) int {
 		return 1
 	}
 
-	if code, unimplemented := requireImplemented(datastore, "backup"); unimplemented {
+	if code, unimplemented := requireImplemented(datastore, "backup-logs"); unimplemented {
 		return code
 	}
 
@@ -190,30 +193,17 @@ func (c *BackupCommand) Run(args []string) int {
 		return 1
 	}
 
-	bucketName := arguments["bucket-name"].StringValue()
-	if bucketName == "" {
-		logger.Error(internal.ErrorInput{
-			Message: command.CommandErrorText(c),
-			Error:   errors.New("Please specify an aws bucket for the backup"), //nolint:staticcheck // matches the bash datastore plugins
-		})
-		return 1
-	}
-
-	// the start and end of each run are marked with the time, since a scheduled
-	// backup appends everything it prints to the service's backup log
-	logger.Header2(fmt.Sprintf("Backing up %s to %s at %s", serviceName, bucketName, internal.BackupTimestamp(time.Now()))) //nolint:errcheck
-
-	if err := internal.Backup(ctx, internal.BackupInput{
-		BucketName:  bucketName,
+	// the log outlives the schedule, so a service that is no longer scheduled
+	// still has the output of the backups it ran
+	if err := internal.BackupLogs(ctx, internal.BackupLogsInput{
 		Datastore:   datastore,
 		ServiceName: serviceName,
-		UseIAM:      c.useIAM,
+		Num:         c.tail,
+		Tail:        flags.Changed("tail"),
 	}); err != nil {
-		logger.Info(fmt.Sprintf("Backup of %s failed at %s", serviceName, internal.BackupTimestamp(time.Now())))
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}
 
-	logger.Info(fmt.Sprintf("Backup of %s finished at %s", serviceName, internal.BackupTimestamp(time.Now())))
 	return 0
 }
