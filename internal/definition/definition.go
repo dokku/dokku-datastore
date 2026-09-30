@@ -264,6 +264,16 @@ type Dokku struct {
 	// keeps working as it always has.
 	ReservedNames []string `yaml:"reserved_names"`
 
+	// Documentation are sections of the plugin readme that belong to no command,
+	// for what a datastore does that none of its commands explain. Each body is
+	// written the way a command's documentation is: a line starting with dokku
+	// becomes a shell block, a line indented by four spaces a literal, a line
+	// opening with > a note, and the rest prose. Prose lines run together into
+	// one paragraph up to the next block, so each sentence ends in a period, and
+	// a quote in prose is rendered as a backtick, which is how inline code is
+	// written.
+	Documentation []DocumentationSection `yaml:"documentation"`
+
 	// Hooks are the steps a datastore needs run around a service's lifecycle,
 	// which are commands in every respect except that they are not subcommands:
 	// a user does not invoke them, the tool does.
@@ -291,6 +301,16 @@ type Dokku struct {
 	// absence is what makes that subcommand unimplemented. Any other key becomes
 	// an extra subcommand.
 	Commands map[string]Command `yaml:"commands"`
+}
+
+// DocumentationSection is one section of the plugin readme a definition adds.
+type DocumentationSection struct {
+	// Title is the section's heading, a template like the body
+	Title string `yaml:"title"`
+
+	// Body is the section itself, a template rendered against the same data a
+	// command's documentation is
+	Body string `yaml:"body"`
 }
 
 // Secret is a credential generated at create time and written to the service root.

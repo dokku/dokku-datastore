@@ -141,7 +141,7 @@ If a service names a definition the plugin no longer ships, commands that would 
 A flavor is a datastore on an image other than its own, shipped as definitions of its own - one per major version, named `<plugin>-<flavor>-<major>` - so that it is placed on the right data directory and followed by dependabot like any other. Postgres has three:
 
 | Definition | Image | Tags |
-|---|---|---|
+| --- | --- | --- |
 | `postgres-pgvector-pg17` | `pgvector/pgvector` | `*-pg17` |
 | `postgres-pgvector-pg18` | `pgvector/pgvector` | `*-pg18` |
 | `postgres-postgis-pg17` | `postgis/postgis` | `17-*` |
@@ -164,6 +164,20 @@ An image no definition ships still runs on the datastore's own definitions, as i
 The images are pinned in each definition's `Dockerfile`, and dependabot holds an older major inside it according to how the image writes its tags. A tag carrying the major as a suffix, such as `0.8.6-pg17`, is only ever moved to one with the same suffix, so it needs nothing more; a tag leading with the major, such as `17-3.5`, needs its semver-major updates ignored, as `postgres-17` does. `go test` checks both, and that every definition has an entry.
 
 postgis publishes images for amd64 only, so its definitions do not run on an arm64 host. The timescaledb image is alpine rather than debian, so its postgres user is `70` rather than `999`, and it ships no `openssl`: its certificate is made in the plain postgres image of the same major, at the tag that definition pins.
+
+## Encrypted postgres connections
+
+Every postgres service is created with a self-signed certificate, and its server encrypts any connection whose client asks it to. Nothing said so, and nothing handed the certificate out, so a client off the host could not verify it was talking to the service. `certificate` prints it, read from the running container, and the plugin readme explains how a client requires tls and verifies the server with it.
+
+```shell
+# the certificate a client verifies the server with
+dokku-datastore invoke postgres certificate lollipop > server.crt
+
+# a client that refuses an unencrypted connection and verifies the server
+psql "postgres://postgres:<password>@db.example.com:5432/lollipop?sslmode=verify-ca&sslrootcert=server.crt"
+```
+
+The certificate names no host, so `verify-full` fails where `verify-ca` succeeds. It is made once and kept when the service is rebuilt or upgraded. A certificate of your own is written over the service's `certs/server.crt` and `certs/server.key` as root, which keeps the owner and mode the server needs to read its key, and is served once the service is restarted.
 
 ## The version a service runs
 
@@ -729,3 +743,20 @@ dokku-datastore trigger-help redis redis:help create
 # the plugin readme, generated from the plugin checkout in the working directory
 dokku-datastore readme redis
 ```
+
+### Readme sections a definition adds
+
+What a datastore does that none of its commands explain had nowhere to be written but a plugin's own `docs/<command>.md`, which is attached to a command and kept out of reach of the tests here. A definition may now add sections of its own to the readme under `x-dokku.documentation`, each with a `title` and a `body`. They are written after the sections every datastore has and before the one on disabling `docker image pull`, and where several definitions of a datastore declare the same title, the newest one's is used.
+
+```yaml
+x-dokku:
+  documentation:
+    - title: Encrypting connections with TLS
+      body: |
+        every {{.Title}} service is created with a self-signed certificate.
+        to refuse an unencrypted connection, add 'sslmode=require' to the dsn the service is exposed at:
+        dokku {{.CommandPrefix}}:info lollipop --exposed-dsn
+            postgres://postgres:PASSWORD@db.example.com:5432/lollipop?sslmode=require
+```
+
+Both are templates rendered against the same data a command's documentation is, and the body is written the way that documentation is. A line starting with `dokku` or `export` becomes a shell block, a line indented by four spaces becomes a literal block, and a line opening with `>` becomes a note. Every other line is prose, and prose lines run together into one paragraph up to the next block, so each sentence ends in a period. Inline code is written in single quotes, which become backticks, and an all caps word is quoted as though it were a variable, so write "tls" and "dsn" in lowercase and leave contractions out. A section with no title or no body, or two with one title, is refused when the definition is parsed.

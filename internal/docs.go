@@ -75,6 +75,10 @@ type DocumentationData struct {
 	// database a service is named after would be one the datastore keeps
 	ReservedNames []string
 
+	// Sections are the readme sections the datastore's definitions add, which
+	// belong to no command
+	Sections []definition.DocumentationSection
+
 	// Flavors are the images other than the datastore's own that it ships
 	// definitions for, such as pgvector/pgvector for postgres, each at the
 	// version its newest definition pins
@@ -154,6 +158,7 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		ExportArgs:     input.Datastore.AcceptsExtraArgs("export"),
 		ImportArgs:     input.Datastore.AcceptsExtraArgs("import"),
 		ReservedNames:  input.Datastore.Definition.Dokku.ReservedNames,
+		Sections:       input.Datastore.Documentation(),
 		Flavors:        documentedFlavors(input.Datastore),
 		Definitions:    documentedDefinitions(input.Datastore),
 		Volumes:        volumes,

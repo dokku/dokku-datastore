@@ -65,6 +65,20 @@ func TestCustomCommandUsageShowsArguments(t *testing.T) {
 	}
 }
 
+// Postgres prints the certificate its server encrypts connections with, so a
+// client off the host can verify it.
+func TestCustomCommandsForPostgres(t *testing.T) {
+	commands := CustomCommands(service.Datastores["postgres"])
+
+	if len(commands) != 1 || commands[0].Name() != "certificate" {
+		t.Fatalf("expected the certificate command, got %v", commands)
+	}
+
+	if commands[0].Usage() != "<service>" {
+		t.Errorf("expected the service argument, got %q", commands[0].Usage())
+	}
+}
+
 // Redis adds nothing of its own, so it has nothing extra to document.
 func TestCustomCommandsForADatastoreWithNone(t *testing.T) {
 	if commands := CustomCommands(service.Datastores["redis"]); len(commands) != 0 {

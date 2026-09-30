@@ -459,6 +459,15 @@ func TestGenerateWritesADatastoresOwnSubcommands(t *testing.T) {
 	}
 }
 
+// Postgres ships the command that prints its certificate the same way.
+func TestGenerateWritesThePostgresCertificateSubcommand(t *testing.T) {
+	scripts := writtenSubcommands(t, "postgres", commandRegistry(&ExposeCommand{}))
+
+	if !strings.Contains(scripts["certificate"], `dokku-datastore" invoke "$PLUGIN_COMMAND_PREFIX" certificate "$@"`) {
+		t.Errorf("expected certificate to dispatch through invoke, got:\n%s", scripts["certificate"])
+	}
+}
+
 // Both would be written to the same script, and one would silently replace the
 // other.
 func TestGenerateRefusesADatastoreCommandNamedLikeTheTools(t *testing.T) {

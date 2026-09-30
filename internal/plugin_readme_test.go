@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/service"
 )
 
@@ -45,6 +46,11 @@ func TestProcessSentence(t *testing.T) {
 			name:     "possessives survive the quote conversion",
 			lines:    []string{"the plugin's own documentation"},
 			expected: "The plugin's own documentation:",
+		},
+		{
+			name:     "inline code starting with an s keeps its opening backtick",
+			lines:    []string{"add 'sslmode=require' to the service's dsn."},
+			expected: "Add `sslmode=require` to the service's dsn.",
 		},
 		{
 			name:     "every sentence in a paragraph is capitalized",
@@ -286,6 +292,88 @@ func TestReadmeReservedNames(t *testing.T) {
 				t.Error("expected the section to list every reserved name")
 			}
 		})
+	}
+}
+
+// A definition's own sections are written only for the datastore that declares
+// them, after the ones every datastore has and before the docker pull section
+// the readme ends with.
+func TestReadmeDefinitionSections(t *testing.T) {
+	t.Setenv("DOKKU_NO_COLOR", "1")
+	clearImageEnv(t)
+
+	for name, expected := range map[string]bool{"postgres": true, "redis": false} {
+		t.Run(name, func(t *testing.T) {
+			readme, err := Readme(ReadmeInput{
+				Commands: append(helpTestCommands(), CustomCommands(service.Datastores[name])...),
+				Data:     NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores[name]}),
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			if actual := strings.Contains(readme, "### Encrypting connections with TLS"); actual != expected {
+				t.Errorf("expected the tls section to be present to be %t, got %t", expected, actual)
+			}
+
+			if actual := strings.Contains(readme, "dokku postgres:certificate <service>"); actual != expected {
+				t.Errorf("expected the certificate command to be documented to be %t, got %t", expected, actual)
+			}
+
+			if !strings.HasSuffix(readme, "disabled.\n") {
+				t.Error("expected the readme to still end with the docker pull section")
+			}
+
+			if strings.Contains(readme, "\n\n\n") {
+				t.Error("expected the readme to have no runs of blank lines")
+			}
+
+			if !expected {
+				return
+			}
+
+			for _, want := range []string{
+				"`/var/lib/dokku/services/postgres/lollipop/certs`",
+				"add `sslmode=require` to the dsn",
+				"```shell\ndokku postgres:certificate lollipop > server.crt\n```",
+				"```\npostgres://postgres:PASSWORD@db.example.com:5432/lollipop?sslmode=verify-ca&sslrootcert=server.crt\n```",
+			} {
+				if !strings.Contains(readme, want) {
+					t.Errorf("expected the tls section to contain %q", want)
+				}
+			}
+
+			if strings.Index(readme, "### Reserved service names") > strings.Index(readme, "### Encrypting connections with TLS") {
+				t.Error("expected the definition's sections after the ones every datastore has")
+			}
+		})
+	}
+}
+
+// A section is a template like the rest of the documentation, heading included,
+// and one that does not render stops the readme rather than printing half of it.
+func TestReadmeDefinitionSectionsAreTemplates(t *testing.T) {
+	data := DocumentationData{
+		CommandPrefix: "thing",
+		Title:         "Thing",
+		Sections: []definition.DocumentationSection{
+			{Title: "Using {{.Title}}", Body: "a {{.Title}} service does things.\ndokku {{.CommandPrefix}}:info lollipop\n"},
+		},
+	}
+
+	sections, err := readmeDefinitionSections(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	expected := []string{"### Using Thing", "A Thing service does things.", "```shell\ndokku thing:info lollipop\n```"}
+	if strings.Join(sections, "\n\n") != strings.Join(expected, "\n\n") {
+		t.Errorf("expected %q, got %q", expected, sections)
+	}
+
+	data.Sections[0].Body = "{{.Missing}}"
+	if _, err := readmeDefinitionSections(data); err == nil {
+		t.Error("expected a section naming missing data to be refused")
 	}
 }
 

@@ -657,6 +657,69 @@ func TestParseAllowsACustomCommandWithNoSection(t *testing.T) {
 	}
 }
 
+// A definition may add readme sections of its own, for what a datastore does
+// that none of its commands explain.
+func TestParseReadsDocumentationSections(t *testing.T) {
+	compose := validCompose + "\n  documentation:\n    - title: Using the thing\n      body: |\n        the thing does things.\n        dokku thing:info lollipop\n"
+	parsed, err := parseCompose(t, compose)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if len(parsed.Dokku.Documentation) != 1 {
+		t.Fatalf("expected one section, got %d", len(parsed.Dokku.Documentation))
+	}
+
+	section := parsed.Dokku.Documentation[0]
+	if section.Title != "Using the thing" {
+		t.Errorf("expected the title to be read, got %q", section.Title)
+	}
+
+	if section.Body != "the thing does things.\ndokku thing:info lollipop\n" {
+		t.Errorf("expected the body to be read, got %q", section.Body)
+	}
+}
+
+// A section with nothing to head it or nothing in it would render as a stray
+// heading or as prose under the section before it, and two sections with one
+// title could not be told apart when a newer definition replaces one.
+func TestParseRefusesABrokenDocumentationSection(t *testing.T) {
+	tests := []struct {
+		name     string
+		sections string
+		expected string
+	}{
+		{
+			name:     "no title",
+			sections: "    - body: the thing does things.\n",
+			expected: "needs a title",
+		},
+		{
+			name:     "no body",
+			sections: "    - title: Using the thing\n",
+			expected: "needs a body",
+		},
+		{
+			name:     "a title used twice",
+			sections: "    - title: Using the thing\n      body: one.\n    - title: Using the thing\n      body: two.\n",
+			expected: "declared twice",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := parseCompose(t, validCompose+"\n  documentation:\n"+test.sections)
+			if err == nil {
+				t.Fatal("expected the section to be refused")
+			}
+
+			if !strings.Contains(err.Error(), test.expected) {
+				t.Errorf("expected the error to contain %q, got %q", test.expected, err)
+			}
+		})
+	}
+}
+
 // The directory is optional: a definition that names none stores its services
 // under its plugin name, which is every definition but graphite's.
 func TestServicesDirectoryDefaultsToThePlugin(t *testing.T) {

@@ -154,6 +154,27 @@ func (s *Datastore) CustomCommands() map[string]definition.Command {
 	return declared
 }
 
+// Documentation is every readme section the datastore adds, in the order each
+// title is first declared. Where two definitions declare the same title the
+// newest wins, as with its custom commands.
+func (s *Datastore) Documentation() []definition.DocumentationSection {
+	sections := []definition.DocumentationSection{}
+	index := map[string]int{}
+	for _, found := range s.Definitions() {
+		for _, section := range found.Dokku.Documentation {
+			if i, ok := index[section.Title]; ok {
+				sections[i] = section
+				continue
+			}
+
+			index[section.Title] = len(sections)
+			sections = append(sections, section)
+		}
+	}
+
+	return sections
+}
+
 // TriggerNames is every dokku trigger the datastore handles, sorted, so that
 // what a plugin ships is the same on every generation.
 func (s *Datastore) TriggerNames() []string {
