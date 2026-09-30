@@ -20,10 +20,12 @@ type composeFile struct {
 // composeService is the service as dokku runs it, rather than as the definition
 // declares it.
 //
-// There is deliberately no ports or expose key. A container exposes what its
-// image declares and nothing more, which is what the docker path produces, and
-// a datastore has never published a port itself. The port names live in the
-// definition, where the dsn, the readiness probe and the ambassador read them.
+// There is deliberately no expose key. A container exposes what its image
+// declares and nothing more, which is what the docker path produces. The port
+// names live in the definition, where the dsn, the readiness probe and the
+// ambassador read them. Ports are only published for a service exposed
+// directly rather than through an ambassador, with the same specs the docker
+// path hands --publish.
 type composeService struct {
 	// ContainerName and Hostname are pinned, which is what lets every read path
 	// address the container by name whichever backend created it.
@@ -57,6 +59,8 @@ type composeService struct {
 	// on the bridge would quietly move.
 	NetworkMode string                       `yaml:"network_mode,omitempty"`
 	Networks    map[string]composeServiceNet `yaml:"networks,omitempty"`
+
+	Ports []string `yaml:"ports,omitempty"`
 
 	Deploy *composeDeploy `yaml:"deploy,omitempty"`
 }
@@ -159,6 +163,11 @@ func Compose(input Input) ([]byte, error) {
 		Volumes:     composeVolumes(arguments),
 		ShmSize:     arguments.ShmSize,
 		WorkingDir:  arguments.WorkingDir,
+		Ports:       arguments.Publish,
+	}
+
+	if len(arguments.Publish) > 0 {
+		service.Labels[PublishedPortsLabel] = strings.Join(arguments.Publish, ",")
 	}
 
 	if arguments.Memory != "" {

@@ -18,7 +18,7 @@ func TestSetPropertyRejectsUnknownKeys(t *testing.T) {
 		t.Fatal("expected an error for an unknown key, got none")
 	}
 
-	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, port-source-range, expose-host, export-args, import-args, volume-targets"
+	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, port-source-range, expose-host, expose-mode, export-args, import-args, volume-targets"
 	if err.Error() != expected {
 		t.Errorf("expected %q, got %q", expected, err)
 	}
@@ -30,9 +30,10 @@ func TestSettableProperties(t *testing.T) {
 	// which have nowhere else to be set, and
 	// the two that bound a container's log, the policy docker restarts it by, how
 	// long it is waited on to become ready, where and to whom an exposed service
-	// is published, the host its exposed dsn names, and the arguments its exports
+	// is published, the host its exposed dsn names, whether it is published
+	// through an ambassador or directly, and the arguments its exports
 	// and imports are run with, and where the definition's volumes are mounted
-	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "port-source-range", "expose-host", "export-args", "import-args", "volume-targets"}
+	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "port-source-range", "expose-host", "expose-mode", "export-args", "import-args", "volume-targets"}
 	if strings.Join(SettableProperties, ",") != strings.Join(expected, ",") {
 		t.Errorf("expected %v, got %v", expected, SettableProperties)
 	}
@@ -192,6 +193,12 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 			expected: `invalid expose-host value "bad_host"`,
 		},
 		{
+			name:     "an expose mode that is not one",
+			key:      service.ExposeModeProperty,
+			value:    "host",
+			expected: `invalid expose-mode value "host"`,
+		},
+		{
 			name:     "export arguments with an unterminated quote",
 			key:      service.ExportArgsProperty,
 			value:    `--where="id > 1`,
@@ -260,7 +267,7 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 // Unsetting is how every other property is cleared, so an empty value has to
 // reach the delete rather than being refused as an unusable one.
 func TestSetPropertyAcceptsAnEmptyValue(t *testing.T) {
-	for _, key := range []string{service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExportArgsProperty, service.ImportArgsProperty, service.VolumeTargetsProperty} {
+	for _, key := range []string{service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExposeModeProperty, service.ExportArgsProperty, service.ImportArgsProperty, service.VolumeTargetsProperty} {
 		if err := ValidatePropertyValue(key, ""); err != nil {
 			t.Errorf("expected an empty %s to be accepted, got %q", key, err)
 		}
@@ -355,5 +362,55 @@ func TestSetVolumeTargetsRefusesAMountedPath(t *testing.T) {
 	targets, err := service.ServiceVolumeTargets(redis, "lollipop")
 	if err != nil || targets != nil {
 		t.Errorf("expected nothing to be written, got %v and %v", targets, err)
+	}
+}
+
+// A service published directly has no ambassador to hold its clients to a
+// range, so the two are refused together whichever is set second, and
+// clearing either one is always allowed
+func TestSetExposeModeRefusesASourceRange(t *testing.T) {
+	redis := service.Datastores["redis"]
+	withInfoService(t, redis, "lollipop")
+
+	if err := SetProperty(redis, "lollipop", service.PortSourceRangeProperty, "10.0.0.0/8"); err != nil {
+		t.Fatalf("expected the range to be accepted, got %q", err)
+	}
+
+	err := SetProperty(redis, "lollipop", service.ExposeModeProperty, service.ExposeModeDirect)
+	if err == nil {
+		t.Fatal("expected the direct mode to be refused alongside a source range")
+	}
+
+	if !strings.Contains(err.Error(), "cannot be enforced") {
+		t.Errorf("expected the refusal to say why, got %q", err)
+	}
+
+	if mode := service.ServiceExposeMode(redis, "lollipop"); mode != service.ExposeModeAmbassador {
+		t.Errorf("expected nothing to be written, got %q", mode)
+	}
+
+	if err := SetProperty(redis, "lollipop", service.ExposeModeProperty, service.ExposeModeAmbassador); err != nil {
+		t.Errorf("expected the ambassador to be accepted alongside a source range, got %q", err)
+	}
+
+	if err := SetProperty(redis, "lollipop", service.PortSourceRangeProperty, ""); err != nil {
+		t.Fatalf("expected clearing the range to be allowed, got %q", err)
+	}
+
+	if err := SetProperty(redis, "lollipop", service.ExposeModeProperty, service.ExposeModeDirect); err != nil {
+		t.Fatalf("expected the direct mode to be accepted without a source range, got %q", err)
+	}
+
+	err = SetProperty(redis, "lollipop", service.PortSourceRangeProperty, "10.0.0.0/8")
+	if err == nil {
+		t.Fatal("expected a source range to be refused for a service exposed directly")
+	}
+
+	if actual := service.ServicePortSourceRange(redis, "lollipop"); actual != "" {
+		t.Errorf("expected nothing to be written, got %q", actual)
+	}
+
+	if err := SetProperty(redis, "lollipop", service.ExposeModeProperty, ""); err != nil {
+		t.Errorf("expected clearing the mode to be allowed, got %q", err)
 	}
 }

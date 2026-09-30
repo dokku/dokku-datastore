@@ -256,6 +256,28 @@ create
 --workdir=/data
 redis:8.8.0
 
+### published ports
+container
+create
+--cidfile=/var/lib/dokku/services/redis/lollipop/ID
+--env-file=/var/lib/dokku/services/redis/lollipop/ENV
+--hostname=dokku.redis.lollipop
+--label=dokku.service=redis
+--label=dokku=service
+--label=dokku.service.published-ports=127.0.0.1:1234:6379,[::1]:1235:8125/udp
+--name=dokku.redis.lollipop
+--restart=always
+--volume=/var/lib/dokku/services/redis/lollipop/config:/usr/local/etc/redis
+--volume=/var/lib/dokku/services/redis/lollipop/data:/data
+--workdir=/data
+--publish=127.0.0.1:1234:6379
+--publish=[::1]:1235:8125/udp
+redis:8.8.0
+redis-server
+/usr/local/etc/redis/redis.conf
+--bind
+0.0.0.0
+
 ### everything at once
 container
 create

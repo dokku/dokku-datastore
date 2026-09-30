@@ -53,6 +53,11 @@ type ContainerArgsInput struct {
 	// NetworkAlias is the dns name the service answers to on its networks
 	NetworkAlias string
 
+	// Publish are the docker --publish specs the container publishes its
+	// ports with, each [address:]host:container[/udp]. Empty for a service
+	// that is not exposed, or that is exposed through an ambassador
+	Publish []string
+
 	// RestartPolicy is the docker restart policy, empty for DefaultRestartPolicy
 	RestartPolicy string
 
@@ -119,6 +124,13 @@ func MountArg(mount definition.VolumeMount) string {
 	return strings.Join(fields, ",")
 }
 
+// PublishedPortsLabel is the label a service container carries naming the
+// ports it publishes itself, comma separated. Unset on one that publishes
+// none, which is every container made before a service could be exposed
+// directly, so what a container publishes can be read without parsing
+// docker's own port bindings back into specs.
+const PublishedPortsLabel = "dokku.service.published-ports"
+
 // DefaultRestartPolicy is what a container is made with when its service names
 // no restart policy. A datastore an app depends on should come back on its own,
 // which is why this was the only value there was before there was a choice.
@@ -150,9 +162,16 @@ func DockerCreateArgs(input ContainerArgsInput) []string {
 		"--hostname=" + input.ContainerName,
 		"--label=dokku.service=" + input.CommandPrefix,
 		"--label=dokku=service",
-		"--name=" + input.ContainerName,
-		"--restart=" + RestartPolicy(input.RestartPolicy),
 	}
+
+	if len(input.Publish) > 0 {
+		args = append(args, "--label="+PublishedPortsLabel+"="+strings.Join(input.Publish, ","))
+	}
+
+	args = append(args,
+		"--name="+input.ContainerName,
+		"--restart="+RestartPolicy(input.RestartPolicy),
+	)
 
 	// sorted, because a map would otherwise emit a different command each run
 	names := make([]string, 0, len(input.Env))
@@ -190,6 +209,10 @@ func DockerCreateArgs(input ContainerArgsInput) []string {
 	if input.InitialNetwork != "" {
 		args = append(args, "--network="+input.InitialNetwork)
 		args = append(args, "--network-alias="+input.NetworkAlias)
+	}
+
+	for _, spec := range input.Publish {
+		args = append(args, "--publish="+spec)
 	}
 
 	args = append(args, input.TaggedImage)

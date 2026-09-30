@@ -78,6 +78,48 @@ func TestComposeAgreesWithTheArgv(t *testing.T) {
 	}
 }
 
+// A service exposed directly publishes the same specs through compose that the
+// docker path hands --publish, and carries the same label saying so.
+func TestComposePublishesWhatTheArgvPublishes(t *testing.T) {
+	input := redisInput(t)
+	input.Scope.Publish = []string{"127.0.0.1:1234:6379", "1235:8125/udp"}
+
+	arguments, err := ContainerArgs(input)
+	if err != nil {
+		t.Fatalf("unable to resolve: %s", err)
+	}
+
+	rendered, err := Compose(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	var file composeFile
+	if err := yaml.Unmarshal(rendered, &file); err != nil {
+		t.Fatalf("unable to parse the rendered file: %s", err)
+	}
+
+	service := file.Services["redis"]
+	if !reflect.DeepEqual(service.Ports, arguments.Publish) {
+		t.Errorf("expected the ports %v, got %v", arguments.Publish, service.Ports)
+	}
+
+	if label := service.Labels[PublishedPortsLabel]; label != "127.0.0.1:1234:6379,1235:8125/udp" {
+		t.Errorf("expected the published ports label, got %q", label)
+	}
+
+	args := strings.Join(DockerCreateArgs(arguments), " ")
+	for _, spec := range arguments.Publish {
+		if !strings.Contains(args, "--publish="+spec) {
+			t.Errorf("expected the argv to publish %q, got %s", spec, args)
+		}
+	}
+
+	if !strings.Contains(args, "--label="+PublishedPortsLabel+"=127.0.0.1:1234:6379,1235:8125/udp") {
+		t.Errorf("expected the argv to carry the published ports label, got %s", args)
+	}
+}
+
 func TestComposeJoinsANamedNetwork(t *testing.T) {
 	input := redisInput(t)
 	input.Scope.InitialNetwork = "custom-network"

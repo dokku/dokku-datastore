@@ -11,7 +11,7 @@ import (
 )
 
 // SettableProperties are the properties a service exposes through the set command
-var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.WaitTimeoutProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExportArgsProperty, service.ImportArgsProperty, service.VolumeTargetsProperty}
+var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.BackupStorageClassProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.WaitTimeoutProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExposeModeProperty, service.ExportArgsProperty, service.ImportArgsProperty, service.VolumeTargetsProperty}
 
 // InvalidPropertyError reports a property the set command does not manage
 func InvalidPropertyError() error {
@@ -52,6 +52,8 @@ func ValidatePropertyValue(key string, value string) error {
 		return service.ValidateExposeHost(value)
 	case service.PortSourceRangeProperty:
 		return service.ValidatePortSourceRange(value)
+	case service.ExposeModeProperty:
+		return service.ValidateExposeMode(value)
 	case service.ExportArgsProperty, service.ImportArgsProperty:
 		return service.ValidateExtraArgs(key, value)
 	case service.VolumeTargetsProperty:
@@ -70,6 +72,19 @@ func ValidatePropertyValue(key string, value string) error {
 func ValidateServicePropertyValue(s *service.Datastore, serviceName string, key string, value string) error {
 	if err := ValidatePropertyValue(key, value); err != nil {
 		return err
+	}
+
+	// a service exposed directly has no ambassador to hold its clients to a
+	// range, so the two are refused together whichever is set second
+	switch key {
+	case service.ExposeModeProperty:
+		if err := service.CheckExposeModeSourceRange(value, service.ServicePortSourceRange(s, serviceName)); err != nil {
+			return err
+		}
+	case service.PortSourceRangeProperty:
+		if err := service.CheckExposeModeSourceRange(service.ServiceExposeMode(s, serviceName), value); err != nil {
+			return err
+		}
 	}
 
 	if key != service.VolumeTargetsProperty || value == "" {

@@ -100,3 +100,66 @@ func TestValidateExposeHost(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateExposeMode(t *testing.T) {
+	for _, value := range []string{"", ExposeModeAmbassador, ExposeModeDirect} {
+		if err := ValidateExposeMode(value); err != nil {
+			t.Errorf("expected %q to be accepted, got %q", value, err)
+		}
+	}
+
+	for _, value := range []string{"Direct", "host", "publish", " direct"} {
+		err := ValidateExposeMode(value)
+		if err == nil {
+			t.Errorf("expected %q to be refused", value)
+			continue
+		}
+
+		if !strings.Contains(err.Error(), ExposeModeProperty) {
+			t.Errorf("expected the error to name %s, got %q", ExposeModeProperty, err)
+		}
+	}
+}
+
+// docker cannot hold a published port to a range of clients, so a service
+// exposed directly with one would quietly accept everyone
+func TestCheckExposeModeSourceRange(t *testing.T) {
+	tests := []struct {
+		mode        string
+		sourceRange string
+		refused     bool
+	}{
+		{mode: "", sourceRange: "10.0.0.0/8"},
+		{mode: ExposeModeAmbassador, sourceRange: "10.0.0.0/8"},
+		{mode: ExposeModeDirect, sourceRange: ""},
+		{mode: ExposeModeDirect, sourceRange: "10.0.0.0/8", refused: true},
+	}
+
+	for _, test := range tests {
+		err := CheckExposeModeSourceRange(test.mode, test.sourceRange)
+		if test.refused && err == nil {
+			t.Errorf("expected %q with %q to be refused", test.mode, test.sourceRange)
+		}
+		if !test.refused && err != nil {
+			t.Errorf("expected %q with %q to be accepted, got %q", test.mode, test.sourceRange, err)
+		}
+	}
+}
+
+func TestServiceExposeMode(t *testing.T) {
+	redis := redisDatastore(t)
+	withServiceRoot(t, redis, "lollipop")
+	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
+
+	if mode := ServiceExposeMode(redis, "lollipop"); mode != ExposeModeAmbassador {
+		t.Errorf("expected a service that never set one to use the ambassador, got %q", mode)
+	}
+
+	if err := common.PropertyWrite(redis.Properties().CommandPrefix, "lollipop", ExposeModeProperty, ExposeModeDirect); err != nil {
+		t.Fatalf("failed to write the property: %v", err)
+	}
+
+	if mode := ServiceExposeMode(redis, "lollipop"); mode != ExposeModeDirect {
+		t.Errorf("expected the mode to be read back, got %q", mode)
+	}
+}

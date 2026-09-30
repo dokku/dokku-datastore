@@ -120,6 +120,15 @@ func TestContainerArgs(t *testing.T) {
 			},
 		},
 		{
+			// a service exposed directly publishes its ports itself, and says
+			// which on a label so the ports can be compared without docker's own
+			// bindings being parsed back into specs
+			name: "published ports",
+			mutate: func(input *ContainerArgsInput) {
+				input.Publish = []string{"127.0.0.1:1234:6379", "[::1]:1235:8125/udp"}
+			},
+		},
+		{
 			name: "everything at once",
 			mutate: func(input *ContainerArgsInput) {
 				input.ConfigOptions = []string{"--appendonly", "yes"}
@@ -172,7 +181,7 @@ func TestContainerArgs(t *testing.T) {
 func TestContainerArgsOmitsUnsetValues(t *testing.T) {
 	args := strings.Join(DockerCreateArgs(redisContainerArgs()), " ")
 
-	for _, absent := range []string{"--memory", "--shm-size", "--network", "--network-alias", "--log-driver", "--log-opt"} {
+	for _, absent := range []string{"--memory", "--shm-size", "--network", "--network-alias", "--log-driver", "--log-opt", "--publish", PublishedPortsLabel} {
 		if strings.Contains(args, absent) {
 			t.Errorf("expected %s to be absent when it is unset, got: %s", absent, args)
 		}

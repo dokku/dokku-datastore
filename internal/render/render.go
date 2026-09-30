@@ -102,6 +102,7 @@ func ContainerArgs(input Input) (ContainerArgsInput, error) {
 		LogOptions:     input.Scope.LogOptions,
 		Memory:         MemoryLimit(input.Scope.Memory),
 		NetworkAlias:   input.Scope.Host,
+		Publish:        input.Scope.Publish,
 		RestartPolicy:  input.Scope.RestartPolicy,
 		ShmSize:        input.Scope.ShmSize,
 		TaggedImage:    image,

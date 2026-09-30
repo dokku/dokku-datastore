@@ -521,6 +521,9 @@ expose the service on random ports on a single address, and only to clients in o
 dokku {{.CommandPrefix}}:set lollipop port-bind-address 10.0.0.5
 dokku {{.CommandPrefix}}:set lollipop port-source-range 10.0.0.0/8
 dokku {{.CommandPrefix}}:expose lollipop
+expose the service by publishing its ports on the service container itself rather than through an ambassador container. a running service is stopped and started to publish them, after asking, or without asking when --force is given
+dokku {{.CommandPrefix}}:set lollipop expose-mode direct
+dokku {{.CommandPrefix}}:expose lollipop --force
 print the dsn a client off the host connects with, which names the expose-host or the first global domain
 dokku {{.CommandPrefix}}:info lollipop --exposed-dsn`
 }
@@ -947,6 +950,10 @@ name the host the exposed dsn points clients at, when they reach the server by a
 dokku {{.CommandPrefix}}:set lollipop expose-host db.example.com
 go back to naming the first global domain
 dokku {{.CommandPrefix}}:set lollipop expose-host
+publish the exposed ports on the service container itself rather than through an ambassador container, which relays every connection. a port-source-range cannot be used with it
+dokku {{.CommandPrefix}}:set lollipop expose-mode direct
+go back to publishing the exposed ports through an ambassador container
+dokku {{.CommandPrefix}}:set lollipop expose-mode
 {{- if .ExportArgs}}
 pass extra arguments to every export of the service, including the ones backups and clones make. the value follows -- so that its leading dash is not read as a flag, and an argument with a space in it is quoted
 dokku {{.CommandPrefix}}:set lollipop export-args -- "<export-args...>"
@@ -966,7 +973,8 @@ go back to mounting every volume where the definition does
 dokku {{.CommandPrefix}}:set lollipop volume-targets
 {{- end}}
 > NOTE: a log setting, a restart policy or a volume target reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.
-> NOTE: a port-bind-address or port-source-range reaches an exposed service with {{.CommandPrefix}}:reexpose, which replaces the container publishing its ports and leaves the service container running.`
+> NOTE: a port-bind-address or port-source-range reaches an exposed service with {{.CommandPrefix}}:reexpose, which replaces the container publishing its ports and leaves the service container running.
+> NOTE: an expose-mode, or a port-bind-address for a service exposed directly, reaches an exposed service with {{.CommandPrefix}}:reexpose, which stops and starts a running service after asking. It also reaches the service the next time it is restarted, or stopped and started.`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1034,7 +1042,9 @@ func (c *UnexposeCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *UnexposeCommand) Documentation() string {
 	return `unexpose the service, removing access to it from the public interface (0.0.0.0)
-dokku {{.CommandPrefix}}:unexpose lollipop`
+dokku {{.CommandPrefix}}:unexpose lollipop
+unexpose a running service exposed directly, stopping and starting it without asking so that its container stops publishing the ports
+dokku {{.CommandPrefix}}:unexpose lollipop --force`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1045,7 +1055,7 @@ func (c *UnexposeCommand) Group() string {
 // Description returns the one line description of the command, in the idiom of the
 // plugin rather than of the binary
 func (c *ReexposeCommand) Description() string {
-	return `reexpose a {{.Title}} service, applying its expose settings without restarting it`
+	return `reexpose a {{.Title}} service, applying its expose settings`
 }
 
 // Usage returns the argument sketch rendered after the command name
@@ -1058,7 +1068,12 @@ func (c *ReexposeCommand) Documentation() string {
 	return `apply a changed port-bind-address or port-source-range to an exposed service, on the ports it is already exposed on
 dokku {{.CommandPrefix}}:set lollipop port-source-range 10.0.0.0/8
 dokku {{.CommandPrefix}}:reexpose lollipop
-> NOTE: only the container publishing the service's ports is replaced, so the service keeps running, though connections made through the exposed ports are dropped. A service that is not exposed, or is not running, is refused.`
+move an exposed service between being published through an ambassador and directly, stopping and starting it without asking
+dokku {{.CommandPrefix}}:set lollipop expose-mode direct
+dokku {{.CommandPrefix}}:reexpose lollipop --force
+> NOTE: a service published through an ambassador only has the ambassador replaced, so the service keeps running, though connections made through the exposed ports are dropped. An ambassador that already matches the service's settings and is publishing is left alone.
+> NOTE: a service whose container has to publish other ports, because it is exposed directly or is being moved between expose modes, is stopped and started. A running service is asked about first, and nothing is changed if the answer is no.
+> NOTE: A service that is not exposed is refused, as is one published through an ambassador that is not running.`
 }
 
 // Group is the readme usage section the command is documented under

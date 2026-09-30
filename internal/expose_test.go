@@ -4,9 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/dokku/dokku/plugins/common"
 )
 
 // withPortFile points service.DokkuLibRoot at a temporary directory and, when
@@ -148,4 +150,37 @@ func TestExposeServiceRefusesAnInvalidPort(t *testing.T) {
 
 func ptr(s string) *string {
 	return &s
+}
+
+// A service exposed directly has no ambassador to hold its clients to a
+// port-source-range, so it is refused rather than exposed with the range
+// quietly ignored, and before the port file is written.
+func TestExposeServiceRefusesADirectSourceRange(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withInfoService(t, datastore, "lollipop")
+
+	commandPrefix := datastore.Properties().CommandPrefix
+	if err := common.PropertyWrite(commandPrefix, "lollipop", service.ExposeModeProperty, service.ExposeModeDirect); err != nil {
+		t.Fatalf("failed to write the property: %v", err)
+	}
+	if err := common.PropertyWrite(commandPrefix, "lollipop", service.PortSourceRangeProperty, "10.0.0.0/8"); err != nil {
+		t.Fatalf("failed to write the property: %v", err)
+	}
+
+	err := ExposeService(context.Background(), ExposeServiceInput{
+		Datastore:   datastore,
+		Ports:       []string{"1234"},
+		ServiceName: "lollipop",
+	})
+	if err == nil {
+		t.Fatal("expected a direct expose with a source range to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "cannot be enforced") {
+		t.Errorf("expected the refusal to say why, got %q", err)
+	}
+
+	if IsExposed(datastore, "lollipop") {
+		t.Error("expected no port file after the refusal")
+	}
 }

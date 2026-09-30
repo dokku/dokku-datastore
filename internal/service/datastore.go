@@ -216,6 +216,7 @@ func (s *Datastore) CreateServiceContainer(ctx context.Context, input CreateServ
 	scope.LogDriver = logConfig.Driver
 	scope.LogOptions = logConfig.Options
 	scope.RestartPolicy = ServiceRestartPolicy(input.Datastore, input.ServiceName)
+	scope.Publish = DirectPublishSpecs(input.Datastore, input.ServiceName, ExposedHostPorts(input.Datastore, input.ServiceName))
 
 	// checked again rather than trusted from when it was given: a host path
 	// removed since would otherwise be recreated by docker, empty and owned by
