@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -291,6 +292,13 @@ func readmeUsage(input ReadmeInput) ([]string, error) {
 	sections = append(sections, readmeWaitTimeout(input.Data)...)
 	sections = append(sections, readmeVolumeTargets(input.Data)...)
 	sections = append(sections, readmeReservedNames(input.Data)...)
+
+	definitionSections, err := readmeDefinitionSections(input.Data)
+	if err != nil {
+		return nil, err
+	}
+
+	sections = append(sections, definitionSections...)
 	sections = append(sections, readmeDockerPull(input.Data)...)
 	return sections, nil
 }
@@ -512,6 +520,29 @@ func readmeReservedNames(data DocumentationData) []string {
 	}
 }
 
+// readmeDefinitionSections are the sections a datastore's definitions add, for
+// what it does that none of its commands explain. Each is written the way a
+// command's documentation is, so it renders the same way.
+func readmeDefinitionSections(data DocumentationData) ([]string, error) {
+	sections := []string{}
+	for _, section := range data.Sections {
+		title, err := RenderDocumentation(section.Title, data)
+		if err != nil {
+			return nil, err
+		}
+
+		body, err := RenderDocumentation(section.Body, data)
+		if err != nil {
+			return nil, err
+		}
+
+		sections = append(sections, "### "+strings.TrimSpace(title))
+		sections = append(sections, readmeDocumentationBlocks(body)...)
+	}
+
+	return sections, nil
+}
+
 // sortedCommands returns the commands in the order the readme lists them
 func sortedCommands(commands []PluginCommand) []PluginCommand {
 	sorted := make([]PluginCommand, len(commands))
@@ -563,6 +594,11 @@ func commandsInGroup(commands []PluginCommand, group string, order []string) []P
 	return matching
 }
 
+// possessive is an apostrophe that turning quotes into backticks caught, which
+// follows a letter where the quote opening inline code follows a space. Matching
+// on the s alone turned the opening quote of 'sslmode=require' back into one.
+var possessive = regexp.MustCompile("([\\p{L}\\p{N}])`s\\b")
+
 // processSentence turns a paragraph of the terminal oriented documentation into
 // markdown prose: sentences are capitalized, acronyms and variable names are
 // quoted, and the single quotes the annotations used become backticks.
@@ -591,7 +627,7 @@ func processSentence(lines []string) string {
 	text = strings.Join(pieces, ". ")
 	text = strings.ReplaceAll(text, "(0.0.0.0)", "(`0.0.0.0`)")
 	text = strings.ReplaceAll(text, "'", "`")
-	text = strings.ReplaceAll(text, "`s", "'s")
+	text = possessive.ReplaceAllString(text, "$1's")
 	text = strings.ReplaceAll(text, "``", "`")
 
 	return strings.TrimSpace(text)

@@ -323,6 +323,24 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		}
 	}
 
+	// a section is found by its title when two definitions of a datastore both
+	// declare it, so a title has to name exactly one
+	seenSection := map[string]bool{}
+	for _, section := range definition.Dokku.Documentation {
+		if strings.TrimSpace(section.Title) == "" {
+			return fail("every x-dokku.documentation section needs a title")
+		}
+
+		if strings.TrimSpace(section.Body) == "" {
+			return fail("documentation section %q needs a body", section.Title)
+		}
+
+		if seenSection[section.Title] {
+			return fail("documentation section %q is declared twice", section.Title)
+		}
+		seenSection[section.Title] = true
+	}
+
 	for name := range definition.Dokku.Commands {
 		// the base spec is fixed: a datastore's own commands are declared apart
 		// from it, so that what the tool implements cannot be extended by a
