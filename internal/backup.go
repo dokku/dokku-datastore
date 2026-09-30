@@ -264,13 +264,10 @@ const (
 	// BackupUseIAMProperty is set when a scheduled backup runs against an
 	// instance role rather than against stored credentials
 	BackupUseIAMProperty = "backup-use-iam"
-
-	// BackupMailtoProperty is who cron mails the output of a scheduled backup to
-	BackupMailtoProperty = "backup-mailto"
 )
 
 // backupScheduleProperties are every property a scheduled backup writes
-var backupScheduleProperties = []string{BackupScheduleProperty, BackupBucketProperty, BackupUseIAMProperty, BackupMailtoProperty}
+var backupScheduleProperties = []string{BackupScheduleProperty, BackupBucketProperty, BackupUseIAMProperty}
 
 // CronEntryFormatJSON is the entry format dokku passes to the cron-entries
 // trigger when it reads each entry as a json object on its own line. Only those
@@ -287,12 +284,6 @@ var cronScheduleParser = cronparser.NewParser(cronparser.Minute | cronparser.Hou
 // separates with semicolons, so anything a shell or that line reads specially
 // is refused rather than escaped.
 var bucketNamePattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
-
-// mailtoRecipientPattern is what each recipient of a scheduled backup's output
-// may be made of: an email address, or a local user on the host. The recipients
-// are written into a MAILTO line in the dokku crontab, so anything that would
-// end that line or that cron reads specially is refused.
-var mailtoRecipientPattern = regexp.MustCompile(`^[A-Za-z0-9._+-]+(@[A-Za-z0-9.-]+)?$`)
 
 // ValidateBackupSchedule reports whether a schedule is one cron can run.
 //
@@ -336,23 +327,6 @@ func ValidateBucketName(bucketName string) error {
 	return nil
 }
 
-// ValidateBackupMailto reports whether a comma-separated list of recipients can
-// be written into the MAILTO line of a scheduled backup. An empty value is
-// valid, and leaves the output of the backup to the global MAILTO.
-func ValidateBackupMailto(mailto string) error {
-	if mailto == "" {
-		return nil
-	}
-
-	for _, recipient := range strings.Split(mailto, ",") {
-		if !mailtoRecipientPattern.MatchString(recipient) {
-			return fmt.Errorf("invalid mailto value %q: specify a comma-separated list of email addresses or local users, without spaces", mailto)
-		}
-	}
-
-	return nil
-}
-
 // BackupSchedule is the scheduled backup a service is recorded with
 type BackupSchedule struct {
 	// Schedule is the cron schedule the backup runs on
@@ -366,7 +340,8 @@ type BackupSchedule struct {
 	UseIAM bool
 
 	// Mailto is who cron mails the output of the backup to, instead of the
-	// global MAILTO
+	// global MAILTO. It is the service's backup-mailto property, which is set
+	// with the set command rather than recorded with the schedule.
 	Mailto string
 }
 
@@ -380,7 +355,7 @@ func (b BackupSchedule) Validate() error {
 		return err
 	}
 
-	return ValidateBackupMailto(b.Mailto)
+	return service.ValidateBackupMailto(b.Mailto)
 }
 
 // ReadBackupSchedule reads the scheduled backup a service is recorded with, and
@@ -391,7 +366,7 @@ func ReadBackupSchedule(s *service.Datastore, serviceName string) (BackupSchedul
 		Schedule:   common.PropertyGet(commandPrefix, serviceName, BackupScheduleProperty),
 		BucketName: common.PropertyGet(commandPrefix, serviceName, BackupBucketProperty),
 		UseIAM:     common.PropertyGet(commandPrefix, serviceName, BackupUseIAMProperty) == "true",
-		Mailto:     common.PropertyGet(commandPrefix, serviceName, BackupMailtoProperty),
+		Mailto:     service.BackupMailto(s, serviceName),
 	}
 
 	if schedule.Schedule == "" {
@@ -589,14 +564,6 @@ func writeBackupSchedule(s *service.Datastore, serviceName string, schedule Back
 		return fmt.Errorf("unable to record the backup bucket: %w", err)
 	}
 
-	if schedule.Mailto == "" {
-		if err := common.PropertyDelete(commandPrefix, serviceName, BackupMailtoProperty); err != nil {
-			return fmt.Errorf("unable to record the backup mailto: %w", err)
-		}
-	} else if err := common.PropertyWrite(commandPrefix, serviceName, BackupMailtoProperty, schedule.Mailto); err != nil {
-		return fmt.Errorf("unable to record the backup mailto: %w", err)
-	}
-
 	if !schedule.UseIAM {
 		if err := common.PropertyDelete(commandPrefix, serviceName, BackupUseIAMProperty); err != nil {
 			return fmt.Errorf("unable to record the backup credentials: %w", err)
@@ -633,7 +600,6 @@ func regenerateCrontab(ctx context.Context) error {
 type ScheduleBackupInput struct {
 	BucketName  string
 	Datastore   *service.Datastore
-	Mailto      string
 	Schedule    string
 	ServiceName string
 	UseIAM      bool
@@ -646,7 +612,6 @@ func ScheduleBackup(ctx context.Context, input ScheduleBackupInput) error {
 		Schedule:   input.Schedule,
 		BucketName: input.BucketName,
 		UseIAM:     input.UseIAM,
-		Mailto:     input.Mailto,
 	}
 	if err := schedule.Validate(); err != nil {
 		return err

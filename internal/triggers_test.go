@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/dokku/dokku/plugins/common"
 	"github.com/mitchellh/cli"
 )
 
@@ -276,6 +277,12 @@ func TestCronEntriesForTriggerWithAMailto(t *testing.T) {
 	} {
 		if err := writeBackupSchedule(datastore, serviceName, schedule); err != nil {
 			t.Fatalf("failed to record the schedule for %s: %s", serviceName, err)
+		}
+
+		// written directly, since set refuses what cherry is recorded with, as
+		// a hand edit could have left it
+		if err := common.PropertyWrite("redis", serviceName, service.BackupMailtoProperty, schedule.Mailto); err != nil {
+			t.Fatalf("failed to record the mailto for %s: %s", serviceName, err)
 		}
 	}
 

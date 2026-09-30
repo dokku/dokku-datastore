@@ -115,7 +115,7 @@ func (c *BackupScheduleCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *BackupScheduleCommand) Usage() string {
-	return `<service> <schedule> <bucket-name> [-u|--use-iam] [--mailto <recipients>]`
+	return `<service> <schedule> <bucket-name> [-u|--use-iam]`
 }
 
 // Documentation returns the long form documentation for the command
@@ -126,11 +126,7 @@ func (c *BackupScheduleCommand) Documentation() string {
 > NOTE: dokku only writes a crontab when the global scheduler or at least one app uses the docker-local scheduler, so a scheduled backup does not run on a host that only uses k3s or null
 dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket
 schedule a backup and authenticate via iam
-dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket --use-iam
-schedule a backup and mail its output
-> '--mailto' is a comma-separated list of email addresses or local users, without spaces. Cron mails them all of the backup's output, which is still appended to the log file, so a mail transfer agent must be configured on the host.
-> NOTE: the mailto requires a dokku version that reads json entries from the cron-entries plugin trigger. Older versions ignore it with a warning, and still run the backup.
-dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket --mailto ops@example.com`
+dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket --use-iam`
 }
 
 // Group is the readme usage section the command is documented under
@@ -938,6 +934,10 @@ upload every backup to the same key, without a timestamp, so bucket versioning a
 dokku {{.CommandPrefix}}:set lollipop backup-timestamp false
 go back to timestamped backups
 dokku {{.CommandPrefix}}:set lollipop backup-timestamp
+mail the output of scheduled backups to a comma-separated list of email addresses or local users rather than to the global cron MAILTO. requires a dokku version that reads json entries from the cron-entries plugin trigger, and a mail transfer agent on the host
+dokku {{.CommandPrefix}}:set lollipop backup-mailto ops@example.com,dba@example.com
+go back to mailing scheduled backup output to the global cron MAILTO
+dokku {{.CommandPrefix}}:set lollipop backup-mailto
 cap the container log at a size of your own rather than the one it inherits
 dokku {{.CommandPrefix}}:set lollipop log-opt max-size=20m,max-file=3
 keep the log unbounded, which is what a service had before there was anything to say here

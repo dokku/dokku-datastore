@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/service"
-	"github.com/dokku/dokku/plugins/common"
 )
 
 // withScheduleService points the package at a temporary root and creates a
@@ -101,40 +100,6 @@ func TestValidateBucketName(t *testing.T) {
 			}
 			if !test.valid && err == nil {
 				t.Errorf("expected %q to be refused", test.bucketName)
-			}
-		})
-	}
-}
-
-// The recipients are written into a MAILTO line in the dokku crontab, so
-// anything that would end that line is refused
-func TestValidateBackupMailto(t *testing.T) {
-	tests := []struct {
-		mailto string
-		valid  bool
-	}{
-		{mailto: "", valid: true},
-		{mailto: "ops@example.com", valid: true},
-		{mailto: "ops+backups@mail.example.com", valid: true},
-		{mailto: "ops@example.com,dba@example.com", valid: true},
-		{mailto: "root", valid: true},
-		{mailto: "ops@example.com, dba@example.com", valid: false},
-		{mailto: "ops@example.com,", valid: false},
-		{mailto: "ops@@example.com", valid: false},
-		{mailto: "ops@example.com;true", valid: false},
-		{mailto: "ops@example.com\n* * * * * true", valid: false},
-		{mailto: "\"ops@example.com\"", valid: false},
-		{mailto: "ops@example.com$(true)", valid: false},
-	}
-
-	for _, test := range tests {
-		t.Run(test.mailto, func(t *testing.T) {
-			err := ValidateBackupMailto(test.mailto)
-			if test.valid && err != nil {
-				t.Errorf("expected %q to be valid, got %s", test.mailto, err)
-			}
-			if !test.valid && err == nil {
-				t.Errorf("expected %q to be refused", test.mailto)
 			}
 		})
 	}
@@ -258,7 +223,7 @@ func TestCrontabLine(t *testing.T) {
 
 // The properties are the only record of what a service was scheduled with, so
 // what is scheduled has to be what is read back, and unscheduling has to leave
-// nothing behind
+// nothing of the schedule behind
 func TestScheduleBackupRoundTrip(t *testing.T) {
 	datastore := withScheduleService(t, "lollipop")
 
@@ -270,13 +235,18 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 		t.Error("expected cat to fail with no scheduled backup")
 	}
 
+	// the mailto is a property of the service rather than of the schedule, and
+	// is read along with it
+	if err := SetProperty(datastore, "lollipop", service.BackupMailtoProperty, "ops@example.com"); err != nil {
+		t.Fatalf("failed to set the mailto: %s", err)
+	}
+
 	if err := ScheduleBackup(t.Context(), ScheduleBackupInput{
 		BucketName:  "my-bucket",
 		Datastore:   datastore,
 		Schedule:    "0 3 * * *",
 		ServiceName: "lollipop",
 		UseIAM:      true,
-		Mailto:      "ops@example.com",
 	}); err != nil {
 		t.Fatalf("failed to schedule the backup: %s", err)
 	}
@@ -313,8 +283,8 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 		t.Errorf("expected %+v, got %+v", expectedReport, report)
 	}
 
-	// scheduling again without --use-iam or --mailto drops them rather than
-	// keeping the old values
+	// scheduling again without --use-iam drops it rather than keeping the old
+	// value, while the mailto the service was set with stays
 	if err := ScheduleBackup(t.Context(), ScheduleBackupInput{
 		BucketName:  "my-bucket",
 		Datastore:   datastore,
@@ -323,19 +293,8 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("failed to schedule the backup again: %s", err)
 	}
-	if schedule, _ := ReadBackupSchedule(datastore, "lollipop"); schedule.UseIAM || schedule.Mailto != "" || schedule.Schedule != "@daily" {
-		t.Errorf("expected the new schedule without iam or a mailto, got %+v", schedule)
-	}
-
-	// scheduled with a mailto once more, so unscheduling has one to remove
-	if err := ScheduleBackup(t.Context(), ScheduleBackupInput{
-		BucketName:  "my-bucket",
-		Datastore:   datastore,
-		Mailto:      "ops@example.com",
-		Schedule:    "@daily",
-		ServiceName: "lollipop",
-	}); err != nil {
-		t.Fatalf("failed to schedule the backup with a mailto: %s", err)
+	if schedule, _ := ReadBackupSchedule(datastore, "lollipop"); schedule.UseIAM || schedule.Mailto != "ops@example.com" || schedule.Schedule != "@daily" {
+		t.Errorf("expected the new schedule without iam and with the mailto, got %+v", schedule)
 	}
 
 	if err := UnscheduleBackup(t.Context(), UnscheduleBackupInput{Datastore: datastore, ServiceName: "lollipop"}); err != nil {
@@ -345,8 +304,8 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 	if _, ok := ReadBackupSchedule(datastore, "lollipop"); ok {
 		t.Error("expected the backup to be unscheduled")
 	}
-	if mailto := common.PropertyGet("redis", "lollipop", BackupMailtoProperty); mailto != "" {
-		t.Errorf("expected unscheduling to remove the mailto, got %q", mailto)
+	if mailto := service.BackupMailto(datastore, "lollipop"); mailto != "ops@example.com" {
+		t.Errorf("expected unscheduling to keep the mailto, got %q", mailto)
 	}
 
 	// and again, which has nothing to do
@@ -372,7 +331,6 @@ func TestScheduleBackupRefusesAnInvalidSchedule(t *testing.T) {
 	for _, input := range []ScheduleBackupInput{
 		{BucketName: "my-bucket", Schedule: "daily"},
 		{BucketName: "my bucket", Schedule: "@daily"},
-		{BucketName: "my-bucket", Schedule: "@daily", Mailto: "ops@example.com\n* * * * * true"},
 	} {
 		input.Datastore = datastore
 		input.ServiceName = "lollipop"

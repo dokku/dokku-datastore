@@ -221,5 +221,10 @@ func (c *SetCommand) Run(args []string) int {
 		return 1
 	}
 
+	if err := internal.ApplyProperty(ctx, datastore, serviceName, key); err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
+	}
+
 	return 0
 }

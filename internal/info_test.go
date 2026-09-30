@@ -276,30 +276,37 @@ func TestInfoReportsTheBackupObjectKey(t *testing.T) {
 	}
 }
 
-// A scheduled backup is reported with who its output is mailed to
-func TestInfoReportsTheBackupSchedule(t *testing.T) {
+// The backup mailto is a property of the service, so it is reported whether or
+// not a backup is scheduled
+func TestInfoReportsTheBackupMailto(t *testing.T) {
 	datastore := service.Datastores["redis"]
 	withInfoService(t, datastore, "lollipop")
 
-	if err := writeBackupSchedule(datastore, "lollipop", BackupSchedule{
-		Schedule:   "@daily",
-		BucketName: "my-bucket",
-		UseIAM:     true,
-		Mailto:     "ops@example.com,dba@example.com",
-	}); err != nil {
-		t.Fatalf("failed to record the schedule: %s", err)
+	if err := SetProperty(datastore, "lollipop", service.BackupMailtoProperty, "ops@example.com,dba@example.com"); err != nil {
+		t.Fatalf("failed to set the mailto: %s", err)
 	}
 
 	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
-	for key, expected := range map[string]string{
-		"backup-schedule": "@daily",
-		"backup-bucket":   "my-bucket",
-		"backup-use-iam":  "true",
-		"backup-mailto":   "ops@example.com,dba@example.com",
-	} {
-		if info[key] != expected {
-			t.Errorf("expected %s to be %q, got %q", key, expected, info[key])
-		}
+	if info[service.BackupMailtoProperty] != "ops@example.com,dba@example.com" {
+		t.Errorf("expected the mailto to be reported without a schedule, got %q", info[service.BackupMailtoProperty])
+	}
+
+	if err := writeBackupSchedule(datastore, "lollipop", BackupSchedule{Schedule: "@daily", BucketName: "my-bucket"}); err != nil {
+		t.Fatalf("failed to record the schedule: %s", err)
+	}
+
+	info = Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if info[service.BackupMailtoProperty] != "ops@example.com,dba@example.com" {
+		t.Errorf("expected the mailto to be reported with a schedule, got %q", info[service.BackupMailtoProperty])
+	}
+
+	if err := SetProperty(datastore, "lollipop", service.BackupMailtoProperty, ""); err != nil {
+		t.Fatalf("failed to unset the mailto: %s", err)
+	}
+
+	info = Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if info[service.BackupMailtoProperty] != "" {
+		t.Errorf("expected an unset mailto to be reported empty, got %q", info[service.BackupMailtoProperty])
 	}
 }
 

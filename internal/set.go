@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -11,7 +12,7 @@ import (
 )
 
 // SettableProperties are the properties a service exposes through the set command
-var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.BackupStorageClassProperty, service.BackupObjectNameProperty, service.BackupTimestampProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.WaitTimeoutProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExposeModeProperty, service.ExportArgsProperty, service.ImportArgsProperty, service.VolumeTargetsProperty}
+var SettableProperties = []string{"initial-network", "post-create-network", "post-start-network", service.KeyserverProperty, service.BackupStorageClassProperty, service.BackupObjectNameProperty, service.BackupTimestampProperty, service.BackupMailtoProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.WaitTimeoutProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExposeModeProperty, service.ExportArgsProperty, service.ImportArgsProperty, service.VolumeTargetsProperty}
 
 // InvalidPropertyError reports a property the set command does not manage
 func InvalidPropertyError() error {
@@ -42,6 +43,8 @@ func ValidatePropertyValue(key string, value string) error {
 		return service.ValidateBackupObjectName(value)
 	case service.BackupTimestampProperty:
 		return service.ValidateBackupTimestamp(value)
+	case service.BackupMailtoProperty:
+		return service.ValidateBackupMailto(value)
 	case service.LogDriverProperty:
 		return service.ValidateLogDriver(value)
 	case service.LogOptProperty:
@@ -153,4 +156,19 @@ func SetProperty(s *service.Datastore, serviceName string, key string, value str
 	}
 
 	return nil
+}
+
+// ApplyProperty has a property that was just set take effect where it is not
+// read again on its own. The backup mailto is read when dokku writes its
+// crontab, so a service with a scheduled backup has dokku write it again.
+func ApplyProperty(ctx context.Context, s *service.Datastore, serviceName string, key string) error {
+	if key != service.BackupMailtoProperty {
+		return nil
+	}
+
+	if _, ok := ReadBackupSchedule(s, serviceName); !ok {
+		return nil
+	}
+
+	return regenerateCrontab(ctx)
 }

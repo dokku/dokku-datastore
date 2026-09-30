@@ -271,7 +271,7 @@ func CronEntriesForTrigger(ctx context.Context, input CronEntriesInput) ([]CronT
 		}
 
 		if schedule.Mailto != "" && input.EntryFormat != CronEntryFormatJSON {
-			warnings = append(warnings, fmt.Errorf("%s for %s is ignored, dokku does not support a per-entry MAILTO", BackupMailtoProperty, serviceName))
+			warnings = append(warnings, fmt.Errorf("%s for %s is ignored, dokku does not support a per-entry MAILTO", service.BackupMailtoProperty, serviceName))
 		}
 
 		tasks = append(tasks, CronEntry(commandPrefix, serviceName, schedule))

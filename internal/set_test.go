@@ -18,7 +18,7 @@ func TestSetPropertyRejectsUnknownKeys(t *testing.T) {
 		t.Fatal("expected an error for an unknown key, got none")
 	}
 
-	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, backup-object-name, backup-timestamp, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, port-source-range, expose-host, expose-mode, export-args, import-args, volume-targets"
+	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, backup-object-name, backup-timestamp, backup-mailto, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, port-source-range, expose-host, expose-mode, export-args, import-args, volume-targets"
 	if err.Error() != expected {
 		t.Errorf("expected %q, got %q", expected, err)
 	}
@@ -34,7 +34,7 @@ func TestSettableProperties(t *testing.T) {
 	// is published, the host its exposed dsn names, whether it is published
 	// through an ambassador or directly, and the arguments its exports
 	// and imports are run with, and where the definition's volumes are mounted
-	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "backup-object-name", "backup-timestamp", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "port-source-range", "expose-host", "expose-mode", "export-args", "import-args", "volume-targets"}
+	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "backup-object-name", "backup-timestamp", "backup-mailto", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "port-source-range", "expose-host", "expose-mode", "export-args", "import-args", "volume-targets"}
 	if strings.Join(SettableProperties, ",") != strings.Join(expected, ",") {
 		t.Errorf("expected %v, got %v", expected, SettableProperties)
 	}
@@ -102,6 +102,18 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 			key:      service.BackupTimestampProperty,
 			value:    "no",
 			expected: `invalid backup-timestamp value "no"`,
+		},
+		{
+			name:     "a mailto that would end the MAILTO line",
+			key:      service.BackupMailtoProperty,
+			value:    "ops@example.com;true",
+			expected: `invalid backup-mailto value "ops@example.com;true"`,
+		},
+		{
+			name:     "a mailto with a space after the comma",
+			key:      service.BackupMailtoProperty,
+			value:    "ops@example.com, dba@example.com",
+			expected: `invalid backup-mailto value "ops@example.com, dba@example.com"`,
 		},
 		{
 			name:     "a driver that is not a name",
@@ -286,7 +298,7 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 // Unsetting is how every other property is cleared, so an empty value has to
 // reach the delete rather than being refused as an unusable one.
 func TestSetPropertyAcceptsAnEmptyValue(t *testing.T) {
-	for _, key := range []string{service.BackupStorageClassProperty, service.BackupObjectNameProperty, service.BackupTimestampProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExposeModeProperty, service.ExportArgsProperty, service.ImportArgsProperty, service.VolumeTargetsProperty} {
+	for _, key := range []string{service.BackupStorageClassProperty, service.BackupObjectNameProperty, service.BackupTimestampProperty, service.BackupMailtoProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExposeModeProperty, service.ExportArgsProperty, service.ImportArgsProperty, service.VolumeTargetsProperty} {
 		if err := ValidatePropertyValue(key, ""); err != nil {
 			t.Errorf("expected an empty %s to be accepted, got %q", key, err)
 		}
