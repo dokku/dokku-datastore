@@ -724,7 +724,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 		options.Addresses = []string{portforward.AllInterfaces}
 		options.Detach = true
 		options.RestartPolicy = portforward.RestartAlways
-		options.HelperImage = "dokku/ambassador:0.8.3"
+		options.HelperImage = "dokku/ambassador:0.8.4"
 		options.Pull = portforward.PullNever
 		options.TCPHalfCloseTimeout = 100000000 * time.Second
 		options.SkipPreflight = true
@@ -744,7 +744,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "abc123",
 				ContainerPorts: []int{5432},
 				HostPorts:      []string{"5678"},
-				Image:          "dokku/ambassador:0.8.3",
+				Image:          "dokku/ambassador:0.8.4",
 				LogConfig:      LogConfig{Options: map[string]string{"max-size": "10m"}},
 			},
 			expected: base(portforward.Options{
@@ -767,7 +767,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "def456",
 				ContainerPorts: []int{5672, 4369, 35197, 15672},
 				HostPorts:      []string{"1", "2", "3", "4"},
-				Image:          "dokku/ambassador:0.8.3",
+				Image:          "dokku/ambassador:0.8.4",
 			},
 			expected: base(portforward.Options{
 				Target: "container/def456",
@@ -788,7 +788,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "def456",
 				ContainerPorts: []int{5672, 4369, 35197, 15672},
 				HostPorts:      []string{"127.0.0.1:1", "[::1]:2", "3", "10.0.0.2:4"},
-				Image:          "dokku/ambassador:0.8.3",
+				Image:          "dokku/ambassador:0.8.4",
 				LogConfig:      LogConfig{Driver: "local", Options: map[string]string{"max-size": "5m", "max-file": "2"}},
 			},
 			expected: base(portforward.Options{
@@ -813,7 +813,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "abc123",
 				ContainerPorts: []int{5432},
 				HostPorts:      []string{"5678"},
-				Image:          "dokku/ambassador:0.8.3",
+				Image:          "dokku/ambassador:0.8.4",
 				RestartPolicy:  "on-failure:3",
 			},
 			expected: func() portforward.Options {
@@ -841,7 +841,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "def456",
 				ContainerPorts: []int{5672, 4369},
 				HostPorts:      []string{"127.0.0.1:1", "2"},
-				Image:          "dokku/ambassador:0.8.3",
+				Image:          "dokku/ambassador:0.8.4",
 				Settings:       ambassadorSettings{Address: "10.0.0.5", SourceRange: "10.0.0.0/8"},
 			},
 			expected: func() portforward.Options {
@@ -873,7 +873,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerPorts:     []int{8125, 8126, 80},
 				ContainerProtocols: []string{"udp", "tcp", "tcp"},
 				HostPorts:          []string{"1", "127.0.0.1:2", "3"},
-				Image:              "dokku/ambassador:0.8.3",
+				Image:              "dokku/ambassador:0.8.4",
 				Settings:           ambassadorSettings{UDPPorts: "8125"},
 			},
 			expected: base(portforward.Options{
@@ -898,7 +898,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerPorts:     []int{8125},
 				ContainerProtocols: []string{"udp"},
 				HostPorts:          []string{"[::1]:1"},
-				Image:              "dokku/ambassador:0.8.3",
+				Image:              "dokku/ambassador:0.8.4",
 				Settings:           ambassadorSettings{UDPPorts: "8125"},
 			},
 			expected: base(portforward.Options{
@@ -921,7 +921,7 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "abc123",
 				ContainerPorts: []int{5432},
 				HostPorts:      []string{"5678"},
-				Image:          "dokku/ambassador:0.8.3",
+				Image:          "dokku/ambassador:0.8.4",
 				Settings:       ambassadorSettings{SourceRange: "2001:db8::/32"},
 			},
 			expected: base(portforward.Options{

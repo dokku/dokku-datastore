@@ -582,7 +582,7 @@ dokku redis:expose lollipop 127.0.0.1:6380
 
 ### Exposing udp ports
 
-A port a definition declares as udp is published and forwarded over udp. Graphite's statsd port is the only one shipped: it has always been exposed over tcp, where a statsd client off the host, which sends udp, reached nothing. Random ports picked for a udp port are ones free over udp. The ambassador image is now `dokku/ambassador:0.8.3`, since the socat in 0.8.2 refuses to listen for udp. A graphite service exposed by an older version of the plugin keeps its tcp-only ambassador until the service is next started, exposed or restarted, or until `reexpose` replaces it. `info --exposed-ports` still reports each port as `container->host`, without the protocol.
+A port a definition declares as udp is published and forwarded over udp. Graphite's statsd port is the only one shipped: it has always been exposed over tcp, where a statsd client off the host, which sends udp, reached nothing. Random ports picked for a udp port are ones free over udp. The ambassador image is now `dokku/ambassador:0.8.4`, since the socat in 0.8.2 refuses to listen for udp. A graphite service exposed by an older version of the plugin keeps its tcp-only ambassador until the service is next started, exposed or restarted, or until `reexpose` replaces it. `info --exposed-ports` still reports each port as `container->host`, without the protocol.
 
 ```shell
 # statsd is published over udp, and the rest of graphite's ports over tcp

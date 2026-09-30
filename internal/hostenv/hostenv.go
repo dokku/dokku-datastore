@@ -15,7 +15,7 @@ import (
 const (
 	// AmbassadorImage publishes a service's ports, so that the service container
 	// itself never has to
-	AmbassadorImage = "dokku/ambassador:0.8.3"
+	AmbassadorImage = "dokku/ambassador:0.8.4"
 
 	// S3BackupImage ships a dump to an s3 bucket
 	S3BackupImage = "dokku/s3backup:0.19.2"
