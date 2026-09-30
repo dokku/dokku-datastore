@@ -287,6 +287,7 @@ func readmeUsage(input ReadmeInput) ([]string, error) {
 	}
 
 	sections = append(sections, readmeExposeLimits(input.Data)...)
+	sections = append(sections, readmeExposeMode(input.Data)...)
 	sections = append(sections, readmeExposedDsn(input.Data)...)
 	sections = append(sections, readmeExtraArgs(input.Data)...)
 	sections = append(sections, readmeWaitTimeout(input.Data)...)
@@ -409,9 +410,24 @@ func readmeExposeLimits(data DocumentationData) []string {
 		"### Limiting where and to whom a service is exposed",
 		fmt.Sprintf("An exposed service's ports are published on every interface unless they are given an address of their own. "+
 			"To publish them on one address instead, set the service's `port-bind-address` property with `dokku %s:set`, and to accept connections only from clients in one IP address or CIDR, set its `port-source-range` property. "+
-			"Either reaches a running service with `dokku %s:reexpose`, which leaves the service running.", data.CommandPrefix, data.CommandPrefix),
+			"Either reaches a running service with `dokku %s:reexpose`, which leaves the service running when its ports are published through an ambassador.", data.CommandPrefix, data.CommandPrefix),
 		"Only one source range can be given. The range is checked against the address a connection reaches the service from, which for a connection to the exposed port on the loopback interface, or an IPv6 connection to a service network without IPv6, is the docker network's gateway rather than the client, " +
 			"so with a range that leaves the gateway out, connecting to `127.0.0.1` from the dokku host itself is refused.",
+	}
+}
+
+// readmeExposeMode explains publishing an exposed service's ports on its own
+// container rather than through an ambassador, and what that costs
+func readmeExposeMode(data DocumentationData) []string {
+	return []string{
+		"### Exposing a service without an ambassador",
+		"An exposed service's ports are published by an ambassador, a container that relays every connection on to the service. " +
+			"The ambassador can be replaced without touching the service and can hold clients to a `port-source-range`, but relaying adds latency to every request.",
+		fmt.Sprintf("To publish the ports on the service container itself instead, set the service's `expose-mode` property to `direct` with `dokku %s:set`. "+
+			"Docker has no way of changing the ports a container publishes, so the container is made again whenever what it publishes changes: when the service is exposed or unexposed, when its `port-bind-address` changes, and when it moves between expose modes. "+
+			"For a running service, `dokku %s:expose`, `dokku %s:unexpose` and `dokku %s:reexpose` ask before stopping and starting it, and change nothing if the answer is no. Pass `--force` to stop and start it without being asked. "+
+			"A change also reaches the service the next time it is restarted, or stopped and started.", data.CommandPrefix, data.CommandPrefix, data.CommandPrefix, data.CommandPrefix),
+		"A `port-source-range` cannot be enforced on a port the service container publishes itself, so it cannot be set on a service exposed directly, and a service with one cannot be exposed directly.",
 	}
 }
 

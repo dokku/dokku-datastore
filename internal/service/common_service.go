@@ -801,7 +801,16 @@ func Start(ctx context.Context, input StartInput) error {
 			ServiceName: input.ServiceName,
 		})
 
-		if !recorded.Complete() || recorded.Tagged() == running {
+		// a container publishes what it was made with, so one made before the
+		// service was exposed, unexposed or moved between expose modes is only
+		// brought in line by making it again. It is down already, so that costs
+		// the service nothing a start was not going to
+		publishes := !publishedPortsDiffer(
+			ContainerPublishedPorts(containerID),
+			DirectPublishSpecs(input.Datastore, input.ServiceName, ExposedHostPorts(input.Datastore, input.ServiceName)),
+		)
+
+		if publishes && (!recorded.Complete() || recorded.Tagged() == running) {
 			if err := backend.Start(ctx, containerID); err != nil {
 				return fmt.Errorf("failed to start container: %w", err)
 			}
@@ -812,14 +821,17 @@ func Start(ctx context.Context, input StartInput) error {
 		// the container disagrees with the record, so it is the container that
 		// is wrong. The image is fetched before it is taken away, so that a pull
 		// which fails leaves the service with the container it already had
-		// rather than with none.
-		if err := EnsureTaggedImage(ctx, EnsureTaggedImageInput{
-			Action:      "start",
-			Datastore:   input.Datastore,
-			ServiceName: input.ServiceName,
-			TaggedImage: recorded.Tagged(),
-		}); err != nil {
-			return err
+		// rather than with none. A record with a half missing is left to be
+		// settled below, from what removing the container records.
+		if recorded.Complete() {
+			if err := EnsureTaggedImage(ctx, EnsureTaggedImageInput{
+				Action:      "start",
+				Datastore:   input.Datastore,
+				ServiceName: input.ServiceName,
+				TaggedImage: recorded.Tagged(),
+			}); err != nil {
+				return err
+			}
 		}
 
 		if err := RemoveServiceContainer(ctx, RemoveServiceContainerInput{

@@ -41,6 +41,15 @@ type ExposeServiceInput struct {
 
 	// Logger reports what is being waited on once the container exists
 	Logger Ui
+
+	// Force is whether a running service exposed directly is stopped and
+	// started without asking, which it has to be for its container to publish
+	// the ports
+	Force bool
+
+	// Ask asks whether a running service exposed directly may be stopped and
+	// started. Nil is the same as an answer of no
+	Ask func(string) (string, error)
 }
 
 // ExposeService exposes a service
@@ -79,18 +88,43 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 		}
 	}
 
+	// refused before anything is written, since a port-source-range the
+	// service was given would otherwise be quietly ignored
+	mode := service.ServiceExposeMode(input.Datastore, input.ServiceName)
+	if err := service.CheckExposeModeSourceRange(mode, service.ServicePortSourceRange(input.Datastore, input.ServiceName)); err != nil {
+		return err
+	}
+
 	// ahead of the port file, which is the only thing that says a service is
 	// exposed. Reconciling the ports fetches this too, but by then the file is
 	// written, so a host that cannot get the ambassador would be left with a
 	// service reported as exposed that publishes nothing and that a second
-	// expose refuses to touch
-	if err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
-		Action:      "port publishing",
-		Datastore:   input.Datastore,
-		ServiceName: input.ServiceName,
-		TaggedImage: hostenv.AmbassadorImage,
-	}); err != nil {
-		return err
+	// expose refuses to touch. A service exposed directly runs no ambassador
+	if mode != service.ExposeModeDirect {
+		if err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
+			Action:      "port publishing",
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+			TaggedImage: hostenv.AmbassadorImage,
+		}); err != nil {
+			return err
+		}
+	}
+
+	// a running container cannot be told to publish ports it was not made
+	// with, so one exposed directly is made again. Asked before the port file
+	// is written, so an answer of no leaves the service as it was
+	publish := service.ServicePublishState(ctx, input.Datastore, input.ServiceName, input.Ports)
+	recreate := publish.Running && publish.Differs
+	if recreate {
+		if err := ConfirmRecreate(ConfirmRecreateInput{
+			ServiceName: input.ServiceName,
+			Logger:      input.Logger,
+			Force:       input.Force,
+			Ask:         input.Ask,
+		}); err != nil {
+			return err
+		}
 	}
 
 	err := common.WriteStringToFile(common.WriteStringToFileInput{
@@ -104,6 +138,16 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 		return fmt.Errorf("failed to write ports to %s: %w", portFile, err)
 	}
 
+	if recreate {
+		return RecreateServiceContainer(ctx, RecreateServiceContainerInput{
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+			Logger:      input.Logger,
+		})
+	}
+
+	// a container that is not running is made again by the start when it
+	// publishes something other than what it should now
 	err = service.Start(ctx, service.StartInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,

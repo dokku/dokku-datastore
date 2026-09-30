@@ -940,10 +940,6 @@ type ServicePortReconcileStatusInput struct {
 
 	// ServiceName is the name of the service to reconcile the port for
 	ServiceName string
-
-	// Force replaces an exposed service's ambassador even when the one it has
-	// could be kept. It has no effect on a service that is not exposed
-	Force bool
 }
 
 // AmbassadorContainerIDLabel is the label an ambassador carries naming the
@@ -1069,8 +1065,13 @@ type ambassadorState struct {
 	// Settings are the settings the service has now
 	Settings ambassadorSettings
 
-	// Force is whether an ambassador that could be kept is replaced anyway
-	Force bool
+	// Direct is whether the service is to be published by its own container
+	// rather than by an ambassador
+	Direct bool
+
+	// PublishesDirectly is whether the service's container publishes ports
+	// itself, which it does from when it is made until it is made again
+	PublishesDirectly bool
 }
 
 // actionForAmbassador maps the state of a service's ambassador onto what
@@ -1092,10 +1093,26 @@ type ambassadorState struct {
 // neither, which is what a service that has set neither expects. Nor is one
 // kept that forwards a different set of ports over udp: one made before udp
 // ports were published forwards a udp port over tcp, where its clients send
-// nothing, and carries no udp ports label to say so. A forced
-// reconcile replaces even one that could be kept.
+// nothing, and carries no udp ports label to say so.
+//
+// A service that publishes its ports through its own container wants no
+// ambassador, which would be fighting it for the same host ports. One that has
+// been moved to being published directly, but whose container was made before
+// that and publishes nothing, keeps a running ambassador until the container
+// is made again, so that it is not left unreachable in between. None is made
+// or replaced for it, since it is on its way out. And one that has been moved
+// back to an ambassador, but whose container still publishes, gets none until
+// that container is made again.
 func actionForAmbassador(state ambassadorState) ambassadorAction {
-	if !state.Exposed {
+	if state.Exposed && state.Direct && !state.PublishesDirectly {
+		if state.Status == "missing" {
+			return ambassadorNone
+		}
+
+		return ambassadorKeep
+	}
+
+	if !state.Exposed || state.Direct || state.PublishesDirectly {
 		if state.Status == "missing" {
 			return ambassadorNone
 		}
@@ -1107,7 +1124,7 @@ func actionForAmbassador(state ambassadorState) ambassadorAction {
 		return ambassadorCreate
 	}
 
-	if !state.Force && state.Status == "running" && state.Managed && !state.Stale && state.FrontedID != "" && state.FrontedID == state.ServiceID && state.FrontedSettings == state.Settings {
+	if state.Status == "running" && state.Managed && !state.Stale && state.FrontedID != "" && state.FrontedID == state.ServiceID && state.FrontedSettings == state.Settings {
 		return ambassadorKeep
 	}
 
@@ -1256,8 +1273,9 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 			ServiceName: input.ServiceName,
 		}),
 		Settings: serviceAmbassadorSettings(input.Datastore, input.ServiceName),
-		Force:    input.Force,
+		Direct:   ServiceExposeMode(input.Datastore, input.ServiceName) == ExposeModeDirect,
 	}
+	state.PublishesDirectly = len(ContainerPublishedPorts(state.ServiceID)) > 0
 	if state.Exposed && state.Status != "missing" {
 		state.FrontedID = ambassadorLabel(ambassadorName, AmbassadorContainerIDLabel)
 		state.FrontedSettings = ambassadorSettings{

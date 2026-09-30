@@ -369,14 +369,28 @@ expected_exposed_dsn() {
   assert_source_range "reexpose with no source range" ""
 }
 
-@test "($DEFINITION) reexpose replaces the ambassador even when nothing changed" {
-  local ambassador_before
+@test "($DEFINITION) reexpose leaves a correctly exposed service alone" {
+  local service_before ambassador_before
+  service_before="$(service_id)"
   ambassador_before="$(ambassador_id)"
 
   run "$BIN" reexpose "$PLUGIN" "$SERVICE"
   assert_success
   assert_ambassador "reexpose with nothing changed"
-  [[ "$(ambassador_id)" != "$ambassador_before" ]] || fail "expected reexpose to replace the ambassador"
+  [[ "$(ambassador_id)" == "$ambassador_before" ]] || fail "expected reexpose to keep an ambassador that already matches"
+  [[ "$(service_id)" == "$service_before" ]] || fail "expected reexpose to leave the service container alone"
+}
+
+@test "($DEFINITION) reexpose replaces an ambassador that stopped publishing" {
+  local ambassador_before
+  ambassador_before="$(ambassador_id)"
+
+  docker container stop "$AMBASSADOR"
+
+  run "$BIN" reexpose "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_ambassador "reexpose of a stopped ambassador"
+  [[ "$(ambassador_id)" != "$ambassador_before" ]] || fail "expected reexpose to replace a stopped ambassador"
 }
 
 @test "($DEFINITION) start applies a changed expose setting to a running service" {

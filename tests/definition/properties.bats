@@ -286,6 +286,54 @@ skip_unless_log_is_capped() {
   assert_output ""
 }
 
+@test "($DEFINITION) the expose mode is set, read back and unset" {
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-mode
+  assert_success
+  assert_output "ambassador"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-mode direct
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-mode
+  assert_success
+  assert_output "direct"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_output --regexp "Expose mode: +direct"
+
+  # docker has no way to hold a port it publishes to a range of clients
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" port-source-range 203.0.113.7
+  assert_failure
+  assert_stderr --partial "cannot be enforced"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-mode
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-mode
+  assert_success
+  assert_output "ambassador"
+
+  # and the other way round
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-source-range 203.0.113.7
+  assert_success
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" expose-mode direct
+  assert_failure
+  assert_stderr --partial "cannot be enforced"
+  run "$BIN" set "$PLUGIN" "$SERVICE" port-source-range
+  assert_success
+}
+
+@test "($DEFINITION) an expose mode that is not one is refused" {
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" expose-mode host
+  assert_failure
+  assert_stderr --partial "expose-mode"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-mode
+  assert_success
+  assert_output "ambassador"
+}
+
 @test "($DEFINITION) an expose setting docker or socat would refuse is refused first" {
   local value
   # docker publishes on an address, not a name, and without a port's brackets

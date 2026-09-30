@@ -54,6 +54,7 @@ var InfoKeys = []InfoKey{
 	{Name: "dsn", Description: "show the service DSN"},
 	{Name: "export-args", Description: "show the extra arguments every export of the service is run with"},
 	{Name: "expose-host", Description: "show the host the exposed DSN names"},
+	{Name: "expose-mode", Description: "show whether exposed ports are published through an ambassador or directly by the service container"},
 	{Name: "exposed-dsn", Description: "show the DSN the service is reached at through its exposed ports"},
 	{Name: "exposed-ports", Description: "show service exposed ports"},
 	{Name: "id", Description: "show the service container id"},
@@ -146,6 +147,9 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	// as it was set, like every other property. The host the exposed dsn falls
 	// back to when it is unset shows in the dsn itself
 	info[service.ExposeHostProperty] = service.ServiceExposeHost(input.Datastore, input.ServiceName)
+	// the mode the service is published with, which is the ambassador when it
+	// was never set
+	info[service.ExposeModeProperty] = service.ServiceExposeMode(input.Datastore, input.ServiceName)
 	info[service.ExportArgsProperty] = service.ServiceExtraArgs(input.Datastore, input.ServiceName, service.ExportArgsProperty)
 	info[service.ImportArgsProperty] = service.ServiceExtraArgs(input.Datastore, input.ServiceName, service.ImportArgsProperty)
 	info["memory"] = common.ReadFirstLine(serviceFiles.Memory)

@@ -150,3 +150,57 @@ func ServicePortSourceRange(s *Datastore, serviceName string) string {
 func ServiceExposeHost(s *Datastore, serviceName string) string {
 	return strings.TrimSpace(common.PropertyGet(s.Properties().CommandPrefix, serviceName, ExposeHostProperty))
 }
+
+// ExposeModeProperty is how an exposed service's ports are published: through
+// an ambassador, a helper container that forwards each port on to the service,
+// or directly by the service container itself. Empty is the ambassador, which
+// is how every exposed service was published before there was a choice.
+//
+// Read when the service container is made, since a container cannot change
+// the ports it publishes, and when the ambassador is reconciled.
+const ExposeModeProperty = "expose-mode"
+
+// ExposeModeAmbassador publishes an exposed service's ports through an
+// ambassador, which can limit its clients to a port-source-range and be
+// replaced without touching the service.
+const ExposeModeAmbassador = "ambassador"
+
+// ExposeModeDirect publishes an exposed service's ports on the service
+// container itself. Nothing sits between a client and the service, but the
+// container has to be made again for what it publishes to change, and docker
+// has no way to limit its clients to a port-source-range.
+const ExposeModeDirect = "direct"
+
+// ValidateExposeMode reports whether a value is an expose mode. An empty value
+// is valid and means the ambassador.
+func ValidateExposeMode(value string) error {
+	switch value {
+	case "", ExposeModeAmbassador, ExposeModeDirect:
+		return nil
+	}
+
+	return fmt.Errorf("invalid %s value %q, must be %s or %s", ExposeModeProperty, value, ExposeModeAmbassador, ExposeModeDirect)
+}
+
+// CheckExposeModeSourceRange reports whether an expose mode and a
+// port-source-range can be used together. A service published directly has no
+// ambassador to enforce the range, and docker cannot, so a range would be
+// silently ignored.
+func CheckExposeModeSourceRange(mode string, sourceRange string) error {
+	if mode == ExposeModeDirect && sourceRange != "" {
+		return fmt.Errorf("a %s cannot be enforced when the %s is %s, unset one of them", PortSourceRangeProperty, ExposeModeProperty, ExposeModeDirect)
+	}
+
+	return nil
+}
+
+// ServiceExposeMode is how a service's ports are published when it is
+// exposed, the ambassador when it was not set.
+func ServiceExposeMode(s *Datastore, serviceName string) string {
+	mode := strings.TrimSpace(common.PropertyGet(s.Properties().CommandPrefix, serviceName, ExposeModeProperty))
+	if mode == "" {
+		return ExposeModeAmbassador
+	}
+
+	return mode
+}

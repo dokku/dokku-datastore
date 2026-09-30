@@ -55,6 +55,11 @@ type Scope struct {
 	LogDriver  string
 	LogOptions map[string]string
 
+	// Publish are the docker --publish specs a service exposed directly
+	// publishes its ports with, already rendered. Empty for one that is not
+	// exposed, or that is exposed through an ambassador.
+	Publish []string
+
 	// RestartPolicy is the docker restart policy a container is made with, as
 	// the service set it. Empty means the default, which the renderer applies.
 	RestartPolicy string
