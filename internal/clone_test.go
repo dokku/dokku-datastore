@@ -12,6 +12,7 @@ import (
 // that a setting dropped on the way through shows up as a difference
 func cloneSource() serviceSettings {
 	return serviceSettings{
+		BackupMailto:       "ops@example.com",
 		BackupStorageClass: "STANDARD_IA",
 		BackupTimestamp:    "false",
 		ConfigOptions:      "--appendonly yes",
@@ -125,9 +126,11 @@ func TestCloneCanClearASetting(t *testing.T) {
 		WaitTimeout:        &empty,
 	})
 
-	// the keyserver, the storage class, the backup timestamp and the extra
-	// arguments have no flag, so they are the settings that are always copied
+	// the keyserver, the backup mailto, the storage class, the backup timestamp
+	// and the extra arguments have no flag, so they are the settings that are
+	// always copied
 	expected := serviceSettings{
+		BackupMailto:       "ops@example.com",
 		BackupStorageClass: "STANDARD_IA",
 		BackupTimestamp:    "false",
 		ExportArgs:         "--hex-blob",
@@ -162,6 +165,7 @@ func TestReadServiceSettings(t *testing.T) {
 		"initial-network":                  "initial",
 		"post-create-network":              "created-one,created-two",
 		"post-start-network":               "started",
+		service.BackupMailtoProperty:       "ops@example.com",
 		service.BackupStorageClassProperty: "STANDARD_IA",
 		service.BackupTimestampProperty:    "false",
 		// not a setting a clone starts from, so reading it back would be a

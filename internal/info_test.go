@@ -276,6 +276,40 @@ func TestInfoReportsTheBackupObjectKey(t *testing.T) {
 	}
 }
 
+// The backup mailto is a property of the service, so it is reported whether or
+// not a backup is scheduled
+func TestInfoReportsTheBackupMailto(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withInfoService(t, datastore, "lollipop")
+
+	if err := SetProperty(datastore, "lollipop", service.BackupMailtoProperty, "ops@example.com,dba@example.com"); err != nil {
+		t.Fatalf("failed to set the mailto: %s", err)
+	}
+
+	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if info[service.BackupMailtoProperty] != "ops@example.com,dba@example.com" {
+		t.Errorf("expected the mailto to be reported without a schedule, got %q", info[service.BackupMailtoProperty])
+	}
+
+	if err := writeBackupSchedule(datastore, "lollipop", BackupSchedule{Schedule: "@daily", BucketName: "my-bucket"}); err != nil {
+		t.Fatalf("failed to record the schedule: %s", err)
+	}
+
+	info = Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if info[service.BackupMailtoProperty] != "ops@example.com,dba@example.com" {
+		t.Errorf("expected the mailto to be reported with a schedule, got %q", info[service.BackupMailtoProperty])
+	}
+
+	if err := SetProperty(datastore, "lollipop", service.BackupMailtoProperty, ""); err != nil {
+		t.Fatalf("failed to unset the mailto: %s", err)
+	}
+
+	info = Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if info[service.BackupMailtoProperty] != "" {
+		t.Errorf("expected an unset mailto to be reported empty, got %q", info[service.BackupMailtoProperty])
+	}
+}
+
 // Backup settings are reported as being present and as a fingerprint rather
 // than as their values, because the credentials and the passphrase are secrets.
 func TestInfoReportsBackupStateWithoutItsSecrets(t *testing.T) {
@@ -291,6 +325,7 @@ func TestInfoReportsBackupStateWithoutItsSecrets(t *testing.T) {
 		"backup-encrypted":              "false",
 		"backup-encryption-fingerprint": "",
 		"backup-endpoint-url":           "",
+		"backup-mailto":                 "",
 		"backup-object-name":            "",
 		"backup-public-key-id":          "",
 		"backup-schedule":               "",

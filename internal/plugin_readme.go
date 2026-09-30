@@ -68,7 +68,7 @@ var readmeSections = []struct {
 			"Backups are uploaded with the bucket's default storage class unless the service sets the `backup-storage-class` property with the `set` command.",
 			"Backups are uploaded to `<prefix>-<service>-<timestamp>.tgz`. The service may name the key with the `backup-object-name` property and drop the timestamp by setting the `backup-timestamp` property to `false`, so that every backup is uploaded to the same key and bucket versioning and lifecycle rules can keep and rotate them. The bucket name may end in a path to upload under, such as `my-s3-bucket/backups`.",
 			"The underlying core backup script is present [here](https://github.com/dokku/docker-s3backup/blob/main/backup.sh).",
-			"Scheduled backups are added to the dokku crontab, and are listed by `dokku cron:list --global`.",
+			"Scheduled backups are added to the dokku crontab, and are listed by `dokku cron:list --global`. The output of a service's scheduled backups can be mailed to specific recipients by setting the `backup-mailto` property with the `set` command, on dokku versions that support a per-entry `MAILTO`.",
 			"Backups can be performed using the backup commands:",
 		},
 		Commands: []string{

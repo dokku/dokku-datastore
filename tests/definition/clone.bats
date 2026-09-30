@@ -20,6 +20,7 @@ setup_file() {
     --memory 512 --shm-size 128m --restart unless-stopped --custom-env FOO=bar --wait-timeout 120 \
     --volume "$(mount_source clone):$MOUNT_TARGET:ro"
   "$BIN" set "$PLUGIN" "$SERVICE" backup-keyserver keys.example.com
+  "$BIN" set "$PLUGIN" "$SERVICE" backup-mailto ops@example.com
   "$BIN" set "$PLUGIN" "$SERVICE" backup-storage-class STANDARD_IA
   "$BIN" set "$PLUGIN" "$SERVICE" backup-timestamp false
   "$BIN" set "$PLUGIN" "$SERVICE" backup-object-name "$SERVICE/latest"
@@ -72,7 +73,7 @@ clone_or_skip() {
   clone_or_skip "$COPY"
 
   local key expected
-  for key in memory shm-size custom-env restart-policy wait-timeout mounts backup-keyserver backup-storage-class backup-timestamp; do
+  for key in memory shm-size custom-env restart-policy wait-timeout mounts backup-keyserver backup-mailto backup-storage-class backup-timestamp; do
     run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" "--$key"
     assert_success
     expected="$output"

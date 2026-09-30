@@ -278,6 +278,62 @@ func TestMigrateLegacyCronFileMovesAValidSchedule(t *testing.T) {
 	}
 }
 
+// A MAILTO added to a cron file by hand was the only way to have a scheduled
+// backup's output mailed, and it is kept when the file is migrated
+func TestMigrateLegacyCronFileKeepsAMailto(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+	cronFile := withLegacyCronFile(t, datastore, "lollipop", "MAILTO=ops@example.com\n0 3 * * * dokku /usr/bin/dokku redis:backup lollipop my-bucket\n")
+
+	ui := cli.NewMockUi()
+	changed, err := migrateLegacyCronFile(InstallInput{Datastore: datastore, Logger: Ui{Ui: ui}}, "lollipop")
+	if err != nil {
+		t.Fatalf("failed to migrate the cron file: %s", err)
+	}
+	if !changed {
+		t.Error("expected the migration to report a change")
+	}
+
+	if _, err := os.Stat(cronFile); !os.IsNotExist(err) {
+		t.Errorf("expected %s to be removed, got %v", cronFile, err)
+	}
+
+	schedule, ok := ReadBackupSchedule(datastore, "lollipop")
+	expected := BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket", Mailto: "ops@example.com"}
+	if !ok || schedule != expected {
+		t.Errorf("expected %+v, got %+v", expected, schedule)
+	}
+}
+
+// A MAILTO that cannot be written into the dokku crontab is dropped with a
+// warning, rather than costing the service its backups
+func TestMigrateLegacyCronFileDropsAMailtoItCannotWrite(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+	cronFile := withLegacyCronFile(t, datastore, "lollipop", "MAILTO=ops@example.com; true\n0 3 * * * dokku /usr/bin/dokku redis:backup lollipop my-bucket\n")
+
+	ui := cli.NewMockUi()
+	changed, err := migrateLegacyCronFile(InstallInput{Datastore: datastore, Logger: Ui{Ui: ui}}, "lollipop")
+	if err != nil {
+		t.Fatalf("failed to migrate the cron file: %s", err)
+	}
+	if !changed {
+		t.Error("expected the migration to report a change")
+	}
+
+	if _, err := os.Stat(cronFile); !os.IsNotExist(err) {
+		t.Errorf("expected %s to be removed, got %v", cronFile, err)
+	}
+
+	schedule, ok := ReadBackupSchedule(datastore, "lollipop")
+	expected := BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket"}
+	if !ok || schedule != expected {
+		t.Errorf("expected %+v, got %+v", expected, schedule)
+	}
+
+	if warnings := ui.ErrorWriter.String(); !strings.Contains(warnings, "Dropping the MAILTO") {
+		t.Errorf("expected a warning about the dropped MAILTO, got %q", warnings)
+	}
+}
+
 // "daily" is what issue 6 was scheduled with. Cron never ran it, and carried
 // into the dokku crontab it would stop every other task from running too, so it
 // is dropped with a warning saying how to schedule it again

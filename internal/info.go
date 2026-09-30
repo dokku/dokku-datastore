@@ -40,6 +40,7 @@ var InfoKeys = []InfoKey{
 	{Name: "backup-encryption-fingerprint", Description: "show a sha256 fingerprint of the stored backup passphrase"},
 	{Name: "backup-endpoint-url", Description: "show the s3-compatible endpoint backups are shipped to"},
 	{Name: "backup-keyserver", Description: "show the keyserver backup public keys are fetched from"},
+	{Name: "backup-mailto", Description: "show who cron mails the output of scheduled backups to in place of the global MAILTO"},
 	{Name: "backup-object-name", Description: "show the name backups are uploaded under in place of the default"},
 	{Name: "backup-public-key-id", Description: "show the gpg public key id backups are encrypted with"},
 	{Name: "backup-schedule", Description: "show the cron schedule backups run on"},
@@ -197,6 +198,7 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info["backup-schedule"] = schedule.Schedule
 	info["backup-bucket"] = schedule.BucketName
 	info["backup-use-iam"] = strconv.FormatBool(schedule.UseIAM)
+	info["backup-mailto"] = service.BackupMailto(input.Datastore, input.ServiceName)
 
 	return info
 }

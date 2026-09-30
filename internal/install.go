@@ -221,17 +221,38 @@ func migrateLegacyCronFile(input InstallInput, serviceName string) (bool, error)
 	}
 
 	commandPrefix := input.Datastore.Properties().CommandPrefix
-	schedule, ok := ParseCronEntry(commandPrefix, common.ReadFirstLine(cronFile))
+	contents, err := os.ReadFile(cronFile)
+	if err != nil {
+		return false, fmt.Errorf("unable to read %s: %w", cronFile, err)
+	}
+
+	schedule, ok := ParseLegacyCronFile(commandPrefix, string(contents))
 	if !ok {
 		input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Unable to read the scheduled backup for %s from %s, leaving it in place", serviceName, cronFile)})
 		return false, nil
 	}
 
+	// a MAILTO added to the file by hand is kept as the service's backup-mailto,
+	// unless it cannot be written into the dokku crontab, which should not cost
+	// the service its backups
+	if err := service.ValidateBackupMailto(schedule.Mailto); err != nil {
+		input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Dropping the MAILTO of the scheduled backup for %s: %s", serviceName, err)})
+		schedule.Mailto = ""
+	}
+
 	if err := schedule.Validate(); err != nil {
 		input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Removing the scheduled backup for %s, which cron could not run: %s", serviceName, err)})
 		input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Schedule it again with: dokku %s:backup-schedule %s <schedule> <bucket-name>", commandPrefix, serviceName)})
-	} else if err := writeBackupSchedule(input.Datastore, serviceName, schedule); err != nil {
-		return false, err
+	} else {
+		if err := writeBackupSchedule(input.Datastore, serviceName, schedule); err != nil {
+			return false, err
+		}
+
+		if schedule.Mailto != "" {
+			if err := common.PropertyWrite(commandPrefix, serviceName, service.BackupMailtoProperty, schedule.Mailto); err != nil {
+				return false, fmt.Errorf("unable to record the %s property: %w", service.BackupMailtoProperty, err)
+			}
+		}
 	}
 
 	if err := os.Remove(cronFile); err != nil {

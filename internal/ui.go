@@ -186,6 +186,13 @@ func (u *Ui) Document(value any, text string) error {
 	return err
 }
 
+// Write writes text to stdout as it is, whatever format was asked for, for
+// output that is already in the form its reader expects
+func (u *Ui) Write(text string) error {
+	_, err := io.WriteString(u.stdout(), text)
+	return err
+}
+
 // WarnInput is the input for the Warn method
 type WarnInput struct {
 	// Warning is the warning message

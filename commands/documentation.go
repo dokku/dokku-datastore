@@ -934,6 +934,10 @@ upload every backup to the same key, without a timestamp, so bucket versioning a
 dokku {{.CommandPrefix}}:set lollipop backup-timestamp false
 go back to timestamped backups
 dokku {{.CommandPrefix}}:set lollipop backup-timestamp
+mail the output of scheduled backups to a comma-separated list of email addresses or local users rather than to the global cron MAILTO. requires a dokku version that reads json entries from the cron-entries plugin trigger, and a mail transfer agent on the host
+dokku {{.CommandPrefix}}:set lollipop backup-mailto ops@example.com,dba@example.com
+go back to mailing scheduled backup output to the global cron MAILTO
+dokku {{.CommandPrefix}}:set lollipop backup-mailto
 cap the container log at a size of your own rather than the one it inherits
 dokku {{.CommandPrefix}}:set lollipop log-opt max-size=20m,max-file=3
 keep the log unbounded, which is what a service had before there was anything to say here

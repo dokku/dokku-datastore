@@ -549,6 +549,26 @@ Without a timestamp, each backup replaces the one before it unless the bucket ha
 
 Both are read when a backup runs, so they apply to the next backup, scheduled ones included, without rescheduling. `info` reports them under `--backup-object-name`, empty when nothing was set, and `--backup-timestamp`, `true` unless it was turned off. `clone` copies `backup-timestamp` but not `backup-object-name`, since a clone backed up to the same bucket under the source's name would replace the source's backups.
 
+## Scheduled backup email
+
+The bash plugins wrote each scheduled backup to a cron file of its own in `/etc/cron.d`, where a `MAILTO` line could be added by hand to have the backup's output mailed. Scheduled backups are now part of the dokku crontab, which only has the global `MAILTO` set with `dokku cron:set --global mailto`, and their output is appended to `/var/log/dokku/<prefix>.log`, so cron had nothing to mail. A service may now name who the output of its scheduled backups is mailed to through the `backup-mailto` property.
+
+```shell
+# mail the output of each scheduled backup to two people
+dokku redis:set lollipop backup-mailto ops@example.com,dba@example.com
+
+# and back to the global MAILTO
+dokku redis:set lollipop backup-mailto
+```
+
+The recipients are a comma-separated list of email addresses or local users, without spaces, and anything else is refused before it is written. Dokku writes the backup under a `MAILTO` line of its own in its crontab, and cron mails all of the backup's output, whether the backup succeeded or failed, while it is still appended to the log file. A mail transfer agent has to be configured on the host for the mail to be delivered.
+
+The property is read when dokku writes its crontab, so setting or clearing it on a service with a scheduled backup has dokku write the crontab again. It is kept when the backup is scheduled again or unscheduled, and applies to whichever backup the service is scheduled with next. `info` reports it under `--backup-mailto`, empty when nothing was set, and `clone` copies it.
+
+The recipients are handed to dokku through the `cron-entries` trigger as a json entry, which only dokku versions including [dokku/dokku#9104](https://github.com/dokku/dokku/pull/9104) read. Older versions refuse the whole crontab when they see one, so the plugin hands them the entry it always has, and warns that the recipients are ignored. `backup-schedule-cat` shows the line a dokku version that reads them writes.
+
+A cron file an earlier version of the plugin wrote is migrated onto the dokku crontab when the plugin is installed. A `MAILTO` line added to it by hand is now kept as the service's `backup-mailto`, rather than leaving the file where it was, unless it cannot be written into the crontab, in which case it is dropped with a warning.
+
 ## Backups when dokku runs in a container
 
 `backup` exported a service into a temporary directory and mounted it into the container that ships it to s3. The mount is resolved by dockerd, and when dokku is installed in docker that directory is inside the dokku container, where dockerd cannot see it. Docker mounted an empty directory in its place, and an archive holding nothing but an empty `backup` directory was uploaded and reported as a success.
@@ -583,7 +603,7 @@ A datastore with no secret for a flag refuses it before anything is created, rat
 
 A clone was made on the source's image and given its data, but nothing else about the source carried over: every other setting came from the flags passed to `clone`, so a clone made without repeating all of them landed on the defaults rather than on what the source runs with.
 
-A clone now starts from the source's settings - its config options, custom env, memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, mounts, volume targets, backup keyserver, backup storage class, backup timestamp and export and import arguments. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
+A clone now starts from the source's settings - its config options, custom env, memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, mounts, volume targets, backup keyserver, backup mailto, backup storage class, backup timestamp and export and import arguments. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
 
 ```shell
 # the same settings as lollipop

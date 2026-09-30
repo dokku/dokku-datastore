@@ -93,6 +93,7 @@ type CloneServiceInput struct {
 // left out for the same reason: a clone backed up to the source's bucket under
 // the source's name would replace the source's backups with its own.
 type serviceSettings struct {
+	BackupMailto       string
 	BackupStorageClass string
 	BackupTimestamp    string
 	ConfigOptions      string
@@ -143,6 +144,7 @@ func readServiceSettings(datastore *service.Datastore, serviceName string) (serv
 	}
 
 	return serviceSettings{
+		BackupMailto:       service.BackupMailto(datastore, serviceName),
 		BackupStorageClass: service.BackupStorageClass(datastore, serviceName),
 		BackupTimestamp:    strings.TrimSpace(common.PropertyGet(commandPrefix, serviceName, service.BackupTimestampProperty)),
 		ConfigOptions:      service.ConfigOptions(datastore, serviceName),
@@ -300,6 +302,7 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 	// runs, so they are written onto the clone once the clone exists
 	for property, value := range map[string]string{
 		service.KeyserverProperty:          settings.Keyserver,
+		service.BackupMailtoProperty:       settings.BackupMailto,
 		service.BackupStorageClassProperty: settings.BackupStorageClass,
 		service.BackupTimestampProperty:    settings.BackupTimestamp,
 	} {
