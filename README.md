@@ -141,7 +141,7 @@ If a service names a definition the plugin no longer ships, commands that would 
 A flavor is a datastore on an image other than its own, shipped as definitions of its own - one per major version, named `<plugin>-<flavor>-<major>` - so that it is placed on the right data directory and followed by dependabot like any other. Postgres has three:
 
 | Definition | Image | Tags |
-|---|---|---|
+| --- | --- | --- |
 | `postgres-pgvector-pg17` | `pgvector/pgvector` | `*-pg17` |
 | `postgres-pgvector-pg18` | `pgvector/pgvector` | `*-pg18` |
 | `postgres-postgis-pg17` | `postgis/postgis` | `17-*` |
