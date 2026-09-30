@@ -76,6 +76,12 @@ func TestTriggerCommandsAcceptExtraArguments(t *testing.T) {
 			args:      []string{"redis", "docker-local", "something-else"},
 		},
 		{
+			// and the entry format, when it reads json entries
+			name:      "trigger-cron-entries with an entry format and extras",
+			arguments: (&TriggerCronEntriesCommand{}).Arguments(),
+			args:      []string{"redis", "docker-local", "json", "something-else"},
+		},
+		{
 			name:      "trigger-cron-entries with no scheduler",
 			arguments: (&TriggerCronEntriesCommand{}).Arguments(),
 			args:      []string{"redis"},

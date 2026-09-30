@@ -42,7 +42,8 @@ func (c *TriggerCronEntriesCommand) Help() string {
 func (c *TriggerCronEntriesCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Lists the scheduled redis backups": fmt.Sprintf("%s %s redis docker-local", appName, c.Name()),
+		"Lists the scheduled redis backups":                 fmt.Sprintf("%s %s redis docker-local", appName, c.Name()),
+		"Lists the scheduled redis backups as json entries": fmt.Sprintf("%s %s redis docker-local json", appName, c.Name()),
 	}
 }
 
@@ -58,6 +59,12 @@ func (c *TriggerCronEntriesCommand) Arguments() []command.Argument {
 	args = append(args, command.Argument{
 		Name:        "scheduler",
 		Description: "the scheduler dokku is writing cron tasks for, which does not change the output",
+		Optional:    true,
+		Type:        command.ArgumentString,
+	})
+	args = append(args, command.Argument{
+		Name:        "entry-format",
+		Description: "the entry format dokku reads, where json has each entry printed as a json object on its own line",
 		Optional:    true,
 		Type:        command.ArgumentString,
 	})
@@ -150,9 +157,13 @@ func (c *TriggerCronEntriesCommand) Run(args []string) int {
 		return 1
 	}
 
-	entries, skipped, err := internal.CronEntriesForTrigger(ctx, internal.TriggerInput{
-		Datastore: datastore,
-		Logger:    logger,
+	entryFormat := arguments["entry-format"].StringValue()
+	tasks, warnings, err := internal.CronEntriesForTrigger(ctx, internal.CronEntriesInput{
+		TriggerInput: internal.TriggerInput{
+			Datastore: datastore,
+			Logger:    logger,
+		},
+		EntryFormat: entryFormat,
 	})
 	if err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
@@ -160,16 +171,32 @@ func (c *TriggerCronEntriesCommand) Run(args []string) int {
 	}
 
 	// to stderr, since dokku reads every line of stdout as a cron task
-	for _, err := range skipped {
+	for _, err := range warnings {
 		logger.Warn(internal.WarnInput{Warning: err.Error()})
 	}
 
-	// dokku reads the text a line at a time and splits each on semicolons
-	tasks := make([]internal.CronTask, 0, len(entries))
+	// dokku reads the output a line at a time, as a json object when it asked
+	// for json entries and split on semicolons otherwise
 	text := strings.Builder{}
-	for _, entry := range entries {
-		tasks = append(tasks, internal.SplitCronEntry(entry))
-		text.WriteString(entry + "\n")
+	for _, task := range tasks {
+		line := task.Text()
+		if entryFormat == internal.CronEntryFormatJSON {
+			line, err = task.JSONLine()
+			if err != nil {
+				logger.Error(internal.ErrorInput{Error: err})
+				return 1
+			}
+		}
+		text.WriteString(line + "\n")
+	}
+
+	// what dokku asked for is printed whatever format a person asked for
+	if entryFormat == internal.CronEntryFormatJSON {
+		if err := logger.Write(text.String()); err != nil {
+			logger.Error(internal.ErrorInput{Error: err})
+			return 1
+		}
+		return 0
 	}
 
 	if err := logger.Document(tasks, text.String()); err != nil {

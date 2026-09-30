@@ -234,21 +234,31 @@ func ServiceListForTrigger(ctx context.Context, input TriggerInput, serviceType 
 	return names, nil
 }
 
-// CronEntriesForTrigger returns the lines the cron-entries trigger prints, one
+// CronEntriesInput is the input for the CronEntriesForTrigger function
+type CronEntriesInput struct {
+	TriggerInput
+
+	// EntryFormat is the entry format dokku passed to the trigger, which is
+	// CronEntryFormatJSON when dokku reads json entries and empty otherwise
+	EntryFormat string
+}
+
+// CronEntriesForTrigger returns the tasks the cron-entries trigger prints, one
 // for each service with a scheduled backup, in the order the services are
-// listed. Alongside them are the services left out because what they were
-// scheduled with cannot be run: the dokku crontab is refused as a whole when a
-// line in it is invalid, so one service's schedule must not stop every other
-// task on the host.
-func CronEntriesForTrigger(ctx context.Context, input TriggerInput) ([]string, []error, error) {
+// listed. Alongside them are warnings: the services left out because what they
+// were scheduled with cannot be run, as the dokku crontab is refused as a whole
+// when a line in it is invalid, so one service's schedule must not stop every
+// other task on the host; and the services whose MAILTO is ignored because dokku
+// does not read json entries.
+func CronEntriesForTrigger(ctx context.Context, input CronEntriesInput) ([]CronTask, []error, error) {
 	services, err := ListServices(ctx, ListServicesInput{Datastore: input.Datastore})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to list services: %w", err)
 	}
 
 	commandPrefix := input.Datastore.Properties().CommandPrefix
-	entries := []string{}
-	skipped := []error{}
+	tasks := []CronTask{}
+	warnings := []error{}
 	for _, serviceName := range services {
 		schedule, ok := ReadBackupSchedule(input.Datastore, serviceName)
 		if !ok {
@@ -256,12 +266,16 @@ func CronEntriesForTrigger(ctx context.Context, input TriggerInput) ([]string, [
 		}
 
 		if err := schedule.Validate(); err != nil {
-			skipped = append(skipped, fmt.Errorf("skipping the scheduled backup for %s: %w", serviceName, err))
+			warnings = append(warnings, fmt.Errorf("skipping the scheduled backup for %s: %w", serviceName, err))
 			continue
 		}
 
-		entries = append(entries, CronEntry(commandPrefix, serviceName, schedule))
+		if schedule.Mailto != "" && input.EntryFormat != CronEntryFormatJSON {
+			warnings = append(warnings, fmt.Errorf("%s for %s is ignored, dokku does not support a per-entry MAILTO", BackupMailtoProperty, serviceName))
+		}
+
+		tasks = append(tasks, CronEntry(commandPrefix, serviceName, schedule))
 	}
 
-	return entries, skipped, nil
+	return tasks, warnings, nil
 }

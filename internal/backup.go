@@ -3,6 +3,7 @@ package internal
 import (
 	"archive/tar"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -263,10 +264,19 @@ const (
 	// BackupUseIAMProperty is set when a scheduled backup runs against an
 	// instance role rather than against stored credentials
 	BackupUseIAMProperty = "backup-use-iam"
+
+	// BackupMailtoProperty is who cron mails the output of a scheduled backup to
+	BackupMailtoProperty = "backup-mailto"
 )
 
 // backupScheduleProperties are every property a scheduled backup writes
-var backupScheduleProperties = []string{BackupScheduleProperty, BackupBucketProperty, BackupUseIAMProperty}
+var backupScheduleProperties = []string{BackupScheduleProperty, BackupBucketProperty, BackupUseIAMProperty, BackupMailtoProperty}
+
+// CronEntryFormatJSON is the entry format dokku passes to the cron-entries
+// trigger when it reads each entry as a json object on its own line. Only those
+// entries can carry a MAILTO, and dokku versions that do not pass it refuse
+// them, so they are printed only when it is passed.
+const CronEntryFormatJSON = "json"
 
 // cronScheduleParser reads a schedule the way the dokku cron plugin does, so a
 // schedule accepted here is one dokku would accept for an app's own task
@@ -277,6 +287,12 @@ var cronScheduleParser = cronparser.NewParser(cronparser.Minute | cronparser.Hou
 // separates with semicolons, so anything a shell or that line reads specially
 // is refused rather than escaped.
 var bucketNamePattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
+
+// mailtoRecipientPattern is what each recipient of a scheduled backup's output
+// may be made of: an email address, or a local user on the host. The recipients
+// are written into a MAILTO line in the dokku crontab, so anything that would
+// end that line or that cron reads specially is refused.
+var mailtoRecipientPattern = regexp.MustCompile(`^[A-Za-z0-9._+-]+(@[A-Za-z0-9.-]+)?$`)
 
 // ValidateBackupSchedule reports whether a schedule is one cron can run.
 //
@@ -320,6 +336,23 @@ func ValidateBucketName(bucketName string) error {
 	return nil
 }
 
+// ValidateBackupMailto reports whether a comma-separated list of recipients can
+// be written into the MAILTO line of a scheduled backup. An empty value is
+// valid, and leaves the output of the backup to the global MAILTO.
+func ValidateBackupMailto(mailto string) error {
+	if mailto == "" {
+		return nil
+	}
+
+	for _, recipient := range strings.Split(mailto, ",") {
+		if !mailtoRecipientPattern.MatchString(recipient) {
+			return fmt.Errorf("invalid mailto value %q: specify a comma-separated list of email addresses or local users, without spaces", mailto)
+		}
+	}
+
+	return nil
+}
+
 // BackupSchedule is the scheduled backup a service is recorded with
 type BackupSchedule struct {
 	// Schedule is the cron schedule the backup runs on
@@ -331,6 +364,10 @@ type BackupSchedule struct {
 	// UseIAM reports whether the backup runs against an instance role rather
 	// than against stored credentials
 	UseIAM bool
+
+	// Mailto is who cron mails the output of the backup to, instead of the
+	// global MAILTO
+	Mailto string
 }
 
 // Validate reports whether a schedule can be written into the dokku crontab
@@ -339,7 +376,11 @@ func (b BackupSchedule) Validate() error {
 		return err
 	}
 
-	return ValidateBucketName(b.BucketName)
+	if err := ValidateBucketName(b.BucketName); err != nil {
+		return err
+	}
+
+	return ValidateBackupMailto(b.Mailto)
 }
 
 // ReadBackupSchedule reads the scheduled backup a service is recorded with, and
@@ -350,6 +391,7 @@ func ReadBackupSchedule(s *service.Datastore, serviceName string) (BackupSchedul
 		Schedule:   common.PropertyGet(commandPrefix, serviceName, BackupScheduleProperty),
 		BucketName: common.PropertyGet(commandPrefix, serviceName, BackupBucketProperty),
 		UseIAM:     common.PropertyGet(commandPrefix, serviceName, BackupUseIAMProperty) == "true",
+		Mailto:     common.PropertyGet(commandPrefix, serviceName, BackupMailtoProperty),
 	}
 
 	if schedule.Schedule == "" {
@@ -375,40 +417,63 @@ func backupCommand(commandPrefix string, serviceName string, schedule BackupSche
 	return command
 }
 
-// CronEntry builds the line the cron-entries trigger prints for a scheduled
-// backup: the schedule, the command and the log file, separated by semicolons
-func CronEntry(commandPrefix string, serviceName string, schedule BackupSchedule) string {
-	return strings.Join([]string{
-		schedule.Schedule,
-		backupCommand(commandPrefix, serviceName, schedule),
-		BackupLogFile(commandPrefix),
-	}, ";")
-}
-
-// CronTask is one line the cron-entries trigger prints, as its json form
-// reports it.
+// CronTask is a scheduled backup as the cron-entries trigger hands it to dokku
 type CronTask struct {
+	// Schedule is the cron schedule the backup runs on
 	Schedule string `json:"schedule"`
-	Command  string `json:"command"`
-	LogFile  string `json:"log-file"`
+
+	// Command is the command the backup runs
+	Command string `json:"command"`
+
+	// LogFile is the file the output of the backup is appended to
+	LogFile string `json:"log-file"`
+
+	// Mailto is who cron mails the output of the backup to, instead of the
+	// global MAILTO
+	Mailto string `json:"mailto,omitempty"`
 }
 
-// SplitCronEntry reads a line CronEntry built back into its fields. Neither the
-// schedule nor the command can hold a semicolon, since both are validated before
-// a line is built, so the first two separate the three.
-func SplitCronEntry(entry string) CronTask {
-	fields := strings.SplitN(entry, ";", 3)
-	for len(fields) < 3 {
-		fields = append(fields, "")
+// Text builds the line the cron-entries trigger prints for dokku versions that
+// do not read json entries: the schedule, the command and the log file,
+// separated by semicolons. Those versions refuse a line with a fourth field, so
+// the task's MAILTO is left out.
+func (t CronTask) Text() string {
+	return strings.Join([]string{t.Schedule, t.Command, t.LogFile}, ";")
+}
+
+// JSONLine builds the line the cron-entries trigger prints for dokku versions
+// that read json entries: the task as a json object on a single line
+func (t CronTask) JSONLine() (string, error) {
+	line, err := json.Marshal(t)
+	if err != nil {
+		return "", fmt.Errorf("unable to encode the cron entry: %w", err)
 	}
 
-	return CronTask{Schedule: fields[0], Command: fields[1], LogFile: fields[2]}
+	return string(line), nil
+}
+
+// CronEntry builds the task the cron-entries trigger prints for a scheduled
+// backup
+func CronEntry(commandPrefix string, serviceName string, schedule BackupSchedule) CronTask {
+	return CronTask{
+		Schedule: schedule.Schedule,
+		Command:  backupCommand(commandPrefix, serviceName, schedule),
+		LogFile:  BackupLogFile(commandPrefix),
+		Mailto:   schedule.Mailto,
+	}
 }
 
 // CrontabLine builds the line dokku writes into its crontab for a scheduled
-// backup, the same way it writes any task handed to it by cron-entries
+// backup, the same way it writes any task handed to it by cron-entries. A task
+// with a MAILTO keeps its output on stdout, where cron mails it from, and dokku
+// writes it under a MAILTO line of its own.
 func CrontabLine(commandPrefix string, serviceName string, schedule BackupSchedule) string {
-	return fmt.Sprintf("%s %s &>> %s", schedule.Schedule, backupCommand(commandPrefix, serviceName, schedule), BackupLogFile(commandPrefix))
+	task := CronEntry(commandPrefix, serviceName, schedule)
+	if task.Mailto != "" {
+		return fmt.Sprintf("%s %s 2>&1 | tee -a %s", task.Schedule, task.Command, task.LogFile)
+	}
+
+	return fmt.Sprintf("%s %s &>> %s", task.Schedule, task.Command, task.LogFile)
 }
 
 // BackupScheduleReport is a service's scheduled backup as backup-schedule-cat
@@ -418,6 +483,7 @@ type BackupScheduleReport struct {
 	Schedule    string `json:"schedule"`
 	BucketName  string `json:"bucket-name"`
 	UseIAM      bool   `json:"use-iam"`
+	Mailto      string `json:"mailto"`
 	CrontabLine string `json:"crontab-line"`
 }
 
@@ -432,6 +498,7 @@ func BackupScheduleCatReport(s *service.Datastore, serviceName string) (BackupSc
 		Schedule:    schedule.Schedule,
 		BucketName:  schedule.BucketName,
 		UseIAM:      schedule.UseIAM,
+		Mailto:      schedule.Mailto,
 		CrontabLine: CrontabLine(s.Properties().CommandPrefix, serviceName, schedule),
 	}, nil
 }
@@ -475,6 +542,42 @@ func ParseCronEntry(commandPrefix string, entry string) (BackupSchedule, bool) {
 	return schedule, true
 }
 
+// ParseLegacyCronFile reads back the schedule a legacy cron file was written
+// with, and reports whether the file held a line an earlier version of the plugin
+// wrote. Environment lines are skipped, and a MAILTO among them is kept as the
+// schedule's MAILTO, since the file was the only place one could be set. The
+// MAILTO is returned as written, and is left for the caller to validate.
+func ParseLegacyCronFile(commandPrefix string, contents string) (BackupSchedule, bool) {
+	mailto := ""
+	for _, line := range strings.Split(contents, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		if name, value, ok := strings.Cut(line, "="); ok && legacyCronEnvNamePattern.MatchString(strings.TrimSpace(name)) {
+			if strings.TrimSpace(name) == "MAILTO" {
+				mailto = strings.Trim(strings.TrimSpace(value), `"'`)
+			}
+			continue
+		}
+
+		schedule, ok := ParseCronEntry(commandPrefix, line)
+		if !ok {
+			return BackupSchedule{}, false
+		}
+
+		schedule.Mailto = mailto
+		return schedule, true
+	}
+
+	return BackupSchedule{}, false
+}
+
+// legacyCronEnvNamePattern is what the name of an environment line in a cron
+// file is made of
+var legacyCronEnvNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // writeBackupSchedule records a scheduled backup for a service
 func writeBackupSchedule(s *service.Datastore, serviceName string, schedule BackupSchedule) error {
 	commandPrefix := s.Properties().CommandPrefix
@@ -484,6 +587,14 @@ func writeBackupSchedule(s *service.Datastore, serviceName string, schedule Back
 
 	if err := common.PropertyWrite(commandPrefix, serviceName, BackupBucketProperty, schedule.BucketName); err != nil {
 		return fmt.Errorf("unable to record the backup bucket: %w", err)
+	}
+
+	if schedule.Mailto == "" {
+		if err := common.PropertyDelete(commandPrefix, serviceName, BackupMailtoProperty); err != nil {
+			return fmt.Errorf("unable to record the backup mailto: %w", err)
+		}
+	} else if err := common.PropertyWrite(commandPrefix, serviceName, BackupMailtoProperty, schedule.Mailto); err != nil {
+		return fmt.Errorf("unable to record the backup mailto: %w", err)
 	}
 
 	if !schedule.UseIAM {
@@ -522,6 +633,7 @@ func regenerateCrontab(ctx context.Context) error {
 type ScheduleBackupInput struct {
 	BucketName  string
 	Datastore   *service.Datastore
+	Mailto      string
 	Schedule    string
 	ServiceName string
 	UseIAM      bool
@@ -534,6 +646,7 @@ func ScheduleBackup(ctx context.Context, input ScheduleBackupInput) error {
 		Schedule:   input.Schedule,
 		BucketName: input.BucketName,
 		UseIAM:     input.UseIAM,
+		Mailto:     input.Mailto,
 	}
 	if err := schedule.Validate(); err != nil {
 		return err

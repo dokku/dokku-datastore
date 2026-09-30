@@ -115,7 +115,7 @@ func (c *BackupScheduleCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *BackupScheduleCommand) Usage() string {
-	return `<service> <schedule> <bucket-name> [-u|--use-iam]`
+	return `<service> <schedule> <bucket-name> [-u|--use-iam] [--mailto <recipients>]`
 }
 
 // Documentation returns the long form documentation for the command
@@ -126,7 +126,11 @@ func (c *BackupScheduleCommand) Documentation() string {
 > NOTE: dokku only writes a crontab when the global scheduler or at least one app uses the docker-local scheduler, so a scheduled backup does not run on a host that only uses k3s or null
 dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket
 schedule a backup and authenticate via iam
-dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket --use-iam`
+dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket --use-iam
+schedule a backup and mail its output
+> '--mailto' is a comma-separated list of email addresses or local users, without spaces. Cron mails them all of the backup's output, which is still appended to the log file, so a mail transfer agent must be configured on the host.
+> NOTE: the mailto requires a dokku version that reads json entries from the cron-entries plugin trigger. Older versions ignore it with a warning, and still run the backup.
+dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket --mailto ops@example.com`
 }
 
 // Group is the readme usage section the command is documented under

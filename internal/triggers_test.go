@@ -41,6 +41,10 @@ func triggerInput(datastore *service.Datastore) TriggerInput {
 	return TriggerInput{Datastore: datastore, Logger: Ui{Ui: cli.NewMockUi()}}
 }
 
+func cronEntriesInput(datastore *service.Datastore, entryFormat string) CronEntriesInput {
+	return CronEntriesInput{TriggerInput: triggerInput(datastore), EntryFormat: entryFormat}
+}
+
 func assertLinkedApps(t *testing.T, datastore *service.Datastore, serviceName string, expected []string) {
 	t.Helper()
 
@@ -238,21 +242,68 @@ func TestCronEntriesForTrigger(t *testing.T) {
 		}
 	}
 
-	entries, skipped, err := CronEntriesForTrigger(t.Context(), triggerInput(datastore))
+	for _, entryFormat := range []string{"", CronEntryFormatJSON} {
+		t.Run(entryFormat, func(t *testing.T) {
+			tasks, skipped, err := CronEntriesForTrigger(t.Context(), cronEntriesInput(datastore, entryFormat))
+			if err != nil {
+				t.Fatalf("failed to list the cron entries: %s", err)
+			}
+
+			expected := []CronTask{
+				{Schedule: "0 3 * * *", Command: "dokku redis:backup apple my-bucket", LogFile: "/var/log/dokku/redis.log"},
+				{Schedule: "@daily", Command: "dokku redis:backup cherry other-bucket --use-iam", LogFile: "/var/log/dokku/redis.log"},
+			}
+			if !slices.Equal(tasks, expected) {
+				t.Errorf("expected %+v, got %+v", expected, tasks)
+			}
+
+			if len(skipped) != 1 || !strings.Contains(skipped[0].Error(), "grape") {
+				t.Errorf("expected grape to be reported as skipped, got %v", skipped)
+			}
+		})
+	}
+}
+
+// A service's MAILTO is handed to dokku with its task. Dokku versions that do not
+// read json entries cannot be handed it, so it is reported as ignored there,
+// while the backup itself is still scheduled.
+func TestCronEntriesForTriggerWithAMailto(t *testing.T) {
+	datastore := withScheduleService(t, "apple", "cherry")
+
+	for serviceName, schedule := range map[string]BackupSchedule{
+		"apple":  {Schedule: "0 3 * * *", BucketName: "my-bucket", Mailto: "ops@example.com"},
+		"cherry": {Schedule: "@daily", BucketName: "my-bucket", Mailto: "ops@example.com;true"},
+	} {
+		if err := writeBackupSchedule(datastore, serviceName, schedule); err != nil {
+			t.Fatalf("failed to record the schedule for %s: %s", serviceName, err)
+		}
+	}
+
+	expected := []CronTask{
+		{Schedule: "0 3 * * *", Command: "dokku redis:backup apple my-bucket", LogFile: "/var/log/dokku/redis.log", Mailto: "ops@example.com"},
+	}
+
+	tasks, warnings, err := CronEntriesForTrigger(t.Context(), cronEntriesInput(datastore, CronEntryFormatJSON))
 	if err != nil {
 		t.Fatalf("failed to list the cron entries: %s", err)
 	}
-
-	expected := []string{
-		"0 3 * * *;dokku redis:backup apple my-bucket;/var/log/dokku/redis.log",
-		"@daily;dokku redis:backup cherry other-bucket --use-iam;/var/log/dokku/redis.log",
+	if !slices.Equal(tasks, expected) {
+		t.Errorf("expected %+v, got %+v", expected, tasks)
 	}
-	if !slices.Equal(entries, expected) {
-		t.Errorf("expected %q, got %q", expected, entries)
+	// cherry's mailto cannot be written into the crontab, so it is skipped
+	if len(warnings) != 1 || !strings.Contains(warnings[0].Error(), "skipping the scheduled backup for cherry") {
+		t.Errorf("expected only cherry to be reported as skipped, got %v", warnings)
 	}
 
-	if len(skipped) != 1 || !strings.Contains(skipped[0].Error(), "grape") {
-		t.Errorf("expected grape to be reported as skipped, got %v", skipped)
+	tasks, warnings, err = CronEntriesForTrigger(t.Context(), cronEntriesInput(datastore, ""))
+	if err != nil {
+		t.Fatalf("failed to list the cron entries: %s", err)
+	}
+	if !slices.Equal(tasks, expected) {
+		t.Errorf("expected %+v, got %+v", expected, tasks)
+	}
+	if len(warnings) != 2 || !strings.Contains(warnings[0].Error(), "backup-mailto for apple is ignored") {
+		t.Errorf("expected apple's mailto to be reported as ignored, got %v", warnings)
 	}
 }
 
@@ -261,7 +312,7 @@ func TestCronEntriesForTrigger(t *testing.T) {
 func TestCronEntriesForTriggerWithNothingScheduled(t *testing.T) {
 	datastore := withScheduleService(t, "lollipop")
 
-	entries, skipped, err := CronEntriesForTrigger(t.Context(), triggerInput(datastore))
+	entries, skipped, err := CronEntriesForTrigger(t.Context(), cronEntriesInput(datastore, ""))
 	if err != nil {
 		t.Fatalf("failed to list the cron entries: %s", err)
 	}

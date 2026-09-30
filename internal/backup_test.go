@@ -3,6 +3,7 @@ package internal
 import (
 	"archive/tar"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/dokku/dokku/plugins/common"
 )
 
 // withScheduleService points the package at a temporary root and creates a
@@ -104,40 +106,118 @@ func TestValidateBucketName(t *testing.T) {
 	}
 }
 
+// The recipients are written into a MAILTO line in the dokku crontab, so
+// anything that would end that line is refused
+func TestValidateBackupMailto(t *testing.T) {
+	tests := []struct {
+		mailto string
+		valid  bool
+	}{
+		{mailto: "", valid: true},
+		{mailto: "ops@example.com", valid: true},
+		{mailto: "ops+backups@mail.example.com", valid: true},
+		{mailto: "ops@example.com,dba@example.com", valid: true},
+		{mailto: "root", valid: true},
+		{mailto: "ops@example.com, dba@example.com", valid: false},
+		{mailto: "ops@example.com,", valid: false},
+		{mailto: "ops@@example.com", valid: false},
+		{mailto: "ops@example.com;true", valid: false},
+		{mailto: "ops@example.com\n* * * * * true", valid: false},
+		{mailto: "\"ops@example.com\"", valid: false},
+		{mailto: "ops@example.com$(true)", valid: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.mailto, func(t *testing.T) {
+			err := ValidateBackupMailto(test.mailto)
+			if test.valid && err != nil {
+				t.Errorf("expected %q to be valid, got %s", test.mailto, err)
+			}
+			if !test.valid && err == nil {
+				t.Errorf("expected %q to be refused", test.mailto)
+			}
+		})
+	}
+}
+
+// A schedule with a MAILTO that cannot be written is left out of the crontab
+func TestBackupScheduleValidateChecksTheMailto(t *testing.T) {
+	schedule := BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", Mailto: "ops@example.com;true"}
+	if err := schedule.Validate(); err == nil {
+		t.Errorf("expected %+v to be refused", schedule)
+	}
+
+	schedule.Mailto = "ops@example.com"
+	if err := schedule.Validate(); err != nil {
+		t.Errorf("expected %+v to be valid, got %s", schedule, err)
+	}
+}
+
 func TestCronEntry(t *testing.T) {
 	tests := []struct {
 		name     string
 		schedule BackupSchedule
-		expected string
+		expected CronTask
+		text     string
+		json     string
 	}{
 		{
 			name:     "a plain schedule",
 			schedule: BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket"},
-			expected: "0 3 * * *;dokku redis:backup lollipop my-bucket;/var/log/dokku/redis.log",
+			expected: CronTask{Schedule: "0 3 * * *", Command: "dokku redis:backup lollipop my-bucket", LogFile: "/var/log/dokku/redis.log"},
+			text:     "0 3 * * *;dokku redis:backup lollipop my-bucket;/var/log/dokku/redis.log",
+			json:     `{"schedule":"0 3 * * *","command":"dokku redis:backup lollipop my-bucket","log-file":"/var/log/dokku/redis.log"}`,
 		},
 		{
 			name:     "using an iam profile",
 			schedule: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", UseIAM: true},
-			expected: "@daily;dokku redis:backup lollipop my-bucket --use-iam;/var/log/dokku/redis.log",
+			expected: CronTask{Schedule: "@daily", Command: "dokku redis:backup lollipop my-bucket --use-iam", LogFile: "/var/log/dokku/redis.log"},
+			text:     "@daily;dokku redis:backup lollipop my-bucket --use-iam;/var/log/dokku/redis.log",
+			json:     `{"schedule":"@daily","command":"dokku redis:backup lollipop my-bucket --use-iam","log-file":"/var/log/dokku/redis.log"}`,
+		},
+		{
+			name:     "with a mailto",
+			schedule: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", Mailto: "ops@example.com"},
+			expected: CronTask{Schedule: "@daily", Command: "dokku redis:backup lollipop my-bucket", LogFile: "/var/log/dokku/redis.log", Mailto: "ops@example.com"},
+			text:     "@daily;dokku redis:backup lollipop my-bucket;/var/log/dokku/redis.log",
+			json:     `{"schedule":"@daily","command":"dokku redis:backup lollipop my-bucket","log-file":"/var/log/dokku/redis.log","mailto":"ops@example.com"}`,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			actual := CronEntry("redis", "lollipop", test.schedule)
-			if actual != test.expected {
-				t.Errorf("expected %q, got %q", test.expected, actual)
+			task := CronEntry("redis", "lollipop", test.schedule)
+			if task != test.expected {
+				t.Errorf("expected %+v, got %+v", test.expected, task)
 			}
 
-			// dokku refuses a line that is not two or three fields
-			if fields := strings.Split(actual, ";"); len(fields) != 3 {
-				t.Errorf("expected three fields, got %d in %q", len(fields), actual)
+			// dokku versions that do not read json refuse a line that is not
+			// two or three fields, so the mailto is never in the text form
+			text := task.Text()
+			if text != test.text {
+				t.Errorf("expected %q, got %q", test.text, text)
+			}
+			if fields := strings.Split(text, ";"); len(fields) != 3 {
+				t.Errorf("expected three fields, got %d in %q", len(fields), text)
 			}
 
-			// and the json form reads the same three back
-			task := SplitCronEntry(actual)
-			if rebuilt := strings.Join([]string{task.Schedule, task.Command, task.LogFile}, ";"); rebuilt != actual {
-				t.Errorf("expected %q to split into its fields, got %+v", actual, task)
+			line, err := task.JSONLine()
+			if err != nil {
+				t.Fatalf("failed to encode the task: %s", err)
+			}
+			if line != test.json {
+				t.Errorf("expected %q, got %q", test.json, line)
+			}
+			if strings.Contains(line, "\n") {
+				t.Errorf("expected a single line, got %q", line)
+			}
+
+			decoded := CronTask{}
+			if err := json.Unmarshal([]byte(line), &decoded); err != nil {
+				t.Fatalf("failed to decode %q: %s", line, err)
+			}
+			if decoded != task {
+				t.Errorf("expected %q to decode to %+v, got %+v", line, task, decoded)
 			}
 		})
 	}
@@ -159,6 +239,11 @@ func TestCrontabLine(t *testing.T) {
 			name:     "using an iam profile",
 			schedule: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", UseIAM: true},
 			expected: "@daily dokku redis:backup lollipop my-bucket --use-iam &>> /var/log/dokku/redis.log",
+		},
+		{
+			name:     "with a mailto",
+			schedule: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", Mailto: "ops@example.com"},
+			expected: "@daily dokku redis:backup lollipop my-bucket 2>&1 | tee -a /var/log/dokku/redis.log",
 		},
 	}
 
@@ -191,6 +276,7 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 		Schedule:    "0 3 * * *",
 		ServiceName: "lollipop",
 		UseIAM:      true,
+		Mailto:      "ops@example.com",
 	}); err != nil {
 		t.Fatalf("failed to schedule the backup: %s", err)
 	}
@@ -199,7 +285,7 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("expected the backup to be scheduled")
 	}
-	expected := BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket", UseIAM: true}
+	expected := BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket", UseIAM: true, Mailto: "ops@example.com"}
 	if schedule != expected {
 		t.Errorf("expected %+v, got %+v", expected, schedule)
 	}
@@ -208,7 +294,7 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to cat the schedule: %s", err)
 	}
-	if contents != "0 3 * * * dokku redis:backup lollipop my-bucket --use-iam &>> /var/log/dokku/redis.log\n" {
+	if contents != "0 3 * * * dokku redis:backup lollipop my-bucket --use-iam 2>&1 | tee -a /var/log/dokku/redis.log\n" {
 		t.Errorf("unexpected cat output %q", contents)
 	}
 
@@ -220,14 +306,15 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 		Schedule:    "0 3 * * *",
 		BucketName:  "my-bucket",
 		UseIAM:      true,
+		Mailto:      "ops@example.com",
 		CrontabLine: strings.TrimSuffix(contents, "\n"),
 	}
 	if report != expectedReport {
 		t.Errorf("expected %+v, got %+v", expectedReport, report)
 	}
 
-	// scheduling again without --use-iam drops it rather than keeping the old
-	// value
+	// scheduling again without --use-iam or --mailto drops them rather than
+	// keeping the old values
 	if err := ScheduleBackup(t.Context(), ScheduleBackupInput{
 		BucketName:  "my-bucket",
 		Datastore:   datastore,
@@ -236,8 +323,19 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("failed to schedule the backup again: %s", err)
 	}
-	if schedule, _ := ReadBackupSchedule(datastore, "lollipop"); schedule.UseIAM || schedule.Schedule != "@daily" {
-		t.Errorf("expected the new schedule without iam, got %+v", schedule)
+	if schedule, _ := ReadBackupSchedule(datastore, "lollipop"); schedule.UseIAM || schedule.Mailto != "" || schedule.Schedule != "@daily" {
+		t.Errorf("expected the new schedule without iam or a mailto, got %+v", schedule)
+	}
+
+	// scheduled with a mailto once more, so unscheduling has one to remove
+	if err := ScheduleBackup(t.Context(), ScheduleBackupInput{
+		BucketName:  "my-bucket",
+		Datastore:   datastore,
+		Mailto:      "ops@example.com",
+		Schedule:    "@daily",
+		ServiceName: "lollipop",
+	}); err != nil {
+		t.Fatalf("failed to schedule the backup with a mailto: %s", err)
 	}
 
 	if err := UnscheduleBackup(t.Context(), UnscheduleBackupInput{Datastore: datastore, ServiceName: "lollipop"}); err != nil {
@@ -246,6 +344,9 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 
 	if _, ok := ReadBackupSchedule(datastore, "lollipop"); ok {
 		t.Error("expected the backup to be unscheduled")
+	}
+	if mailto := common.PropertyGet("redis", "lollipop", BackupMailtoProperty); mailto != "" {
+		t.Errorf("expected unscheduling to remove the mailto, got %q", mailto)
 	}
 
 	// and again, which has nothing to do
@@ -271,6 +372,7 @@ func TestScheduleBackupRefusesAnInvalidSchedule(t *testing.T) {
 	for _, input := range []ScheduleBackupInput{
 		{BucketName: "my-bucket", Schedule: "daily"},
 		{BucketName: "my bucket", Schedule: "@daily"},
+		{BucketName: "my-bucket", Schedule: "@daily", Mailto: "ops@example.com\n* * * * * true"},
 	} {
 		input.Datastore = datastore
 		input.ServiceName = "lollipop"
@@ -343,6 +445,69 @@ func TestParseCronEntryRejectsWhatItDidNotWrite(t *testing.T) {
 				t.Errorf("expected %q not to parse", test.entry)
 			}
 		})
+	}
+}
+
+// A legacy cron file could only be given a MAILTO by adding a line to it by
+// hand, which is kept when the file is migrated
+func TestParseLegacyCronFile(t *testing.T) {
+	tests := []struct {
+		name     string
+		contents string
+		expected BackupSchedule
+	}{
+		{
+			name:     "a single line",
+			contents: "0 3 * * * dokku /usr/bin/dokku redis:backup lollipop my-bucket\n",
+			expected: BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket"},
+		},
+		{
+			name:     "a mailto before the entry",
+			contents: "MAILTO=ops@example.com\n0 3 * * * dokku /usr/bin/dokku redis:backup lollipop my-bucket --use-iam\n",
+			expected: BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket", UseIAM: true, Mailto: "ops@example.com"},
+		},
+		{
+			name:     "a quoted mailto",
+			contents: "MAILTO=\"ops@example.com\"\n@daily dokku /usr/bin/dokku redis:backup lollipop my-bucket\n",
+			expected: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", Mailto: "ops@example.com"},
+		},
+		{
+			name:     "comments and other environment lines",
+			contents: "# backups\nSHELL=/bin/bash\n\nMAILTO = ops@example.com\nPATH=/usr/bin:/bin\n@daily dokku /usr/bin/dokku redis:backup lollipop my-bucket\n",
+			expected: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", Mailto: "ops@example.com"},
+		},
+		{
+			name:     "a mailto that cannot be written, left to the caller",
+			contents: "MAILTO=ops@example.com; true\n@daily dokku /usr/bin/dokku redis:backup lollipop my-bucket\n",
+			expected: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", Mailto: "ops@example.com; true"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			schedule, ok := ParseLegacyCronFile("redis", test.contents)
+			if !ok {
+				t.Fatalf("expected %q to parse", test.contents)
+			}
+
+			if schedule != test.expected {
+				t.Errorf("expected %+v, got %+v", test.expected, schedule)
+			}
+		})
+	}
+}
+
+// A file whose first entry is not one this wrote is not read, whatever follows
+func TestParseLegacyCronFileRejectsWhatItDidNotWrite(t *testing.T) {
+	for _, contents := range []string{
+		"",
+		"MAILTO=ops@example.com\n",
+		"MAILTO=ops@example.com\n0 3 * * * dokku /usr/bin/dokku postgres:backup lollipop my-bucket\n",
+		"0 3 * * * /usr/bin/something-else\n0 3 * * * dokku /usr/bin/dokku redis:backup lollipop my-bucket\n",
+	} {
+		if _, ok := ParseLegacyCronFile("redis", contents); ok {
+			t.Errorf("expected %q not to parse", contents)
+		}
 	}
 }
 

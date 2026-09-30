@@ -221,10 +221,22 @@ func migrateLegacyCronFile(input InstallInput, serviceName string) (bool, error)
 	}
 
 	commandPrefix := input.Datastore.Properties().CommandPrefix
-	schedule, ok := ParseCronEntry(commandPrefix, common.ReadFirstLine(cronFile))
+	contents, err := os.ReadFile(cronFile)
+	if err != nil {
+		return false, fmt.Errorf("unable to read %s: %w", cronFile, err)
+	}
+
+	schedule, ok := ParseLegacyCronFile(commandPrefix, string(contents))
 	if !ok {
 		input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Unable to read the scheduled backup for %s from %s, leaving it in place", serviceName, cronFile)})
 		return false, nil
+	}
+
+	// a MAILTO added to the file by hand is kept, unless it cannot be written
+	// into the dokku crontab, which should not cost the service its backups
+	if err := ValidateBackupMailto(schedule.Mailto); err != nil {
+		input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Dropping the MAILTO of the scheduled backup for %s: %s", serviceName, err)})
+		schedule.Mailto = ""
 	}
 
 	if err := schedule.Validate(); err != nil {

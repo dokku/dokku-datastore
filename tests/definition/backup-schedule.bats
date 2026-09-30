@@ -85,6 +85,92 @@ assert_crontab_regenerated() {
   assert_output "true"
 }
 
+@test "($DEFINITION) a scheduled backup can have its output mailed" {
+  schedule_backup "$SERVICE" "@daily" my-bucket --mailto ops@example.com,dba@example.com
+  assert_success
+  assert_crontab_regenerated
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-mailto
+  assert_success
+  assert_output "ops@example.com,dba@example.com"
+
+  # dokku versions that read json entries are handed the mailto
+  run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local json
+  assert_success
+  assert_output "{\"schedule\":\"@daily\",\"command\":\"dokku $PLUGIN:backup $SERVICE my-bucket\",\"log-file\":\"/var/log/dokku/$PLUGIN.log\",\"mailto\":\"ops@example.com,dba@example.com\"}"
+  run jq -c . <<<"$output"
+  assert_success
+
+  # which is what is printed, whatever format a person asked for
+  run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local json --format json
+  assert_success
+  run jq -r '.mailto' <<<"$output"
+  assert_success
+  assert_output "ops@example.com,dba@example.com"
+
+  # and those that do not are handed the line they read, and told it is ignored
+  run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local
+  assert_success
+  assert_output "@daily;dokku $PLUGIN:backup $SERVICE my-bucket;/var/log/dokku/$PLUGIN.log"
+  assert_stderr --partial "backup-mailto for $SERVICE is ignored"
+
+  run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local --format json
+  assert_success
+  run jq -r '.[0].mailto' <<<"$output"
+  assert_success
+  assert_output "ops@example.com,dba@example.com"
+
+  run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_output "@daily dokku $PLUGIN:backup $SERVICE my-bucket 2>&1 | tee -a /var/log/dokku/$PLUGIN.log"
+
+  run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE" --format json
+  assert_success
+  run jq -r '.mailto' <<<"$output"
+  assert_success
+  assert_output "ops@example.com,dba@example.com"
+
+  # scheduling again without it drops the mailto
+  schedule_backup "$SERVICE" "@daily" my-bucket
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-mailto
+  assert_success
+  assert_output ""
+
+  run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local json
+  assert_success
+  assert_output "{\"schedule\":\"@daily\",\"command\":\"dokku $PLUGIN:backup $SERVICE my-bucket\",\"log-file\":\"/var/log/dokku/$PLUGIN.log\"}"
+}
+
+@test "($DEFINITION) a mailto cron cannot write is refused" {
+  schedule_backup "$SERVICE" "@daily" my-bucket --mailto ops@example.com
+  assert_success
+
+  schedule_backup "$SERVICE" "@daily" my-bucket --mailto "ops@example.com;true"
+  assert_failure
+
+  schedule_backup "$SERVICE" "@daily" my-bucket --mailto "ops@example.com, dba@example.com"
+  assert_failure
+
+  # and the mailto the service already had is kept
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-mailto
+  assert_success
+  assert_output "ops@example.com"
+}
+
+@test "($DEFINITION) an unscheduled backup no longer has its output mailed" {
+  schedule_backup "$SERVICE" "@daily" my-bucket --mailto ops@example.com
+  assert_success
+
+  run "$BIN" backup-unschedule "$PLUGIN" "$SERVICE"
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-mailto
+  assert_success
+  assert_output ""
+}
+
 @test "($DEFINITION) a schedule cron cannot run is refused" {
   schedule_backup "$SERVICE" "0 3 * * *" my-bucket
   assert_success

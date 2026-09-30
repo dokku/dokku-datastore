@@ -24,6 +24,8 @@ type BackupScheduleCommand struct {
 	GlobalFlagCommand
 	// useIAM uses the iam profile attached to the server instead of stored credentials
 	useIAM bool
+	// mailto is who cron mails the output of the backup to
+	mailto string
 }
 
 // Name returns the name of the command
@@ -45,7 +47,8 @@ func (c *BackupScheduleCommand) Help() string {
 func (c *BackupScheduleCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Backs a redis service named test up every night": fmt.Sprintf("%s %s redis test '0 3 * * *' my-bucket", appName, c.Name()),
+		"Backs a redis service named test up every night":                     fmt.Sprintf("%s %s redis test '0 3 * * *' my-bucket", appName, c.Name()),
+		"Backs a redis service named test up every night, mailing the output": fmt.Sprintf("%s %s redis test '0 3 * * *' my-bucket --mailto ops@example.com", appName, c.Name()),
 	}
 }
 
@@ -94,6 +97,7 @@ func (c *BackupScheduleCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
 	f.BoolVarP(&c.useIAM, "use-iam", "u", false, "use the IAM profile associated with the current server")
+	f.StringVar(&c.mailto, "mailto", "", "a comma-separated list of email addresses or local users cron mails the output of the backup to")
 	return f
 }
 
@@ -216,6 +220,7 @@ func (c *BackupScheduleCommand) Run(args []string) int {
 	if err := internal.ScheduleBackup(ctx, internal.ScheduleBackupInput{
 		BucketName:  bucketName,
 		Datastore:   datastore,
+		Mailto:      c.mailto,
 		Schedule:    schedule,
 		ServiceName: serviceName,
 		UseIAM:      c.useIAM,

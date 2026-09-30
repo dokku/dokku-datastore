@@ -276,6 +276,33 @@ func TestInfoReportsTheBackupObjectKey(t *testing.T) {
 	}
 }
 
+// A scheduled backup is reported with who its output is mailed to
+func TestInfoReportsTheBackupSchedule(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withInfoService(t, datastore, "lollipop")
+
+	if err := writeBackupSchedule(datastore, "lollipop", BackupSchedule{
+		Schedule:   "@daily",
+		BucketName: "my-bucket",
+		UseIAM:     true,
+		Mailto:     "ops@example.com,dba@example.com",
+	}); err != nil {
+		t.Fatalf("failed to record the schedule: %s", err)
+	}
+
+	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	for key, expected := range map[string]string{
+		"backup-schedule": "@daily",
+		"backup-bucket":   "my-bucket",
+		"backup-use-iam":  "true",
+		"backup-mailto":   "ops@example.com,dba@example.com",
+	} {
+		if info[key] != expected {
+			t.Errorf("expected %s to be %q, got %q", key, expected, info[key])
+		}
+	}
+}
+
 // Backup settings are reported as being present and as a fingerprint rather
 // than as their values, because the credentials and the passphrase are secrets.
 func TestInfoReportsBackupStateWithoutItsSecrets(t *testing.T) {
@@ -291,6 +318,7 @@ func TestInfoReportsBackupStateWithoutItsSecrets(t *testing.T) {
 		"backup-encrypted":              "false",
 		"backup-encryption-fingerprint": "",
 		"backup-endpoint-url":           "",
+		"backup-mailto":                 "",
 		"backup-object-name":            "",
 		"backup-public-key-id":          "",
 		"backup-schedule":               "",
