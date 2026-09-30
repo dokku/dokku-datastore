@@ -57,13 +57,6 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 	serviceFiles := service.Files(input.Datastore, input.ServiceName)
 	portFile := serviceFiles.Port
 
-	// refused ahead of anything else, since a port-source-range the service
-	// was given would otherwise be quietly ignored
-	mode := service.ServiceExposeMode(input.Datastore, input.ServiceName)
-	if err := service.CheckExposeModeSourceRange(mode, service.ServicePortSourceRange(input.Datastore, input.ServiceName)); err != nil {
-		return err
-	}
-
 	if len(input.Ports) == 0 {
 		// picked where they will be published, and written without the address,
 		// so a later port-bind-address moves them rather than leaving them behind
@@ -93,6 +86,13 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 		if err := service.ValidateHostPort(port); err != nil {
 			return err
 		}
+	}
+
+	// refused before anything is written, since a port-source-range the
+	// service was given would otherwise be quietly ignored
+	mode := service.ServiceExposeMode(input.Datastore, input.ServiceName)
+	if err := service.CheckExposeModeSourceRange(mode, service.ServicePortSourceRange(input.Datastore, input.ServiceName)); err != nil {
+		return err
 	}
 
 	// ahead of the port file, which is the only thing that says a service is
