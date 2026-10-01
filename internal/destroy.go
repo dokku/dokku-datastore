@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
@@ -56,6 +57,25 @@ func RemoveDataArgs(input RemoveDataArgsInput) []string {
 	return append(args, targets...)
 }
 
+// destroyDirectories are the host directories a destroy widens before removing
+// the service root: the ones the definition binds, and the data an upgrade kept
+// aside, which the datastore's user wrote just the same.
+func destroyDirectories(s *service.Datastore, serviceName string) ([]string, error) {
+	folders := service.Folders(s, serviceName)
+	directories := s.BindHostDirectories(serviceName)
+
+	previous, err := service.PreviousDataDirectories(folders.Root)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, name := range previous {
+		directories = append(directories, filepath.Join(folders.HostRoot, name))
+	}
+
+	return directories, nil
+}
+
 // DestroyServiceInput is the input for the DestroyService function
 type DestroyServiceInput struct {
 	// Datastore is the service to destroy
@@ -97,8 +117,13 @@ func DestroyService(ctx context.Context, input DestroyServiceInput) error {
 	// is not. A definition that binds nothing needs no container and so needs no
 	// image
 	serviceFolders := service.Folders(input.Datastore, input.ServiceName)
+	directories, err := destroyDirectories(input.Datastore, input.ServiceName)
+	if err != nil {
+		return err
+	}
+
 	arguments := RemoveDataArgs(RemoveDataArgsInput{
-		Directories: input.Datastore.BindHostDirectories(input.ServiceName),
+		Directories: directories,
 		Image:       hostenv.BusyboxImage,
 	})
 

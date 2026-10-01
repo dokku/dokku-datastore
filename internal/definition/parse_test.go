@@ -320,6 +320,151 @@ func TestParseReadsReservedNames(t *testing.T) {
 	}
 }
 
+// migratingCompose is a definition that migrates the data of a service moved
+// onto it, which the upgrade tests then break in one way each.
+const migratingCompose = validCompose + `  commands:
+    export:
+      exec: [dump]
+    import:
+      stdin: true
+      exec: [restore]
+  upgrade:
+    migrate: true
+    from:
+      thing-1:
+        image: thing-upgrade:1-to-2
+        user: "0"
+        volumes:
+          - type: bind
+            source: "{{ .HostRoot }}"
+            target: /service
+        env:
+          OLD: "/service/{{ .PreviousData }}"
+        exec: [upgrade]
+`
+
+func TestParseReadsAnUpgrade(t *testing.T) {
+	parsed, err := parseCompose(t, migratingCompose)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if !parsed.Dokku.Upgrade.Migrate {
+		t.Error("expected the definition to migrate")
+	}
+
+	step, ok := parsed.Dokku.Upgrade.From["thing-1"]
+	if !ok {
+		t.Fatalf("expected a step from thing-1, got %v", parsed.Dokku.Upgrade.From)
+	}
+
+	if step.Image != "thing-upgrade:1-to-2" || step.Env["OLD"] != "/service/{{ .PreviousData }}" {
+		t.Errorf("expected the step as declared, got %+v", step)
+	}
+
+	if parsed.Dokku.Upgrade.Export != nil || parsed.Dokku.Upgrade.Import != nil {
+		t.Error("expected no export and import of its own")
+	}
+
+	parsed, err = parseCompose(t, migratingCompose+"    export:\n      exec: [dumpall]\n    import:\n      stdin: true\n      exec: [restoreall]\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if parsed.Dokku.Upgrade.Export == nil || parsed.Dokku.Upgrade.Export.Exec[0] != "dumpall" {
+		t.Errorf("expected the export as declared, got %+v", parsed.Dokku.Upgrade.Export)
+	}
+	if parsed.Dokku.Upgrade.Import == nil || !parsed.Dokku.Upgrade.Import.Stdin {
+		t.Errorf("expected the import as declared, got %+v", parsed.Dokku.Upgrade.Import)
+	}
+}
+
+func TestParseRejectsABrokenUpgrade(t *testing.T) {
+	tests := []struct {
+		name     string
+		compose  string
+		expected string
+	}{
+		{
+			name:     "a step with nothing to fall back to",
+			compose:  strings.Replace(migratingCompose, "    migrate: true\n", "", 1),
+			expected: "x-dokku.upgrade.from needs x-dokku.upgrade.migrate",
+		},
+		{
+			name:     "a migration with no import",
+			compose:  strings.Replace(migratingCompose, "    import:\n      stdin: true\n      exec: [restore]\n", "", 1),
+			expected: "needs an export and an import",
+		},
+		{
+			name:     "a migration with no data volume",
+			compose:  strings.Replace(migratingCompose, `source: "{{ .HostRoot }}/data"`, `source: "{{ .HostRoot }}/state"`, 1),
+			expected: "moves the data volume aside",
+		},
+		{
+			name:     "a step from itself",
+			compose:  strings.Replace(migratingCompose, "      thing-1:", "      thing:", 1),
+			expected: "names this definition",
+		},
+		{
+			name:     "a step mounting a path outside the service root",
+			compose:  strings.Replace(migratingCompose, `            source: "{{ .HostRoot }}"`, "            source: /var/lib", 1),
+			expected: "must be a bind mount rooted at {{ .HostRoot }}",
+		},
+		{
+			name:     "the previous data named outside an upgrade step",
+			compose:  strings.Replace(migratingCompose, "      exec: [dump]", `      exec: [dump, "{{ .PreviousData }}"]`, 1),
+			expected: "only x-dokku.upgrade.from steps are given",
+		},
+		{
+			name:     "a migration export with no import",
+			compose:  migratingCompose + "    export:\n      exec: [dumpall]\n",
+			expected: "are declared together",
+		},
+		{
+			name:     "a migration import that reads nothing",
+			compose:  migratingCompose + "    export:\n      exec: [dumpall]\n    import:\n      exec: [restoreall]\n",
+			expected: "needs stdin: true",
+		},
+		{
+			name:     "a migration export on a definition that does not migrate",
+			compose:  validCompose + "  upgrade:\n    export:\n      exec: [dumpall]\n    import:\n      stdin: true\n      exec: [restoreall]\n",
+			expected: "x-dokku.upgrade.export needs x-dokku.upgrade.migrate",
+		},
+		{
+			name:     "a volume on a command exec'd into the service",
+			compose:  validCompose + "  commands:\n    export:\n      volumes:\n        - type: bind\n          source: \"{{ .HostRoot }}\"\n          target: /service\n      exec: [dump]\n",
+			expected: "cannot mount volumes of its own",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := parseCompose(t, test.compose)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+
+			if !strings.Contains(err.Error(), test.expected) {
+				t.Errorf("expected an error mentioning %q, got: %s", test.expected, err)
+			}
+		})
+	}
+}
+
+// A sidecar mounts what it declares beside the service's own, which is how a
+// command reaches the service root.
+func TestParseAcceptsTheVolumesOfASidecar(t *testing.T) {
+	compose := validCompose + "  custom_commands:\n    tidy:\n      description: tidy up\n      mode: sidecar\n      volumes:\n        - type: bind\n          source: \"{{ .HostRoot }}\"\n          target: /service\n      exec: [tidy]\n"
+	parsed, err := parseCompose(t, compose)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if volumes := parsed.Dokku.CustomCommands["tidy"].Volumes; len(volumes) != 1 || volumes[0].Target != "/service" {
+		t.Errorf("expected the service root mounted at /service, got %v", volumes)
+	}
+}
+
 // A command started in a container of its own may clear the image's
 // entrypoint, which is kept as declared rather than defaulted.
 func TestParseKeepsTheEntrypointOfAContainerCommand(t *testing.T) {

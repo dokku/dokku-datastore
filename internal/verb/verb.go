@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/backend"
 	"github.com/dokku/dokku-datastore/internal/definition"
@@ -226,7 +227,7 @@ func runSidecar(ctx context.Context, input RunInput) error {
 		Image:      image,
 		Argv:       exec.Argv,
 		Env:        exec.Env,
-		Volumes:    input.Volumes,
+		Volumes:    Volumes(input.Volumes, command, input.Scope),
 		Network:    "container:" + input.Names.Container,
 		User:       exec.User,
 		Entrypoint: command.Entrypoint,
@@ -235,6 +236,21 @@ func runSidecar(ctx context.Context, input RunInput) error {
 		Stdout:     exec.Stdout,
 		Stderr:     exec.Stderr,
 	})
+}
+
+// Volumes are the mounts a container started for a command is given: the ones
+// it was handed, then the ones the command declares for itself, resolved
+// against the service root the way the service's own are. A command declares
+// one to reach a path the service's mounts do not, such as the service root
+// itself.
+func Volumes(volumes []string, command definition.Command, scope definition.Scope) []string {
+	resolved := append([]string{}, volumes...)
+	for _, volume := range command.Volumes {
+		source := strings.Replace(volume.Source, definition.HostRootTemplate, scope.HostRoot, 1)
+		resolved = append(resolved, source+":"+volume.Target)
+	}
+
+	return resolved
 }
 
 // runOffline runs a command against a service's data with the service down.
@@ -264,7 +280,7 @@ func runOffline(ctx context.Context, input RunInput) error {
 		Image:      input.Image,
 		Argv:       exec.Argv,
 		Env:        exec.Env,
-		Volumes:    input.Volumes,
+		Volumes:    Volumes(input.Volumes, command, input.Scope),
 		User:       exec.User,
 		Entrypoint: command.Entrypoint,
 		Stdin:      exec.Stdin,

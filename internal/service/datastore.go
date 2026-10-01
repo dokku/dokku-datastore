@@ -609,6 +609,59 @@ func (s *Datastore) ImportService(ctx context.Context, input ImportServiceInput)
 	})
 }
 
+// CarriesDataTo reports whether a migration from this definition onto another
+// uses the export and import the two declare for a migration, rather than the
+// export and import subcommands. Both have to: what one writes is only known to
+// be what the other reads when both are declared for the purpose.
+func (s *Datastore) CarriesDataTo(target *Datastore) bool {
+	return s.Definition.Dokku.Upgrade.Export != nil && target.Definition.Dokku.Upgrade.Import != nil
+}
+
+// ExportForUpgrade writes everything a service holds to a writer, the way the
+// definition declares for carrying it onto another, falling back to the export
+// subcommand when the definition the service is moved onto declares no import
+// of its own.
+//
+// The service's export-args are not applied in either case: they shape a dump
+// an operator asked for, and a migration that carried only part of the data
+// would lose the rest when the old data is removed.
+func (s *Datastore) ExportForUpgrade(ctx context.Context, target *Datastore, serviceName string, writer io.Writer) error {
+	command, ok := s.Definition.CommandFor("export")
+	if s.CarriesDataTo(target) {
+		command, ok = *s.Definition.Dokku.Upgrade.Export, true
+	}
+	if !ok {
+		return verb.ErrNotImplemented{Plugin: s.Definition.Dokku.Plugin, Name: "export"}
+	}
+
+	// run under a name of its own, which no export-args are kept for
+	return s.run(ctx, serviceName, "upgrade.export", runOptions{
+		Command: &command,
+		Stdout:  writer,
+		Stderr:  os.Stderr,
+	})
+}
+
+// ImportForUpgrade reads what ExportForUpgrade wrote into a service moved onto
+// this definition from another, without the service's import-args for the same
+// reason the export goes without its export-args.
+func (s *Datastore) ImportForUpgrade(ctx context.Context, previous *Datastore, serviceName string, reader io.Reader) error {
+	command, ok := s.Definition.CommandFor("import")
+	if previous.CarriesDataTo(s) {
+		command, ok = *s.Definition.Dokku.Upgrade.Import, true
+	}
+	if !ok {
+		return verb.ErrNotImplemented{Plugin: s.Definition.Dokku.Plugin, Name: "import"}
+	}
+
+	// run under a name of its own, which no import-args are kept for
+	return s.run(ctx, serviceName, "upgrade.import", runOptions{
+		Command: &command,
+		Stdin:   reader,
+		Stderr:  os.Stderr,
+	})
+}
+
 // ResetService deletes all of the service's data, leaving the service, its
 // credentials and its links as they were.
 func (s *Datastore) ResetService(ctx context.Context, input ResetServiceInput) error {
@@ -631,11 +684,41 @@ func (s *Datastore) RunPreCreate(ctx context.Context, serviceName string) error 
 		return nil
 	}
 
+	return s.runOneOff(ctx, serviceName, "hooks.pre_create", "creation", hook, s.scope(serviceName))
+}
+
+// HasUpgradeStep reports whether this definition migrates the data of a
+// service moved onto it from the named definition in place, rather than by
+// exporting and importing it.
+func (s *Datastore) HasUpgradeStep(from string) bool {
+	_, ok := s.Definition.Dokku.Upgrade.From[from]
+	return ok
+}
+
+// RunUpgradeStep migrates the data of a service moved onto this definition from
+// another, in place, with the service down.
+//
+// It is a container of its own for the reason the pre_create hook is: nothing
+// of the service is running. It is told where the old data was moved to, which
+// is the one thing an upgrade knows that a service's own scope does not.
+func (s *Datastore) RunUpgradeStep(ctx context.Context, serviceName string, from string, previousData string) error {
+	step, ok := s.Definition.Dokku.Upgrade.From[from]
+	if !ok {
+		return fmt.Errorf("%s has no step migrating data from %s", s.DefinitionName(), from)
+	}
+
 	scope := s.scope(serviceName)
+	scope.PreviousData = previousData
+	return s.runOneOff(ctx, serviceName, "upgrade.from."+from, "upgrade", &step, scope)
+}
+
+// runOneOff runs a hook or an upgrade step in a container of its own, with the
+// mounts it declares rather than the service's.
+func (s *Datastore) runOneOff(ctx context.Context, serviceName string, name string, action string, hook *definition.Command, scope definition.Scope) error {
 	resolved, err := verb.Resolve(verb.RunInput{
 		Definition: s.Definition,
 		Scope:      scope,
-		Name:       "hooks.pre_create",
+		Name:       name,
 		Command:    hook,
 	})
 	if err != nil {
@@ -652,7 +735,7 @@ func (s *Datastore) RunPreCreate(ctx context.Context, serviceName string) error 
 	// still holds it
 	if hook.Image != "" {
 		if err := EnsureTaggedImage(ctx, EnsureTaggedImageInput{
-			Action:      "creation",
+			Action:      action,
 			Datastore:   s,
 			ServiceName: serviceName,
 			TaggedImage: hook.Image,
@@ -661,17 +744,11 @@ func (s *Datastore) RunPreCreate(ctx context.Context, serviceName string) error 
 		}
 	}
 
-	volumes := make([]string, 0, len(hook.Volumes))
-	for _, volume := range hook.Volumes {
-		source := strings.Replace(volume.Source, definition.HostRootTemplate, Folders(s, serviceName).HostRoot, 1)
-		volumes = append(volumes, source+":"+volume.Target)
-	}
-
 	return backend.Run(ctx, backend.RunInput{
 		Image:      reference,
 		Argv:       resolved.Argv,
 		Env:        resolved.Env,
-		Volumes:    volumes,
+		Volumes:    verb.Volumes(nil, *hook, scope),
 		User:       hook.User,
 		Entrypoint: hook.Entrypoint,
 		Stdout:     os.Stderr,
@@ -753,6 +830,10 @@ type runOptions struct {
 func verbAction(name string) string {
 	if strings.HasPrefix(name, "hooks.") {
 		return "creation"
+	}
+
+	if strings.HasPrefix(name, "upgrade.") {
+		return "upgrade"
 	}
 
 	return strings.TrimPrefix(name, "triggers.")

@@ -97,6 +97,84 @@ x-dokku:
           chown 70:70 /certs/server.key /certs/server.crt &&
           chmod 600 /certs/server.key && chmod 644 /certs/server.crt
 
+  # a service moved onto this definition from another postgres definition has
+  # its data carried across: a major version cannot read another's cluster, and
+  # a flavor's extensions are only in its own image. The old data directory is
+  # kept aside under the service root until upgrade-cleanup removes it.
+  upgrade:
+    migrate: true
+
+    # every database and role the cluster holds, rather than the one database
+    # the export subcommand dumps, so that nothing an app or an operator made
+    # beside it is left behind in the data kept aside. --clean drops what the
+    # new cluster made of its own before it is made again from the dump.
+    export:
+      exec: ["pg_dumpall", "-h", "localhost", "-U", "postgres", "-w", "--clean", "--if-exists"]
+      env:
+        PGPASSWORD: "{{ .Secret.password }}"
+
+    # the dump is replayed from the maintenance database, which pg_dumpall
+    # drops and makes again from whichever database it last connected to. The
+    # superuser it is replayed as already exists and cannot be dropped, so the
+    # two statements that would try are left out of the roles at the top of the
+    # dump, before its first \connect and so before any of its rows.
+    #
+    # an image may make template databases of its own when the cluster is
+    # first made, as postgis does with template_postgis, and a template cannot
+    # be dropped. pg_dumpall only clears template1's flag before dropping it, so
+    # every other template the new cluster has is made an ordinary database
+    # first. The dump makes each template the old cluster had a template again,
+    # and one only the new image made stays an ordinary database.
+    #
+    # timescaledb's catalog has to be restored with its workers stopped and
+    # its triggers off, which timescaledb_pre_restore does for a database. The
+    # dump drops and makes every database again, so restoring is also turned on
+    # for the whole server until the dump is in, and each database is told the
+    # restore is over afterwards. Every postgres definition carries the same
+    # text, which a test holds them to, and the timescaledb steps do nothing on
+    # an image without the extension.
+    import:
+      stdin: true
+      exec:
+        - sh
+        - -c
+        - |
+          set -e
+          sql() {
+            psql -h localhost -U postgres -w -qtAX -v ON_ERROR_STOP=1 -d "$1"
+          }
+          databases() {
+            echo "SELECT datname FROM pg_database WHERE datallowconn ORDER BY datname;" | sql postgres
+          }
+          timescaledb="$(echo "SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb';" | sql postgres)"
+          if [ -n "$timescaledb" ]; then
+            echo "ALTER SYSTEM SET timescaledb.restoring = on;" | sql postgres >/dev/null
+            echo "SELECT pg_reload_conf();" | sql postgres >/dev/null
+            for database in $(databases); do
+              echo "SELECT timescaledb_pre_restore() FROM pg_extension WHERE extname = 'timescaledb';" | sql "$database" >/dev/null
+            done
+          fi
+          printf '%s\n' "SELECT format('ALTER DATABASE %I IS_TEMPLATE false', datname) FROM pg_database WHERE datistemplate AND datname NOT IN ('template0', 'template1') \gexec" | sql postgres >/dev/null
+          status=0
+          awk -v user=postgres '
+            /^\\connect / { connected = 1 }
+            !connected && ($0 == "CREATE ROLE " user ";" || $0 == "DROP ROLE IF EXISTS " user ";") { next }
+            { print }
+          ' | psql -h localhost -U postgres -w -q -v ON_ERROR_STOP=1 -d postgres >/dev/null || status=$?
+          if [ -n "$timescaledb" ]; then
+            echo "ALTER SYSTEM RESET timescaledb.restoring;" | sql postgres >/dev/null
+            echo "SELECT pg_reload_conf();" | sql postgres >/dev/null
+            for database in $(databases); do
+              echo "SELECT timescaledb_post_restore() FROM pg_extension WHERE extname = 'timescaledb';" | sql "$database" >/dev/null
+              echo "ALTER DATABASE \"$database\" RESET timescaledb.restoring;" | sql "$database" >/dev/null
+            done
+          fi
+          exit "$status"
+        - dokku-postgres-upgrade-import
+      env:
+        PGPASSWORD: "{{ .Secret.password }}"
+        PGOPTIONS: "-c client_min_messages=warning"
+
   # the certificate the server was started with, so that a client off the host
   # can verify it is talking to this service. Read from the running container
   # rather than the host, which keeps it following a moved certs volume
@@ -110,6 +188,28 @@ x-dokku:
         save it to verify the server from a client off the host
         dokku {{.CommandPrefix}}:certificate lollipop > server.crt
       exec: ["cat", "{{ .Target.certs }}/server.crt"]
+
+    # the data an upgrade kept aside belongs to the postgres user, so it is
+    # removed from a container running as root rather than from the host. Only
+    # the directories an upgrade names are matched, and each is printed as it
+    # goes
+    upgrade-cleanup:
+      description: remove the data an upgrade across a major version kept aside
+      documentation: |
+        remove the data an upgrade across a major version kept aside
+        > NOTE: the service must be running
+        dokku {{.CommandPrefix}}:upgrade-cleanup lollipop
+      mode: sidecar
+      user: "0"
+      entrypoint: ""
+      volumes:
+        - type: bind
+          source: "{{ .HostRoot }}"
+          target: /service
+      exec:
+        - sh
+        - -c
+        - find /service -mindepth 1 -maxdepth 1 -type d -name 'data.*' -print -exec rm -rf {} +
 
   # written the way a command's documentation is: every sentence ends in a
   # period, since prose lines run together, and inline code is quoted
@@ -145,6 +245,20 @@ x-dokku:
         dokku {{.CommandPrefix}}:export lollipop > lollipop.dump
         dokku {{.CommandPrefix}}:create lollipop-utf8 --custom-env "POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C"
         dokku {{.CommandPrefix}}:import lollipop-utf8 < lollipop.dump
+
+    # what an upgrade across a major version does with the data, which is not
+    # something the upgrade command's own documentation can say for every
+    # datastore
+    - title: Upgrading across a major version
+      body: |
+        an upgrade that moves a service to another major version, or onto another flavor, carries its data across rather than mounting it where the new version would not read it.
+        the linked apps are stopped while the data is copied, so the upgrade has to be given '--restart-apps':
+        dokku {{.CommandPrefix}}:upgrade lollipop --definition postgres-18 --restart-apps
+        from 17 to 18 on the official image the data is copied with 'pg_upgrade', which needs as much free disk as the data takes up.
+        every other move exports every database and role from the old version with 'pg_dumpall' and replays it into the new one.
+        a move that fails puts the service back on the version it ran, with the data it had.
+        the old data is kept in a 'data.<definition>.<timestamp>' directory beside the service's data, and is removed once the upgrade is confirmed:
+        dokku {{.CommandPrefix}}:upgrade-cleanup lollipop
 
   commands:
     # the password goes in PGPASSWORD rather than on the command line, which is

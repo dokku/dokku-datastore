@@ -117,7 +117,7 @@ func (c *UpgradeCommand) FlagSet() *flag.FlagSet {
 	f.StringVar(&c.definition, "definition", "", "the definition to move the service onto, instead of the one its image and version resolve to")
 	f.StringVarP(&c.image, "image", "i", "", "the image to upgrade the service to")
 	f.StringVarP(&c.imageVersion, "image-version", "I", "", "the image version to upgrade the service to")
-	f.BoolVarP(&c.restartApps, "restart-apps", "R", false, "whether to stop and start the linked apps around the upgrade")
+	f.BoolVarP(&c.restartApps, "restart-apps", "R", false, "whether to stop and start the linked apps around the upgrade, required for one that migrates the data")
 	f.StringVarP(&c.configOptions, "config-options", "c", "", "extra arguments for the process the service container runs, not docker flags; use mount for mounts")
 	f.StringVarP(&c.customEnv, "custom-env", "C", "", "semi-colon delimited environment variables to start the service with")
 	f.StringVarP(&c.initialNetwork, "initial-network", "N", "", "the initial network to attach the service to")

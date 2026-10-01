@@ -220,7 +220,7 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		seenKey[key] = true
 	}
 
-	for _, body := range templateBodies(definition) {
+	for _, body := range templateBodies(definition, true) {
 		for _, key := range TargetReferences(body) {
 			if !seenKey[key] {
 				return fail("%q names the target of the volume %q, which is not declared", body, key)
@@ -368,6 +368,52 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		}
 	}
 
+	// a step that migrates the data in place is only ever tried before the
+	// export and import it stands in for, so a definition that does not migrate
+	// has nothing for it to stand in for, and one that does needs both halves
+	upgrade := definition.Dokku.Upgrade
+	if len(upgrade.From) > 0 && !upgrade.Migrate {
+		return fail("x-dokku.upgrade.from needs x-dokku.upgrade.migrate, since it stands in for the export and import a migration falls back to")
+	}
+
+	if upgrade.Migrate && (!definition.Implements("export") || !definition.Implements("import")) {
+		return fail("x-dokku.upgrade.migrate needs an export and an import to carry the data across")
+	}
+
+	// what one definition's export writes is only known to be what another's
+	// import reads when both are declared, and a definition that declares
+	// neither still has the export and import subcommands to fall back to
+	if (upgrade.Export == nil) != (upgrade.Import == nil) {
+		return fail("x-dokku.upgrade.export and x-dokku.upgrade.import are declared together, since a migration uses one definition's export with another's import")
+	}
+
+	if upgrade.Export != nil && !upgrade.Migrate {
+		return fail("x-dokku.upgrade.export needs x-dokku.upgrade.migrate, since only a migration runs it")
+	}
+
+	if upgrade.Import != nil && !upgrade.Import.Stdin {
+		return fail("x-dokku.upgrade.import reads what the export wrote, so it needs stdin: true")
+	}
+
+	// the data volume is what a migration moves aside and starts empty again
+	if upgrade.Migrate && !seenKey["data"] {
+		return fail("x-dokku.upgrade.migrate moves the data volume aside, so it needs a volume mounted from {{ .HostRoot }}/data")
+	}
+
+	for from := range upgrade.From {
+		if from == input.Name {
+			return fail("x-dokku.upgrade.from.%s names this definition, which a service is never moved onto from itself", from)
+		}
+	}
+
+	// the directory the old data was moved to only exists while an upgrade is
+	// running, so anything else naming it would render against nothing
+	for _, body := range templateBodies(definition, false) {
+		if strings.Contains(body, PreviousDataField) {
+			return fail("%q names %s, which only x-dokku.upgrade.from steps are given", body, PreviousDataField)
+		}
+	}
+
 	for name, command := range allCommands(definition) {
 		if len(command.Exec) == 0 {
 			return fail("command %q needs an exec", name)
@@ -391,14 +437,32 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		if command.ExtraArgs && name != "export" && name != "import" {
 			return fail("command %q cannot take extra arguments; only export and import do", name)
 		}
+
+		// a mount of its own belongs to a container started for the command,
+		// and is resolved against the service root the way the service's are
+		ownContainer := strings.HasPrefix(name, "hooks.") || strings.HasPrefix(name, "upgrade.from.") ||
+			command.Mode == ModeSidecar || command.Mode == ModeOffline
+		if len(command.Volumes) > 0 && !ownContainer {
+			return fail("command %q cannot mount volumes of its own; only hooks, upgrade steps, and sidecar and offline commands run in a container of their own", name)
+		}
+
+		for _, volume := range command.Volumes {
+			if volume.Type != "bind" || !strings.HasPrefix(volume.Source, HostRootTemplate) {
+				return fail("command %q mounts %q, which must be a bind mount rooted at {{ .HostRoot }}", name, volume.Source)
+			}
+
+			if volume.Target == "" {
+				return fail("command %q mounts %q without a target", name, volume.Source)
+			}
+		}
 	}
 
 	// an entrypoint belongs to a container started for the command. One exec'd
 	// into the running service, or run on the host, has none to replace, so the
-	// setting would do nothing. Hooks are left out: they always run in a
-	// container of their own.
+	// setting would do nothing. Hooks and upgrade steps are left out: they
+	// always run in a container of their own.
 	for name, command := range allCommands(definition) {
-		if command.Entrypoint == nil || strings.HasPrefix(name, "hooks.") {
+		if command.Entrypoint == nil || strings.HasPrefix(name, "hooks.") || strings.HasPrefix(name, "upgrade.from.") {
 			continue
 		}
 
@@ -520,8 +584,10 @@ func TargetReferences(body string) []string {
 }
 
 // templateBodies is every template a definition renders against a service's
-// scope, for the checks that hold for all of them.
-func templateBodies(definition Definition) []string {
+// scope, for the checks that hold for all of them. The upgrade steps are left
+// out unless asked for, since they are the only ones rendered against more than
+// a service's own scope.
+func templateBodies(definition Definition, withUpgrade bool) []string {
 	bodies := []string{definition.Service.Image, definition.Service.WorkingDir, definition.Dokku.DSN}
 	bodies = append(bodies, definition.Service.Command...)
 	for _, value := range definition.Service.Environment {
@@ -532,7 +598,11 @@ func templateBodies(definition Definition) []string {
 		bodies = append(bodies, definition.Service.Healthcheck.Test...)
 	}
 
-	for _, command := range allCommands(definition) {
+	for name, command := range allCommands(definition) {
+		if !withUpgrade && strings.HasPrefix(name, "upgrade.from.") {
+			continue
+		}
+
 		bodies = append(bodies, command.Image)
 		bodies = append(bodies, command.Exec...)
 		for _, value := range command.Env {
@@ -565,6 +635,18 @@ func allCommands(definition Definition) map[string]Command {
 
 	for name, command := range definition.Dokku.Triggers {
 		commands["triggers."+name] = command
+	}
+
+	for name, command := range definition.Dokku.Upgrade.From {
+		commands["upgrade.from."+name] = command
+	}
+
+	if definition.Dokku.Upgrade.Export != nil {
+		commands["upgrade.export"] = *definition.Dokku.Upgrade.Export
+	}
+
+	if definition.Dokku.Upgrade.Import != nil {
+		commands["upgrade.import"] = *definition.Dokku.Upgrade.Import
 	}
 
 	return commands

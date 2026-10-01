@@ -3,8 +3,8 @@
 # survived rather than only that the service came back up.
 set -eo pipefail
 
-ACTION="${1:?usage: $0 <write|clobber|read|extension|has-extension|hypertable> <service> [extension]}"
-SERVICE="${2:?usage: $0 <write|clobber|read|extension|has-extension|hypertable> <service> [extension]}"
+ACTION="${1:?usage: $0 <write|clobber|read|cluster|read-cluster|templates|extension|has-extension|hypertable> <service> [extension]}"
+SERVICE="${2:?usage: $0 <write|clobber|read|cluster|read-cluster|templates|extension|has-extension|hypertable> <service> [extension]}"
 CONTAINER="dokku.postgres.$SERVICE"
 PASSWORD="$(cat "$DOKKU_LIB_ROOT/services/postgres/$SERVICE/PASSWORD")"
 # the database the service was created with, which is the service name with
@@ -38,6 +38,26 @@ has-extension)
   # database already had it
   EXTENSION="${3:?usage: $0 has-extension <service> <extension>}"
   sql "SELECT extname FROM pg_extension WHERE extname = '$EXTENSION';"
+  ;;
+cluster)
+  # a role and a database of its own beside the service's, holding a known
+  # record, which only a migration carrying the whole cluster brings along
+  sql "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'probe_role') THEN CREATE ROLE probe_role LOGIN; END IF; END \$\$;" >/dev/null
+  if [[ -z "$(sql "SELECT 1 FROM pg_database WHERE datname = 'probe_other';")" ]]; then
+    sql "CREATE DATABASE probe_other OWNER probe_role;" >/dev/null
+  fi
+  DATABASE=probe_other sql "CREATE TABLE IF NOT EXISTS probe (value text); DELETE FROM probe; INSERT INTO probe VALUES ('other');" >/dev/null
+  ;;
+read-cluster)
+  # the database beside the service's, its owner, and the record it holds
+  owner="$(sql "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'probe_other';")"
+  value="$(DATABASE=probe_other sql "SELECT value FROM probe;")"
+  echo "$owner:$value"
+  ;;
+templates)
+  # the databases new ones can be copied from, which an image may add to,
+  # one per line. template0 is the cluster's own and never changes
+  sql "SELECT datname FROM pg_database WHERE datistemplate AND datname <> 'template0' ORDER BY datname;"
   ;;
 hypertable)
   # a table timescaledb partitions by time, which only works when the

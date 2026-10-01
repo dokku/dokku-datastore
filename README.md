@@ -137,6 +137,25 @@ If a service names a definition the plugin no longer ships, commands that would 
 
 `upgrade --definition` moves the service onto the named definition, with the image and version it ships unless `--image` and `--image-version` say otherwise. That moves where its data is mounted in the same way, even when the image stays the same. A volume the service moved with `volume-targets` stays where it was moved to on the new definition, and an upgrade onto a definition that does not mount that volume is refused before the old container is taken away. `<VARIABLE>_DEFINITION` is only read by `create`. `clone` places the new service on the definition the source is pinned to, rather than on the one the source's image resolves to.
 
+### Migrating data between definitions
+
+A definition that cannot read the data another of its datastore's definitions left behind says so with `x-dokku.upgrade.migrate`, and an upgrade that moves a service onto it carries the data across. Every postgres definition does: no major version reads another's cluster, and a flavor's extensions are only in its own image.
+
+```shell
+# the linked apps are stopped while the data is copied, so nothing they write is lost
+dokku-datastore upgrade postgres db --definition postgres-18 --restart-apps
+```
+
+The upgrade is refused without `--restart-apps`, before anything is touched. The service's data directory is moved aside to `data.<definition>.<timestamp>` under the service root, and the new definition starts from an empty one. The data is then carried across by the step the new definition declares under `x-dokku.upgrade.from.<definition>` for the one the service is moved off, where there is one: `postgres-18` runs `pg_upgrade` from `tianon/postgres-upgrade:17-to-18` for a service moved off `postgres-17`. Anywhere else, or when that step fails, the data is exported from the old definition and imported into the new one. A definition declares `x-dokku.upgrade.export` and `x-dokku.upgrade.import` for that where its `export` and `import` dump less than everything the service holds: postgres's dump the service's own database, so a migration uses `pg_dumpall` instead, which carries every database and role. The pair is used when the old definition declares the export and the new one the import, and otherwise the `export` and `import` subcommands are, which is why a definition that migrates has to implement both. Neither is given the service's `export-args` or `import-args`, which shape a dump an operator asked for rather than one that has to carry everything. A step is given the directory the old data was moved to as `{{ .PreviousData }}`, relative to the service root, and nothing but a step may name it.
+
+A migration that fails puts the service back on the definition and the image it ran, with the data it had. One that succeeds keeps the old data where it was moved to, for the operator to remove with `upgrade-cleanup` once they are satisfied with the new; `destroy` removes it along with the rest of the service.
+
+```shell
+dokku-datastore invoke postgres upgrade-cleanup db
+```
+
+A definition that says nothing leaves the data where it is, which is right for one whose next major reads the last one's data in place, such as elasticsearch.
+
 ## Flavors
 
 A flavor is a datastore on an image other than its own, shipped as definitions of its own - one per major version, named `<plugin>-<flavor>-<major>` - so that it is placed on the right data directory and followed by dependabot like any other. Postgres has three:

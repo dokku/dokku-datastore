@@ -66,16 +66,19 @@ func TestCustomCommandUsageShowsArguments(t *testing.T) {
 }
 
 // Postgres prints the certificate its server encrypts connections with, so a
-// client off the host can verify it.
+// client off the host can verify it, and removes the data an upgrade across a
+// major version kept aside.
 func TestCustomCommandsForPostgres(t *testing.T) {
 	commands := CustomCommands(service.Datastores["postgres"])
 
-	if len(commands) != 1 || commands[0].Name() != "certificate" {
-		t.Fatalf("expected the certificate command, got %v", commands)
+	if len(commands) != 2 || commands[0].Name() != "certificate" || commands[1].Name() != "upgrade-cleanup" {
+		t.Fatalf("expected the certificate and upgrade-cleanup commands, got %v", commands)
 	}
 
-	if commands[0].Usage() != "<service>" {
-		t.Errorf("expected the service argument, got %q", commands[0].Usage())
+	for _, command := range commands {
+		if command.Usage() != "<service>" {
+			t.Errorf("expected %s to take the service argument, got %q", command.Name(), command.Usage())
+		}
 	}
 }
 

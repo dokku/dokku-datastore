@@ -280,6 +280,10 @@ type Dokku struct {
 	// a user does not invoke them, the tool does.
 	Hooks Hooks `yaml:"hooks"`
 
+	// Upgrade says what happens to a service's data when an upgrade moves it
+	// onto this definition from another of the same plugin.
+	Upgrade Upgrade `yaml:"upgrade"`
+
 	// CustomCommands are the operations this datastore adds, which the tool
 	// knows nothing about beyond how to run them. They are declared apart from
 	// Commands so that being custom is a fact about the definition rather than
@@ -410,6 +414,44 @@ type Hooks struct {
 	// image creates an admin account and nothing else.
 	PostCreate *Command `yaml:"post_create"`
 }
+
+// Upgrade is how a service's data moves onto this definition from another of
+// the same plugin.
+//
+// A datastore split by major version is split because its data does not carry
+// over by mounting it somewhere new: postgres eighteen finds no cluster where
+// seventeen left one, and would not read it if it did. A definition that says
+// nothing here has its data left where it was, which is right for one whose
+// next major reads the last one's data in place.
+type Upgrade struct {
+	// Migrate is true when a service moved onto this definition has its data
+	// carried across rather than left where it was. The old data directory is
+	// kept aside under the service root, and the data is exported from the old
+	// definition and imported into this one, unless a From step does it first.
+	Migrate bool `yaml:"migrate"`
+
+	// Export and Import carry a service's data between two definitions in
+	// place of the export and import subcommands, which dump what an operator
+	// asks for rather than everything the service holds: postgres's dump one
+	// database, and a migration has to carry every database and role. They are
+	// declared together, and used when the definition a service is moved off
+	// declares Export and the one it is moved onto declares Import, so that
+	// what one writes is what the other reads.
+	Export *Command `yaml:"export"`
+	Import *Command `yaml:"import"`
+
+	// From are the steps that migrate the data in place, keyed by the exact
+	// definition the service is moved off. Each runs in a container of its own
+	// with the service down, and can name the directory the old data was moved
+	// to as {{ .PreviousData }}, relative to the service root. A step that
+	// fails is undone and the data is exported and imported instead, so a step
+	// only has to be faster than that, not more capable.
+	From map[string]Command `yaml:"from"`
+}
+
+// PreviousDataField is the scope field naming where an upgrade put the data a
+// service had before it, which only an upgrade's own steps are given.
+const PreviousDataField = ".PreviousData"
 
 // Argument is a positional argument of an extra subcommand.
 type Argument struct {
