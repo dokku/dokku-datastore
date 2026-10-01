@@ -84,6 +84,45 @@ func directPublishSpecs(input directPublishSpecsInput) []string {
 	return specs
 }
 
+// MinimumExposedPorts is the fewest host ports a service can be exposed on:
+// enough to reach its primary port, which is the one its dsn names.
+//
+// A definition adds a port at the end of its list, so a service exposed before
+// that holds a host port for each port it had then. Those stay where they were
+// published and the ports after them are left unexposed, rather than a service
+// that was reachable losing every port because the definition grew.
+func MinimumExposedPorts(s *Datastore) int {
+	primary, ok := s.Definition.PrimaryPort()
+	if !ok {
+		return len(s.Definition.Service.Ports)
+	}
+
+	for i, port := range s.Definition.Service.Ports {
+		if port.Name == primary.Name {
+			return i + 1
+		}
+	}
+
+	return len(s.Definition.Service.Ports)
+}
+
+// CheckExposedPortCount reports whether a service can be exposed on this many
+// host ports: at least enough to reach its primary port, and no more than it
+// has ports to publish them on.
+func CheckExposedPortCount(s *Datastore, count int) error {
+	maximum := len(s.Definition.Service.Ports)
+	minimum := MinimumExposedPorts(s)
+	if count >= minimum && count <= maximum {
+		return nil
+	}
+
+	if minimum == maximum {
+		return fmt.Errorf("expected %d ports", maximum)
+	}
+
+	return fmt.Errorf("expected between %d and %d ports", minimum, maximum)
+}
+
 // ContainerPublishedPorts are the --publish specs a service container was made
 // with, empty for one that publishes nothing itself.
 func ContainerPublishedPorts(containerID string) []string {

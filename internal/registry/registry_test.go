@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"testing"
 
@@ -409,28 +410,55 @@ func TestRabbitmqSeedsTheFileItMounts(t *testing.T) {
 		t.Fatal("expected a rabbitmq definition")
 	}
 
-	target := "/etc/rabbitmq/rabbitmq.conf"
+	// the operator's own config, and the one that turns tls on
+	for _, target := range []string{"/etc/rabbitmq/rabbitmq.conf", "/etc/rabbitmq/conf.d/20-dokku-tls.conf"} {
+		mounted := false
+		for _, volume := range rabbitmq.Service.Volumes {
+			if volume.Target == target {
+				mounted = true
+			}
+		}
 
-	mounted := false
-	for _, volume := range rabbitmq.Service.Volumes {
-		if volume.Target == target {
-			mounted = true
+		if !mounted {
+			t.Fatalf("expected %s to be mounted", target)
+		}
+
+		seeded := false
+		for _, config := range rabbitmq.Service.Configs {
+			if config.Target == target {
+				seeded = true
+			}
+		}
+
+		if !seeded {
+			t.Errorf("expected %s to be seeded, or docker will make it a directory", target)
 		}
 	}
+}
 
-	if !mounted {
-		t.Fatalf("expected %s to be mounted", target)
+// A service exposed before rabbitmq served tls holds a host port for each of
+// the four ports it had then, in their order. The tls ports come after them, so
+// each of those host ports stays on the container port it was exposed on and
+// the tls ports are the ones left unexposed.
+func TestRabbitmqTLSPortsComeLast(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
 	}
 
-	seeded := false
-	for _, config := range rabbitmq.Service.Configs {
-		if config.Target == target {
-			seeded = true
-		}
+	rabbitmq, ok := loaded.Definition("rabbitmq")
+	if !ok {
+		t.Fatal("expected a rabbitmq definition")
 	}
 
-	if !seeded {
-		t.Errorf("expected %s to be seeded, or docker will make it a directory", target)
+	targets := []int{}
+	for _, port := range rabbitmq.Service.Ports {
+		targets = append(targets, port.Target)
+	}
+
+	expected := []int{5672, 4369, 35197, 15672, 5671, 15671}
+	if !slices.Equal(targets, expected) {
+		t.Errorf("expected the rabbitmq ports to be %v, got %v", expected, targets)
 	}
 }
 
@@ -1912,7 +1940,7 @@ func TestVolumeKeysArePinned(t *testing.T) {
 		"postgres-timescaledb-pg17": postgres,
 		"postgres-timescaledb-pg18": postgres,
 		"pushpin":                   {"config"},
-		"rabbitmq":                  {"config/rabbitmq.conf", "data"},
+		"rabbitmq":                  {"config/rabbitmq.conf", "data", "certs", "config/tls.conf"},
 		"redis":                     {"config", "data"},
 		"rethinkdb":                 {"data"},
 		"solr-7":                    {"data"},

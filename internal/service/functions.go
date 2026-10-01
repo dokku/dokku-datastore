@@ -1298,9 +1298,13 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		return RemoveAmbassadorContainer(ctx, input.Datastore, input.ServiceName)
 	}
 
+	// a port file shorter than the definition was written before the definition
+	// gained the ports it is missing, which come last. The ports it holds stay
+	// published where they were and the new ones are left unexposed, the same
+	// as a service exposed directly, rather than the service losing every port
 	hostPorts := ExposedHostPorts(input.Datastore, input.ServiceName)
-	if len(hostPorts) != len(serviceProperties.Ports) {
-		return fmt.Errorf("port file %s holds %d ports, expected %d", portFile, len(hostPorts), len(serviceProperties.Ports))
+	if err := CheckExposedPortCount(input.Datastore, len(hostPorts)); err != nil {
+		return fmt.Errorf("port file %s holds %d ports: %w", portFile, len(hostPorts), err)
 	}
 
 	// checked here rather than left to docker-port-forward, which refuses a

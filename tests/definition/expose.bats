@@ -502,3 +502,60 @@ expected_exposed_dsn() {
   [[ ! -f "$PORT_FILE" ]] || fail "a refused expose left $PORT_FILE behind"
   assert_no_ambassador "refused expose"
 }
+
+# the position of the primary port among the definition's ports, counted from
+# one, which is the fewest ports a service can be exposed on
+primary_port_position() {
+  awk '
+    /^    ports:/ { ports = 1; next }
+    ports && /^    [^ -]/ { ports = 0 }
+    ports && /^[^ ]/ { ports = 0 }
+    ports && /- name:/ { count++ }
+    ports && /primary: true/ { print count; exit }
+  ' "$DEFINITION_ROOT/docker-compose.yml"
+}
+
+@test "($DEFINITION) a service exposed on fewer ports than it has keeps them" {
+  # what a service exposed before its definition gained a port holds, which is
+  # how rabbitmq's services were exposed before it served tls
+  local primary mapping mappings exposed=()
+  read -r -a mappings <"$EXPOSED_PORTS_FILE"
+  primary="$(primary_port_position)"
+  [[ "$primary" -lt "${#mappings[@]}" ]] || skip "$PLUGIN has no port after its primary one to leave unexposed"
+
+  for mapping in "${mappings[@]:0:$primary}"; do
+    exposed+=("${mapping#*->}")
+  done
+
+  run "$BIN" expose "$PLUGIN" "$SERVICE" "${exposed[@]}"
+  assert_success
+  assert_ambassador "expose on fewer ports"
+  [[ "$(wc -w <"$PORT_FILE" | tr -d ' ')" == "$primary" ]] || fail "expected $primary ports in the port file, got '$(cat "$PORT_FILE")'"
+
+  run rebuild_service
+  assert_success
+  assert_ambassador "a rebuild of a service exposed on fewer ports"
+
+  run container_inspect "$AMBASSADOR" '{{ len .HostConfig.PortBindings }}'
+  assert_success
+  assert_output "$primary"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-host dsn.example.com
+  assert_success
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --exposed-dsn
+  assert_success
+  assert_output "$(expected_exposed_dsn dsn.example.com)"
+  run "$BIN" set "$PLUGIN" "$SERVICE" expose-host
+  assert_success
+
+  # exposing it again publishes every port
+  run "$BIN" unexpose "$PLUGIN" "$SERVICE"
+  assert_success
+  run "$BIN" expose "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_ambassador "expose again on every port"
+  [[ "$(wc -w <"$PORT_FILE" | tr -d ' ')" == "${#mappings[@]}" ]] || fail "expected ${#mappings[@]} ports in the port file, got '$(cat "$PORT_FILE")'"
+
+  run "$BIN" unexpose "$PLUGIN" "$SERVICE"
+  assert_success
+}

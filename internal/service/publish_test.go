@@ -119,3 +119,35 @@ func TestSplitPublishedPorts(t *testing.T) {
 		t.Errorf("expected %v, got %v", expected, actual)
 	}
 }
+
+// A service can be exposed on fewer host ports than its definition has, so long
+// as they reach its primary port. That is what a port file written before the
+// definition gained a port holds, and what an expose written then passes.
+func TestCheckExposedPortCount(t *testing.T) {
+	tests := []struct {
+		name      string
+		datastore *Datastore
+		count     int
+		valid     bool
+	}{
+		{name: "rabbitmq on none of its ports", datastore: Datastores["rabbitmq"], count: 0, valid: false},
+		{name: "rabbitmq on its primary port alone", datastore: Datastores["rabbitmq"], count: 1, valid: true},
+		{name: "rabbitmq on the ports it had before tls", datastore: Datastores["rabbitmq"], count: 4, valid: true},
+		{name: "rabbitmq on every port", datastore: Datastores["rabbitmq"], count: 6, valid: true},
+		{name: "rabbitmq on more ports than it has", datastore: Datastores["rabbitmq"], count: 7, valid: false},
+		{name: "a primary port second, on the first alone", datastore: dsnSecondPortDatastore(t), count: 1, valid: false},
+		{name: "a primary port second, on both", datastore: dsnSecondPortDatastore(t), count: 2, valid: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := CheckExposedPortCount(test.datastore, test.count)
+			if test.valid && err != nil {
+				t.Errorf("expected %d ports to be accepted, got %v", test.count, err)
+			}
+			if !test.valid && err == nil {
+				t.Errorf("expected %d ports to be refused", test.count)
+			}
+		})
+	}
+}

@@ -1068,7 +1068,7 @@ func (s *Datastore) URL(serviceName string, schemeOverride string) string {
 // client elsewhere connects.
 func (s *Datastore) ExposedURL(serviceName string) string {
 	hostPorts := ExposedHostPorts(s, serviceName)
-	if len(hostPorts) == 0 || len(hostPorts) < len(s.Definition.Service.Ports) {
+	if len(hostPorts) == 0 {
 		return ""
 	}
 
@@ -1077,8 +1077,16 @@ func (s *Datastore) ExposedURL(serviceName string) string {
 		return ""
 	}
 
+	// a port file written before the definition gained a port is shorter than
+	// the definition, and the ports it is missing are not exposed. Only the
+	// ports it holds are named, so a dsn naming one of the others fails to
+	// render rather than pointing at the container's own port
 	ports := map[string]int{}
 	for i, port := range s.Definition.Service.Ports {
+		if i >= len(hostPorts) {
+			break
+		}
+
 		// the port file may carry the address a port is bound on, which is
 		// dropped here along with everything else about where it is bound
 		hostPort := hostPorts[i]
