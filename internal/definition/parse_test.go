@@ -252,6 +252,18 @@ func TestParseRejects(t *testing.T) {
 			expected: `command "connect" cannot take extra arguments`,
 		},
 		{
+			// a reset takes nothing but the service, so there is nothing for
+			// extra arguments to be passed on with
+			name:     "extra arguments on a reset",
+			compose:  validCompose + "\n  commands:\n    reset:\n      extra_args: true\n      exec: [thing]\n",
+			expected: `command "reset" cannot take extra arguments`,
+		},
+		{
+			name:     "reset under custom_commands",
+			compose:  validCompose + "\n  custom_commands:\n    reset:\n      description: reset\n      exec: [thing]\n",
+			expected: "declare it under commands",
+		},
+		{
 			// exec'd into the running service, so there is no container
 			// started for it whose entrypoint could be replaced
 			name:     "an entrypoint on a command run in the service",
@@ -345,6 +357,9 @@ func TestImplements(t *testing.T) {
 	}{
 		{name: "connect present", definition: withCommands("connect"), subcommand: "connect", expected: true},
 		{name: "connect absent", definition: withCommands(), subcommand: "connect", expected: false},
+		{name: "reset present", definition: withCommands("reset"), subcommand: "reset", expected: true},
+		// how a datastore's data is deleted is the definition's to say
+		{name: "reset absent", definition: withCommands("connect", "export", "import"), subcommand: "reset", expected: false},
 		{name: "clone needs both halves", definition: withCommands("export"), subcommand: "clone", expected: false},
 		{name: "clone with both halves", definition: withCommands("export", "import"), subcommand: "clone", expected: true},
 		{name: "backup follows export", definition: withCommands("export"), subcommand: "backup", expected: true},

@@ -125,6 +125,36 @@ x-dokku:
         DOKKU_CLICKHOUSE_PASSWORD: "{{ .Secret.password }}"
         DOKKU_CLICKHOUSE_USER: "{{ .ServiceName }}"
 
+    # the database is dropped and made again from its own SHOW CREATE, which
+    # keeps its engine and comment. The account is declared in users.d rather
+    # than granted on the database, so the drop leaves it able to reach the new
+    # one. A staging database an import left behind goes with it. The session
+    # sits in the system database, as the import's does, so it is never inside
+    # the database being dropped.
+    #
+    # run in the service container rather than beside it, where the password
+    # can go in CLICKHOUSE_PASSWORD: no entrypoint runs, and the client reads it
+    # from there rather than from its argv
+    reset:
+      exec:
+        - sh
+        - -c
+        - |
+          set -e
+          database="$1"
+          query() {
+            clickhouse client --user "$DOKKU_CLICKHOUSE_USER" --database system --query "$1"
+          }
+          create="$(query "SHOW CREATE DATABASE \`$database\` FORMAT TSVRaw")"
+          query "DROP DATABASE IF EXISTS \`${database}_dokku_import\` SYNC"
+          query "DROP DATABASE \`$database\` SYNC"
+          query "$create"
+        - dokku-clickhouse-reset
+        - "{{ .Database }}"
+      env:
+        CLICKHOUSE_PASSWORD: "{{ .Secret.password }}"
+        DOKKU_CLICKHOUSE_USER: "{{ .ServiceName }}"
+
   # the databases the server keeps for itself. default is left out: it is only
   # the default database, and a service named after it works
   reserved_names: [information_schema, system]

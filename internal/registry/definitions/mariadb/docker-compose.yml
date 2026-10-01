@@ -92,6 +92,53 @@ x-dokku:
       env:
         MYSQL_PWD: "{{ .Secret.password }}"
 
+    # the database is dropped and made again with the character set and
+    # collation it had, which takes the tables, views, routines, triggers and
+    # events in it. Grants on the database are kept by name rather than with it,
+    # so the account a linked app connects as keeps its access. Other sessions in
+    # the database are ended first, as a transaction one holds open would leave
+    # the drop waiting on its lock; lock_wait_timeout fails the drop rather than
+    # leaving it waiting for a year should one start in between. Run as root
+    # rather than as mariadb, which can only end its own sessions.
+    #
+    # the create statement is read before anything is dropped, so a database
+    # that cannot be described is left alone. Written inline rather than shipped
+    # as a script, since a script is only mounted into a container made after
+    # it was added, and a reset runs in the container the service already has.
+    # The same text as mysql's, which passes its own client instead.
+    reset:
+      exec:
+        - sh
+        - -c
+        - |
+          set -e
+          database="$1"
+          client="$2"
+          sql() {
+            "$client" --user=root --batch --skip-column-names --database="$database" "$@"
+          }
+          create="$(sql <<'SQL'
+          SELECT CONCAT('CREATE DATABASE `', SCHEMA_NAME, '` CHARACTER SET ', DEFAULT_CHARACTER_SET_NAME, ' COLLATE ', DEFAULT_COLLATION_NAME)
+            FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = DATABASE();
+          SQL
+          )"
+          if [ -z "$create" ]; then
+            echo "unable to read how the $database database was created" >&2
+            exit 1
+          fi
+          for id in $(sql -e "SELECT ID FROM information_schema.PROCESSLIST WHERE DB = DATABASE() AND ID <> CONNECTION_ID()"); do
+            sql -e "KILL $id" >/dev/null 2>&1 || true
+          done
+          printf '%s\n' \
+            "SET SESSION lock_wait_timeout = 60;" \
+            "DROP DATABASE \`$database\`;" \
+            "$create;" | sql
+        - dokku-mariadb-reset
+        - "{{ .Database }}"
+        - dokku-mariadb-client
+      env:
+        MYSQL_PWD: "{{ .Secret.root_password }}"
+
   # the databases the server keeps for itself. A service named after one would
   # hand its app the server's own database rather than one of its own
   reserved_names: [information_schema, mysql, performance_schema, sys]

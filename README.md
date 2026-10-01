@@ -466,6 +466,38 @@ dokku postgres:export lollipop --file /var/lib/dokku/data/storage/data.dump --fo
 ssh dokku@dokku.me postgres:export lollipop > data.dump
 ```
 
+## Resetting a service's data
+
+Emptying a service meant destroying it and creating it again, which needed every linked app unlinked first and handed the new service new credentials, so each app had to be linked again.
+
+`reset` deletes all of a service's data and leaves the service as empty as a newly created one. The service, its credentials and the apps it is linked to are kept, so a linked app keeps the url it was given. Connections the apps hold open may be closed. It asks for the service name before deleting anything, unless `--force` is given.
+
+```shell
+# asks for the service name first
+dokku postgres:reset lollipop
+
+# without asking
+dokku postgres:reset lollipop --force
+```
+
+How the data is deleted is up to each datastore:
+
+- postgres drops the database, ending the sessions in it, and creates it again with the owner, encoding and locale it had. The extensions it had, such as `vector`, `postgis` or `timescaledb`, are created again at the image's default version, in the `public` schema. Settings made with `ALTER DATABASE` and grants on the database itself are not kept.
+- mysql and mariadb drop the database, ending the sessions in it, and create it again with the character set and collation it had. Grants on the database are kept.
+- mongo drops the database. The service account is kept, since mongo stores accounts apart from the database they belong to.
+- redis and memcached flush every key.
+- clickhouse drops the database and creates it again as it was declared.
+- omnisci drops every view and table in the database.
+- couchdb deletes every database whose name does not start with `_`, and creates the service's database again.
+- elasticsearch deletes every data stream and index whose name does not start with `.`. Those are the ones elasticsearch keeps for itself. Templates, ingest pipelines and lifecycle policies are kept.
+- meilisearch deletes every index, and typesense deletes every collection and alias. Both keep their api keys.
+- rabbitmq deletes every vhost, which takes their queues and messages with them, and creates the service's vhost again. The accounts are kept.
+- rethinkdb drops every table in every database but its own.
+- solr deletes its core's index, keeping the configuration a deploy copied into it. The service is stopped while this happens.
+- graphite deletes every metric, keeping grafana's dashboards and accounts. The service is stopped while this happens.
+
+nats and pushpin keep no data, so `reset` reports that it is not implemented for them.
+
 ## Passing extra arguments to export and import
 
 `export` and `import` ran each datastore's dump and load tools with a fixed set of arguments, so a dump could not be made any other way. A mysql table with binary columns was dumped as raw bytes, where `mysqldump --hex-blob` would have written it correctly, and there was nowhere to pass that. Scheduled backups and clones made their dumps the same way.

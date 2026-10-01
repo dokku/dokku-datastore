@@ -171,6 +171,29 @@ x-dokku:
         dokku {{.CommandPrefix}}:restart lollipop
         the settings that turn tls on are kept in '/var/lib/dokku/services/{{.CommandPrefix}}/lollipop/config/tls.conf', which is created once and is not rewritten.
 
-  # no commands: rabbitmq holds messages rather than data to dump, and the bash
-  # plugin implements none of connect, export or import. Clone and the backup
+  # no connect, export or import: rabbitmq holds messages rather than data to
+  # dump, and the bash plugin implements none of them. Clone and the backup
   # family fall out of that.
+  commands:
+    # every vhost is deleted, which takes the queues and the messages in them,
+    # the exchanges, bindings, policies and parameters with it, and the
+    # service's own is made again. The image only grants the account its vhost
+    # on first boot, so the permissions are granted again here. The accounts
+    # themselves are kept, so the password a linked app connects with still
+    # works; the connections it holds are closed with the vhost.
+    reset:
+      exec:
+        - sh
+        - -c
+        - |
+          set -e
+          vhost="$1"
+          user="$2"
+          rabbitmqctl -q -s list_vhosts name | while IFS= read -r name; do
+            rabbitmqctl -q delete_vhost "$name"
+          done
+          rabbitmqctl -q add_vhost "$vhost"
+          rabbitmqctl -q set_permissions -p "$vhost" "$user" ".*" ".*" ".*"
+        - dokku-rabbitmq-reset
+        - "{{ .Database }}"
+        - "{{ .ServiceName }}"

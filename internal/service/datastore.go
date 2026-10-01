@@ -609,6 +609,15 @@ func (s *Datastore) ImportService(ctx context.Context, input ImportServiceInput)
 	})
 }
 
+// ResetService deletes all of the service's data, leaving the service, its
+// credentials and its links as they were.
+func (s *Datastore) ResetService(ctx context.Context, input ResetServiceInput) error {
+	return s.run(ctx, input.ServiceName, "reset", runOptions{
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+	})
+}
+
 // RunPreCreate runs the step a datastore needs before its container exists.
 //
 // Nothing of the service is running yet, so this is a container of its own

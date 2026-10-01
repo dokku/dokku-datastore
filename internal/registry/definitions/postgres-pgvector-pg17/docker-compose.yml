@@ -163,6 +163,70 @@ x-dokku:
       env:
         PGPASSWORD: "{{ .Secret.password }}"
 
+    # the database is dropped and made again from template0 with the owner,
+    # encoding and locale it had, rather than emptied, so nothing an app made in
+    # it survives. WITH (FORCE) ends the sessions linked apps hold open, which
+    # would otherwise refuse the drop. The extensions it had are made again at
+    # the image's default version, timescaledb first and in a session of its
+    # own, since the rest may build on it and it expects to be the first thing a
+    # session loads. Settings made with ALTER DATABASE and grants on the database
+    # itself are not carried over.
+    #
+    # the create statement is read before anything is dropped, so a database
+    # that cannot be described is left alone. A service named postgres has the
+    # maintenance database as its own, so the drop is run from template1 instead.
+    # Written inline rather than shipped as a script, since a script is only
+    # mounted into a container made after it was added, and a reset runs in the
+    # container the service already has. Every postgres definition carries the
+    # same text, which a test holds them to.
+    reset:
+      exec:
+        - sh
+        - -c
+        - |
+          set -e
+          database="$1"
+          maintenance=postgres
+          if [ "$database" = postgres ]; then
+            maintenance=template1
+          fi
+          sql() {
+            psql -h localhost -U postgres -w -qtAX -v ON_ERROR_STOP=1 -v "database=$database" -d "$1"
+          }
+          timescaledb="$(sql "$database" <<'SQL'
+          SELECT 1 FROM pg_extension WHERE extname = 'timescaledb';
+          SQL
+          )"
+          extensions="$(sql "$database" <<'SQL'
+          SELECT format('CREATE EXTENSION IF NOT EXISTS %I CASCADE;', extname)
+            FROM pg_extension WHERE extname NOT IN ('plpgsql', 'timescaledb') ORDER BY oid;
+          SQL
+          )"
+          sql "$maintenance" >/dev/null <<'SQL'
+          SELECT format('CREATE DATABASE %I OWNER %I TEMPLATE template0 ENCODING %L LC_COLLATE %L LC_CTYPE %L',
+                   datname, pg_get_userbyid(datdba), pg_encoding_to_char(encoding), datcollate, datctype)
+                 || CASE datlocprovider
+                      WHEN 'i' THEN format(' LOCALE_PROVIDER icu ICU_LOCALE %L', datlocale)
+                        || CASE WHEN daticurules IS NULL THEN '' ELSE format(' ICU_RULES %L', daticurules) END
+                      WHEN 'b' THEN format(' LOCALE_PROVIDER builtin BUILTIN_LOCALE %L', datlocale)
+                      ELSE ' LOCALE_PROVIDER libc'
+                    END AS create_database
+            FROM pg_database WHERE datname = :'database' \gset
+          DROP DATABASE :"database" WITH (FORCE);
+          SELECT :'create_database' \gexec
+          SQL
+          if [ -n "$timescaledb" ]; then
+            echo "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;" | sql "$database" >/dev/null
+          fi
+          if [ -n "$extensions" ]; then
+            printf '%s\n' "$extensions" | sql "$database" >/dev/null
+          fi
+        - dokku-postgres-reset
+        - "{{ .Database }}"
+      env:
+        PGPASSWORD: "{{ .Secret.password }}"
+        PGOPTIONS: "-c client_min_messages=warning"
+
   # the templates every new database is copied from. postgres is left out: it
   # is only the default database, and a service named after it works
   reserved_names: [template0, template1]
