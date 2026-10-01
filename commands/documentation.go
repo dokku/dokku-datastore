@@ -1223,6 +1223,10 @@ Moving across a major version has to be asked for by name, because it is not a t
 A service can also be moved onto a definition by name, with --image and --image-version laid over the image and version it ships. This moves where the data is mounted in the same way, even when the image stays the same.
 dokku {{.CommandPrefix}}:upgrade lollipop --definition {{index .Definitions 0}}
 {{- end}}
+{{- if .Migrates}}
+An upgrade that moves a service onto another of its definitions carries the data across rather than leaving it where the new one would not read it, which needs --restart-apps so that the linked apps write nothing while it is copied. The old data is kept beside the new, and a move that fails puts the service back on what it ran.
+dokku {{.CommandPrefix}}:upgrade lollipop --definition {{index .Definitions 0}} --restart-apps
+{{- end}}
 A service keeps the mounts it has unless --volume is passed, which replaces them, and each one is checked against the new container before the old one is taken away.
 dokku {{.CommandPrefix}}:upgrade lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro
 {{- if .VolumeKey}}

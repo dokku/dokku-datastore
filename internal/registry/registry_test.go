@@ -1982,7 +1982,9 @@ func TestEveryDefinitionRendersWithItsDefaultTargets(t *testing.T) {
 					commands = append(commands, *hook)
 				}
 			}
-			for _, group := range []map[string]definition.Command{found.Dokku.Commands, found.Dokku.CustomCommands, found.Dokku.Triggers} {
+			// an upgrade step is the one thing told where the old data went
+			scope.PreviousData = "data.previous.20261001T000000"
+			for _, group := range []map[string]definition.Command{found.Dokku.Commands, found.Dokku.CustomCommands, found.Dokku.Triggers, found.Dokku.Upgrade.From} {
 				for _, command := range group {
 					commands = append(commands, command)
 				}
@@ -2064,5 +2066,99 @@ func TestVolumeKeysArePinned(t *testing.T) {
 		if strings.Join(found.VolumeKeys(), " ") != strings.Join(keys, " ") {
 			t.Errorf("expected the %s definition's volumes to be %v, got %v", name, keys, found.VolumeKeys())
 		}
+	}
+}
+
+// A step migrating data in place is keyed by the definition a service is moved
+// off, which has to be one of the same plugin at a lower major: pg_upgrade only
+// goes forward, and a step keyed by a name the registry does not have would
+// never run. The image it runs is the one published for that pair of majors.
+func TestUpgradeStepsMoveForwardWithinAPlugin(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	steps := 0
+	for _, name := range loaded.Names() {
+		found, _ := loaded.Definition(name)
+		for from, step := range found.Dokku.Upgrade.From {
+			steps++
+			t.Run(name+" from "+from, func(t *testing.T) {
+				previous, ok := loaded.Definition(from)
+				if !ok {
+					t.Fatalf("expected %s to be a definition", from)
+				}
+
+				if previous.Dokku.Plugin != found.Dokku.Plugin {
+					t.Errorf("expected %s to be a %s definition, got %s", from, found.Dokku.Plugin, previous.Dokku.Plugin)
+				}
+
+				before, after := parseVariant(from), parseVariant(name)
+				if before.major == 0 || before.major >= after.major {
+					t.Errorf("expected %s to be an older major than %s", from, name)
+				}
+
+				if expected := fmt.Sprintf(":%d-to-%d", before.major, after.major); !strings.HasSuffix(step.Image, expected) {
+					t.Errorf("expected the step to run an image tagged %s, got %q", expected, step.Image)
+				}
+			})
+		}
+	}
+
+	if steps == 0 {
+		t.Error("expected at least one step migrating data in place")
+	}
+}
+
+// Every postgres definition migrates the data of a service moved onto it, since
+// none of them reads another's cluster, and every definition that migrates can
+// remove the data a migration kept aside, the same way wherever it is declared.
+func TestEveryMigratingDefinitionCleansUpTheSameWay(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	for _, name := range loaded.NamesFor("postgres") {
+		found, _ := loaded.Definition(name)
+		if !found.Dokku.Upgrade.Migrate {
+			t.Errorf("expected %s to migrate", name)
+		}
+	}
+
+	var expected *definition.Command
+	for _, name := range loaded.Names() {
+		found, _ := loaded.Definition(name)
+		if !found.Dokku.Upgrade.Migrate {
+			continue
+		}
+
+		cleanup, ok := found.Dokku.CustomCommands["upgrade-cleanup"]
+		if !ok {
+			t.Errorf("expected %s to declare upgrade-cleanup", name)
+			continue
+		}
+
+		if expected == nil {
+			expected = &cleanup
+			continue
+		}
+
+		if strings.Join(cleanup.Exec, "\n") != strings.Join(expected.Exec, "\n") || cleanup.User != expected.User || cleanup.Mode != expected.Mode {
+			t.Errorf("expected %s to clean up as the others do", name)
+		}
+	}
+
+	if expected == nil {
+		t.Fatal("expected a definition that migrates")
+	}
+
+	// the data an upgrade kept aside is named data.<definition>.<timestamp>,
+	// which is all the command may match: the data the service runs on is
+	// beside it
+	script := strings.Join(expected.Exec, " ")
+	if !strings.Contains(script, "-name 'data.*'") || !strings.Contains(script, "-mindepth 1 -maxdepth 1") {
+		t.Errorf("expected the cleanup to match only the directories an upgrade keeps, got %q", script)
 	}
 }

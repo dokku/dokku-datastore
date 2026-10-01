@@ -828,3 +828,33 @@ func TestResolveClickhouseDumpVerbsFollowAMovedConfigVolume(t *testing.T) {
 		t.Errorf("expected the backup config written to the moved volume, got %q", actual)
 	}
 }
+
+// A command started in a container of its own mounts the volumes it declares
+// after the ones it was handed, resolved against the service root dockerd
+// sees, which is how a command reaches past the service's own mounts.
+func TestVolumesAppendsWhatTheCommandDeclares(t *testing.T) {
+	command := definition.Command{
+		Volumes: []definition.Volume{
+			{Type: "bind", Source: "{{ .HostRoot }}", Target: "/service"},
+			{Type: "bind", Source: "{{ .HostRoot }}/certs", Target: "/certs"},
+		},
+	}
+	scope := definition.Scope{HostRoot: "/host/services/postgres/lollipop"}
+	handed := []string{"/host/services/postgres/lollipop/data:/var/lib/postgresql"}
+
+	actual := Volumes(handed, command, scope)
+	expected := []string{
+		"/host/services/postgres/lollipop/data:/var/lib/postgresql",
+		"/host/services/postgres/lollipop:/service",
+		"/host/services/postgres/lollipop/certs:/certs",
+	}
+	if !slices.Equal(actual, expected) {
+		t.Errorf("expected %v, got %v", expected, actual)
+	}
+
+	// the slice handed in is the service's own, which another command reads
+	// after this one
+	if len(handed) != 1 {
+		t.Errorf("expected the handed volumes to be left alone, got %v", handed)
+	}
+}

@@ -631,11 +631,41 @@ func (s *Datastore) RunPreCreate(ctx context.Context, serviceName string) error 
 		return nil
 	}
 
+	return s.runOneOff(ctx, serviceName, "hooks.pre_create", "creation", hook, s.scope(serviceName))
+}
+
+// HasUpgradeStep reports whether this definition migrates the data of a
+// service moved onto it from the named definition in place, rather than by
+// exporting and importing it.
+func (s *Datastore) HasUpgradeStep(from string) bool {
+	_, ok := s.Definition.Dokku.Upgrade.From[from]
+	return ok
+}
+
+// RunUpgradeStep migrates the data of a service moved onto this definition from
+// another, in place, with the service down.
+//
+// It is a container of its own for the reason the pre_create hook is: nothing
+// of the service is running. It is told where the old data was moved to, which
+// is the one thing an upgrade knows that a service's own scope does not.
+func (s *Datastore) RunUpgradeStep(ctx context.Context, serviceName string, from string, previousData string) error {
+	step, ok := s.Definition.Dokku.Upgrade.From[from]
+	if !ok {
+		return fmt.Errorf("%s has no step migrating data from %s", s.DefinitionName(), from)
+	}
+
 	scope := s.scope(serviceName)
+	scope.PreviousData = previousData
+	return s.runOneOff(ctx, serviceName, "upgrade.from."+from, "upgrade", &step, scope)
+}
+
+// runOneOff runs a hook or an upgrade step in a container of its own, with the
+// mounts it declares rather than the service's.
+func (s *Datastore) runOneOff(ctx context.Context, serviceName string, name string, action string, hook *definition.Command, scope definition.Scope) error {
 	resolved, err := verb.Resolve(verb.RunInput{
 		Definition: s.Definition,
 		Scope:      scope,
-		Name:       "hooks.pre_create",
+		Name:       name,
 		Command:    hook,
 	})
 	if err != nil {
@@ -652,7 +682,7 @@ func (s *Datastore) RunPreCreate(ctx context.Context, serviceName string) error 
 	// still holds it
 	if hook.Image != "" {
 		if err := EnsureTaggedImage(ctx, EnsureTaggedImageInput{
-			Action:      "creation",
+			Action:      action,
 			Datastore:   s,
 			ServiceName: serviceName,
 			TaggedImage: hook.Image,
@@ -661,17 +691,11 @@ func (s *Datastore) RunPreCreate(ctx context.Context, serviceName string) error 
 		}
 	}
 
-	volumes := make([]string, 0, len(hook.Volumes))
-	for _, volume := range hook.Volumes {
-		source := strings.Replace(volume.Source, definition.HostRootTemplate, Folders(s, serviceName).HostRoot, 1)
-		volumes = append(volumes, source+":"+volume.Target)
-	}
-
 	return backend.Run(ctx, backend.RunInput{
 		Image:      reference,
 		Argv:       resolved.Argv,
 		Env:        resolved.Env,
-		Volumes:    volumes,
+		Volumes:    verb.Volumes(nil, *hook, scope),
 		User:       hook.User,
 		Entrypoint: hook.Entrypoint,
 		Stdout:     os.Stderr,

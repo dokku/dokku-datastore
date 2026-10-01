@@ -9,6 +9,7 @@ import (
 
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/execx"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 )
@@ -247,6 +248,24 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		return err
 	}
 
+	// and for the same reason again: a migration that cannot be undone, or that
+	// would lose what the apps write while it runs, is refused while the old
+	// container is still there to keep running
+	plan := upgradeMigration(input.Datastore, target)
+	if err := checkMigration(input, target, plan, recorded); err != nil {
+		return err
+	}
+	if plan != migrationNone {
+		if err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
+			Action:      "upgrade",
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+			TaggedImage: hostenv.BusyboxImage,
+		}); err != nil {
+			return err
+		}
+	}
+
 	linkedApps := service.LinkedApps(ctx, service.LinkedAppsInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
@@ -260,6 +279,66 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	}
 
 	input.Logger.Header2(fmt.Sprintf("Upgrading %s to %s", input.ServiceName, taggedImage)) //nolint:errcheck
+	placement := upgradePlacement{
+		Image:        image,
+		ImageVersion: imageVersion,
+		TaggedImage:  taggedImage,
+	}
+	if plan == migrationNone {
+		if err := placeService(ctx, input, target, placement); err != nil {
+			return err
+		}
+	} else {
+		err := migrateService(ctx, migrateServiceInput{
+			Upgrade:   input,
+			Target:    target,
+			Plan:      plan,
+			Placement: placement,
+			Previous: upgradePlacement{
+				Image:        recorded.Image,
+				ImageVersion: recorded.ImageVersion,
+				TaggedImage:  recorded.Tagged(),
+			},
+		})
+		if err != nil {
+			// the service is back on what it ran, so its apps are too
+			if input.RestartApps {
+				input.Logger.Header2(fmt.Sprintf("Starting all linked apps for %s", input.ServiceName)) //nolint:errcheck
+				if appErr := changeAppState(ctx, "start", linkedApps); appErr != nil {
+					return fmt.Errorf("%w; %w", err, appErr)
+				}
+			}
+
+			return err
+		}
+	}
+
+	if input.RestartApps {
+		input.Logger.Header2(fmt.Sprintf("Starting all linked apps for %s", input.ServiceName)) //nolint:errcheck
+		if err := changeAppState(ctx, "start", linkedApps); err != nil {
+			return err
+		}
+	}
+
+	input.Logger.Header2("Done") //nolint:errcheck
+	return nil
+}
+
+// upgradePlacement is the image a service is placed on.
+type upgradePlacement struct {
+	// Image is the image without its tag, as the record holds it
+	Image string
+
+	// ImageVersion is the tag, as the record holds it
+	ImageVersion string
+
+	// TaggedImage is the two together, which a container is made from
+	TaggedImage string
+}
+
+// placeService takes a service's container away and makes it again on a
+// definition and an image, leaving its data where it is.
+func placeService(ctx context.Context, input UpgradeServiceInput, target *service.Datastore, placement upgradePlacement) error {
 	if err := service.RemoveServiceContainer(ctx, service.RemoveServiceContainerInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
@@ -267,6 +346,17 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		return err
 	}
 
+	if err := recordPlacement(input, target, placement); err != nil {
+		return err
+	}
+
+	input.Datastore = target
+	return startPlacement(ctx, input, placement)
+}
+
+// recordPlacement writes down the definition and the image a service runs, and
+// the settings an upgrade was asked to change.
+func recordPlacement(input UpgradeServiceInput, target *service.Datastore, placement upgradePlacement) error {
 	// an upgrade that crosses a major version moves the service onto the other
 	// definition, which is a different data path rather than a different tag.
 	// Recorded together with the image it was resolved from: a container rebuilt
@@ -274,29 +364,31 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	// without the image would mount the new path at the old version.
 	if err := service.RecordImage(service.RecordImageInput{
 		Datastore:    input.Datastore,
-		Image:        image,
-		ImageVersion: imageVersion,
+		Image:        placement.Image,
+		ImageVersion: placement.ImageVersion,
 		ServiceName:  input.ServiceName,
 	}); err != nil {
 		return err
 	}
 
-	input.Datastore = target
-	if err := service.PinDefinition(input.Datastore, input.ServiceName); err != nil {
+	if err := service.PinDefinition(target, input.ServiceName); err != nil {
 		return err
 	}
 
 	// the container about to be made is built from the service's own files and
 	// properties, so anything the upgrade was asked to change has to be written
 	// before it rather than passed to it
-	if err := applyUpgradeSettings(input); err != nil {
-		return err
-	}
+	input.Datastore = target
+	return applyUpgradeSettings(input)
+}
 
+// startPlacement makes a service's container on the image it was placed on and
+// waits for it to answer.
+func startPlacement(ctx context.Context, input UpgradeServiceInput, placement upgradePlacement) error {
 	if err := input.Datastore.CreateServiceContainer(ctx, service.CreateServiceContainerInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
-		TaggedImage: taggedImage,
+		TaggedImage: placement.TaggedImage,
 	}); err != nil {
 		return err
 	}
@@ -310,23 +402,11 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 
 	// before the linked apps are started again, so they come back to a datastore
 	// that answers on the version they were stopped for
-	if err := WaitForService(ctx, WaitForServiceInput{
+	return WaitForService(ctx, WaitForServiceInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 		Logger:      input.Logger,
-	}); err != nil {
-		return err
-	}
-
-	if input.RestartApps {
-		input.Logger.Header2(fmt.Sprintf("Starting all linked apps for %s", input.ServiceName)) //nolint:errcheck
-		if err := changeAppState(ctx, "start", linkedApps); err != nil {
-			return err
-		}
-	}
-
-	input.Logger.Header2("Done") //nolint:errcheck
-	return nil
+	})
 }
 
 // applyUpgradeSettings writes the settings an upgrade was asked to change, and

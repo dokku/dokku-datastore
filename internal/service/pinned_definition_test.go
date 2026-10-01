@@ -238,7 +238,7 @@ func TestDocumentationIsDeclaredOnceAcrossTheMajors(t *testing.T) {
 		titles = append(titles, section.Title)
 	}
 
-	expected := []string{"Encrypting connections with TLS", "Choosing the database encoding and locale"}
+	expected := []string{"Encrypting connections with TLS", "Choosing the database encoding and locale", "Upgrading across a major version"}
 	if strings.Join(titles, "\n") != strings.Join(expected, "\n") {
 		t.Errorf("expected %q once each, got %q", expected, titles)
 	}

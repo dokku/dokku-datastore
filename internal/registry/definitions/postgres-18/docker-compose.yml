@@ -86,6 +86,47 @@ x-dokku:
           chown 999:999 /certs/server.key /certs/server.crt &&
           chmod 600 /certs/server.key && chmod 644 /certs/server.crt
 
+  # a service moved onto this definition from another postgres definition has
+  # its data carried across: a major version cannot read another's cluster, and
+  # a flavor's extensions are only in its own image. The old data directory is
+  # kept aside under the service root until upgrade-cleanup removes it.
+  upgrade:
+    migrate: true
+
+    # pg_upgrade from the image tianon publishes for each pair of majors, which
+    # carries both servers' binaries. It only exists for the official image, so
+    # the flavors export and import instead. Copy mode rather than --link, so
+    # that the data kept aside still starts if anything after this fails.
+    #
+    # the new cluster is made to match the old one's checksums, which eighteen
+    # turns on by default and pg_upgrade refuses to mismatch, and is given the
+    # old one's pg_hba.conf, since a plain initdb only trusts local connections
+    # and the apps linked to the service would be refused
+    from:
+      postgres-17:
+        image: tianon/postgres-upgrade:17-to-18
+        user: "0"
+        volumes:
+          - type: bind
+            source: "{{ .HostRoot }}"
+            target: /service
+        env:
+          PGDATAOLD: "/service/{{ .PreviousData }}"
+          PGDATANEW: /service/data/18/docker
+        exec:
+          - bash
+          - -c
+          - |
+            set -e
+            if /usr/lib/postgresql/17/bin/pg_controldata "$PGDATAOLD" | grep -q '^Data page checksum version: *0$'; then
+              export POSTGRES_INITDB_ARGS=--no-data-checksums
+            else
+              export POSTGRES_INITDB_ARGS=--data-checksums
+            fi
+            docker-upgrade pg_upgrade
+            cp "$PGDATAOLD/pg_hba.conf" "$PGDATANEW/pg_hba.conf"
+            chown postgres:postgres "$PGDATANEW/pg_hba.conf"
+
   # the certificate the server was started with, so that a client off the host
   # can verify it is talking to this service. Read from the running container
   # rather than the host, which keeps it following a moved certs volume
@@ -99,6 +140,28 @@ x-dokku:
         save it to verify the server from a client off the host
         dokku {{.CommandPrefix}}:certificate lollipop > server.crt
       exec: ["cat", "{{ .Target.certs }}/server.crt"]
+
+    # the data an upgrade kept aside belongs to the postgres user, so it is
+    # removed from a container running as root rather than from the host. Only
+    # the directories an upgrade names are matched, and each is printed as it
+    # goes
+    upgrade-cleanup:
+      description: remove the data an upgrade across a major version kept aside
+      documentation: |
+        remove the data an upgrade across a major version kept aside
+        > NOTE: the service must be running
+        dokku {{.CommandPrefix}}:upgrade-cleanup lollipop
+      mode: sidecar
+      user: "0"
+      entrypoint: ""
+      volumes:
+        - type: bind
+          source: "{{ .HostRoot }}"
+          target: /service
+      exec:
+        - sh
+        - -c
+        - find /service -mindepth 1 -maxdepth 1 -type d -name 'data.*' -print -exec rm -rf {} +
 
   # written the way a command's documentation is: every sentence ends in a
   # period, since prose lines run together, and inline code is quoted
@@ -134,6 +197,20 @@ x-dokku:
         dokku {{.CommandPrefix}}:export lollipop > lollipop.dump
         dokku {{.CommandPrefix}}:create lollipop-utf8 --custom-env "POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C"
         dokku {{.CommandPrefix}}:import lollipop-utf8 < lollipop.dump
+
+    # what an upgrade across a major version does with the data, which is not
+    # something the upgrade command's own documentation can say for every
+    # datastore
+    - title: Upgrading across a major version
+      body: |
+        an upgrade that moves a service to another major version, or onto another flavor, carries its data across rather than mounting it where the new version would not read it.
+        the linked apps are stopped while the data is copied, so the upgrade has to be given '--restart-apps':
+        dokku {{.CommandPrefix}}:upgrade lollipop --definition postgres-18 --restart-apps
+        from 17 to 18 on the official image the data is copied with 'pg_upgrade', which needs as much free disk as the data takes up.
+        every other move exports the database from the old version and imports it into the new one.
+        a move that fails puts the service back on the version it ran, with the data it had.
+        the old data is kept in a 'data.<definition>.<timestamp>' directory beside the service's data, and is removed once the upgrade is confirmed:
+        dokku {{.CommandPrefix}}:upgrade-cleanup lollipop
 
   commands:
     # the password goes in PGPASSWORD rather than on the command line, which is

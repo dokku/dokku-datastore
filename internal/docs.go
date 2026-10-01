@@ -102,6 +102,11 @@ type DocumentationData struct {
 	// VolumeKeys are the volumes a service of the datastore can move, each
 	// once, whichever of its definitions mounts it
 	VolumeKeys []string
+
+	// Migrates is whether an upgrade onto one of the datastore's definitions
+	// from another carries the data across, which is what the upgrade has to
+	// be told to stop the linked apps for
+	Migrates bool
 }
 
 // DocumentedImage is an image and the version a definition pins for it.
@@ -164,7 +169,20 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		Volumes:        volumes,
 		VolumeKey:      documentedVolumeKey(input.Datastore),
 		VolumeKeys:     documentedVolumeKeys(volumes),
+		Migrates:       documentedMigrates(input.Datastore),
 	}
+}
+
+// documentedMigrates is whether any of a datastore's definitions migrates the
+// data of a service moved onto it.
+func documentedMigrates(datastore *service.Datastore) bool {
+	for _, found := range datastore.Definitions() {
+		if found.Dokku.Upgrade.Migrate {
+			return true
+		}
+	}
+
+	return false
 }
 
 // documentedVolumeKeys is each volume named once, in the order they are first

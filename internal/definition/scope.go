@@ -76,6 +76,11 @@ type Scope struct {
 
 	// Args are the positional arguments of an extra subcommand.
 	Args map[string]string
+
+	// PreviousData is the directory, relative to the service root, an upgrade
+	// moved the service's old data to. Only an upgrade's own steps are given
+	// it, and nothing else may name it.
+	PreviousData string
 }
 
 // templateFuncs are the functions a definition may call. Deliberately tiny:
