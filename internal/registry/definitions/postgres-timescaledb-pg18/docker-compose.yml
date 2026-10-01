@@ -119,6 +119,13 @@ x-dokku:
     # two statements that would try are left out of the roles at the top of the
     # dump, before its first \connect and so before any of its rows.
     #
+    # an image may make template databases of its own when the cluster is
+    # first made, as postgis does with template_postgis, and a template cannot
+    # be dropped. pg_dumpall only clears template1's flag before dropping it, so
+    # every other template the new cluster has is made an ordinary database
+    # first. The dump makes each template the old cluster had a template again,
+    # and one only the new image made stays an ordinary database.
+    #
     # timescaledb's catalog has to be restored with its workers stopped and
     # its triggers off, which timescaledb_pre_restore does for a database. The
     # dump drops and makes every database again, so restoring is also turned on
@@ -147,6 +154,7 @@ x-dokku:
               echo "SELECT timescaledb_pre_restore() FROM pg_extension WHERE extname = 'timescaledb';" | sql "$database" >/dev/null
             done
           fi
+          printf '%s\n' "SELECT format('ALTER DATABASE %I IS_TEMPLATE false', datname) FROM pg_database WHERE datistemplate AND datname NOT IN ('template0', 'template1') \gexec" | sql postgres >/dev/null
           status=0
           awk -v user=postgres '
             /^\\connect / { connected = 1 }

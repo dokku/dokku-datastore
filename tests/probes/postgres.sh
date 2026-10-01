@@ -3,8 +3,8 @@
 # survived rather than only that the service came back up.
 set -eo pipefail
 
-ACTION="${1:?usage: $0 <write|clobber|read|cluster|read-cluster|extension|has-extension|hypertable> <service> [extension]}"
-SERVICE="${2:?usage: $0 <write|clobber|read|cluster|read-cluster|extension|has-extension|hypertable> <service> [extension]}"
+ACTION="${1:?usage: $0 <write|clobber|read|cluster|read-cluster|templates|extension|has-extension|hypertable> <service> [extension]}"
+SERVICE="${2:?usage: $0 <write|clobber|read|cluster|read-cluster|templates|extension|has-extension|hypertable> <service> [extension]}"
 CONTAINER="dokku.postgres.$SERVICE"
 PASSWORD="$(cat "$DOKKU_LIB_ROOT/services/postgres/$SERVICE/PASSWORD")"
 # the database the service was created with, which is the service name with
@@ -53,6 +53,11 @@ read-cluster)
   owner="$(sql "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'probe_other';")"
   value="$(DATABASE=probe_other sql "SELECT value FROM probe;")"
   echo "$owner:$value"
+  ;;
+templates)
+  # the databases new ones can be copied from, which an image may add to,
+  # one per line. template0 is the cluster's own and never changes
+  sql "SELECT datname FROM pg_database WHERE datistemplate AND datname <> 'template0' ORDER BY datname;"
   ;;
 hypertable)
   # a table timescaledb partitions by time, which only works when the

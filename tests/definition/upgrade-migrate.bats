@@ -90,6 +90,10 @@ flavor_extension() {
   run "$(probe_path)" cluster "$SERVICE"
   assert_success
 
+  # the template databases the image made, which come back as templates
+  local templates
+  templates="$("$(probe_path)" templates "$SERVICE")"
+
   run --separate-stderr "$BIN" upgrade "$PLUGIN" "$SERVICE" --definition "$NEXT_DEFINITION" --restart-apps
   assert_success
 
@@ -121,6 +125,10 @@ flavor_extension() {
   run --separate-stderr "$(probe_path)" read-cluster "$SERVICE"
   assert_success
   assert_output "probe_role:other"
+
+  run --separate-stderr "$(probe_path)" templates "$SERVICE"
+  assert_success
+  assert_output "$templates"
 
   if [[ -n "$extension" ]]; then
     run --separate-stderr "$(probe_path)" has-extension "$SERVICE" "$extension"
