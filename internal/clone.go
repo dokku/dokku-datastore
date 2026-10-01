@@ -340,6 +340,9 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 	}
 	defer os.Remove(dumpFile.Name())
 
+	// the service's own database alone, unlike a backup. A dump of every
+	// database loads each one under the name it was exported from, so the
+	// source's own would land beside the new service's rather than in it.
 	if err := input.Datastore.ExportService(ctx, service.ExportServiceInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,

@@ -714,6 +714,114 @@ func TestResolveAppendsExtraArgs(t *testing.T) {
 	}
 }
 
+// The every-database forms of export and import resolve as commands of their
+// own: the accounts that can see every database, and the extra arguments after
+// what the definition renders, as the service's own dumps take them.
+func TestResolveEveryDatabaseDumps(t *testing.T) {
+	tests := []struct {
+		definition string
+		verb       string
+		extraArgs  []string
+		first      string
+		last       string
+		env        map[string]string
+	}{
+		{definition: "postgres-17", verb: "export", extraArgs: []string{"--no-comments"}, first: "sh", last: "lollipop", env: map[string]string{"PGPASSWORD": "hunter2"}},
+		{definition: "postgres-timescaledb-pg18", verb: "import", extraArgs: []string{"--echo-errors"}, first: "sh", last: "dokku-postgres-import-all", env: map[string]string{"PGPASSWORD": "hunter2"}},
+		{definition: "mysql", verb: "export", extraArgs: []string{"--hex-blob"}, first: "bash", last: "--set-gtid-purged=OFF", env: map[string]string{"MYSQL_PWD": "hunter3"}},
+		{definition: "mysql", verb: "import", extraArgs: []string{"--force"}, first: "mysql", last: "--user=root", env: map[string]string{"MYSQL_PWD": "hunter3"}},
+		{definition: "mariadb", verb: "export", extraArgs: []string{"--hex-blob"}, first: "bash", last: "--quick", env: map[string]string{"MYSQL_PWD": "hunter3"}},
+		{definition: "mariadb", verb: "import", extraArgs: []string{"--force"}, first: "dokku-mariadb-client", last: "--user=root", env: map[string]string{"MYSQL_PWD": "hunter3"}},
+		{definition: "mongo", verb: "export", extraArgs: []string{"--numParallelCollections=1"}, first: "mongodump", last: "--archive"},
+		{definition: "mongo", verb: "import", extraArgs: []string{"--numParallelCollections=1"}, first: "mongorestore", last: "local.*"},
+		{definition: "couchdb", verb: "export", first: "dokku-couchdb-export", last: "dokku-couchdb-export", env: map[string]string{"COUCHDB_ALL_DATABASES": "true", "COUCHDB_DATABASE": "lollipop"}},
+		{definition: "couchdb", verb: "import", first: "dokku-couchdb-import", last: "dokku-couchdb-import", env: map[string]string{"COUCHDB_ALL_DATABASES": "true", "COUCHDB_DATABASE": "lollipop"}},
+		{definition: "clickhouse", verb: "export", first: "dokku-clickhouse-export", last: "dokku-clickhouse-export", env: map[string]string{"DOKKU_CLICKHOUSE_ALL_DATABASES": "true", "DOKKU_CLICKHOUSE_DATABASE": "lollipop"}},
+		{definition: "clickhouse", verb: "import", first: "dokku-clickhouse-import", last: "dokku-clickhouse-import", env: map[string]string{"DOKKU_CLICKHOUSE_ALL_DATABASES": "true", "DOKKU_CLICKHOUSE_DATABASE": "lollipop"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.definition+" "+test.verb, func(t *testing.T) {
+			scope := redisScope()
+			scope.Plugin = test.definition
+			scope.Secret = map[string]string{"password": "hunter2", "root_password": "hunter3"}
+
+			loaded := definitionFor(t, test.definition)
+			command := loaded.Dokku.Commands[test.verb].AllDatabases
+			if command == nil {
+				t.Fatalf("expected %s to %s every database", test.definition, test.verb)
+			}
+
+			resolved, err := Resolve(RunInput{
+				Definition: loaded,
+				Scope:      scope,
+				Name:       test.verb,
+				Command:    command,
+				Names:      backend.Names{Container: "dokku." + test.definition + ".lollipop"},
+				ExtraArgs:  test.extraArgs,
+			})
+			if err != nil {
+				t.Fatalf("unable to resolve %s: %s", test.verb, err)
+			}
+
+			if resolved.Argv[0] != test.first {
+				t.Errorf("expected %s every database to run %q, got %q", test.verb, test.first, resolved.Argv)
+			}
+
+			rendered := len(resolved.Argv) - len(test.extraArgs)
+			if rendered < 1 || resolved.Argv[rendered-1] != test.last {
+				t.Fatalf("expected the extra arguments after %q, got %q", test.last, resolved.Argv)
+			}
+
+			if actual := resolved.Argv[rendered:]; !slices.Equal(actual, test.extraArgs) {
+				t.Errorf("expected %q appended, got %q", test.extraArgs, actual)
+			}
+
+			for name, value := range test.env {
+				if resolved.Env[name] != value {
+					t.Errorf("expected %s=%q, got %q", name, value, resolved.Env[name])
+				}
+			}
+		})
+	}
+}
+
+// Mongo dumps every database as the admin account, the only one that can read
+// them all, and leaves the databases holding the server's accounts out of the
+// load, so a restore never sets the service's password back to an old one.
+func TestResolveMongoEveryDatabaseKeepsTheAccounts(t *testing.T) {
+	scope := redisScope()
+	scope.Plugin = "mongo"
+	scope.Secret = map[string]string{"password": "hunter2", "root_password": "hunter3"}
+	mongo := definitionFor(t, "mongo")
+
+	for _, verb := range []string{"export", "import"} {
+		resolved, err := Resolve(RunInput{
+			Definition: mongo,
+			Scope:      scope,
+			Name:       verb,
+			Command:    mongo.Dokku.Commands[verb].AllDatabases,
+			Names:      backend.Names{Container: "dokku.mongo.lollipop"},
+		})
+		if err != nil {
+			t.Fatalf("unable to resolve %s: %s", verb, err)
+		}
+
+		argv := strings.Join(resolved.Argv, " ")
+		if !strings.Contains(argv, "-u admin -p hunter3 --authenticationDatabase admin") {
+			t.Errorf("expected %s every database as the admin account, got %q", verb, argv)
+		}
+
+		if slices.Contains(resolved.Argv, "-d") || slices.Contains(resolved.Argv, "--nsFrom") {
+			t.Errorf("expected %s every database to name no database, got %q", verb, argv)
+		}
+
+		if verb == "import" && !strings.Contains(argv, "--nsExclude admin.* --nsExclude config.* --nsExclude local.*") {
+			t.Errorf("expected the server's own databases left out of the load, got %q", argv)
+		}
+	}
+}
+
 // A timescaledb import restores with the extension's background workers stopped,
 // since one that writes its own catalog row mid-restore fails the copy of that
 // catalog, and starts them again afterwards. The extra arguments still reach

@@ -274,6 +274,123 @@ teardown_file() {
   assert_output ""
 }
 
+@test "($DEFINITION) export and import of every database round trip" {
+  if ! exports_all_databases; then
+    skip "$DEFINITION does not export every database"
+  fi
+
+  # a record in the service's own database and one in another the service
+  # holds, the way an app that makes a database of its own leaves it
+  local probe
+  probe="$(probe_path)"
+  run "$probe" write "$SERVICE"
+  assert_success
+  run "$probe" write-extra "$SERVICE"
+  assert_success
+
+  local dump="$BATS_TEST_TMPDIR/all.dump" export_status=0
+  "$BIN" export "$PLUGIN" "$SERVICE" --all-databases >"$dump" 2>"$dump.err" || export_status=$?
+  [[ "$export_status" -eq 0 ]] || fail "export --all-databases failed with status $export_status: $(cat "$dump.err")"
+  [[ -s "$dump" ]] || fail "export --all-databases produced nothing"
+
+  run "$probe" clobber "$SERVICE"
+  assert_success
+  run "$probe" clobber-extra "$SERVICE"
+  assert_success
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" --all-databases <"$dump"
+  assert_success
+
+  run --separate-stderr "$probe" read "$SERVICE"
+  assert_success
+  assert_output "known"
+  run --separate-stderr "$probe" read-extra "$SERVICE"
+  assert_success
+  assert_output "known"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --status
+  assert_success
+  assert_output "running"
+
+  # extra arguments reach the tools that dump and load every database too,
+  # which a flag none of them has proves by being refused, leaving the data
+  # as it was
+  run "$BIN" export "$PLUGIN" "$SERVICE" --all-databases --file "$BATS_TEST_TMPDIR/refused.dump" -- "$UNKNOWN_ARG"
+  assert_failure
+  [[ ! -e "$BATS_TEST_TMPDIR/refused.dump" ]] || fail "a failed export left a dump behind"
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" --all-databases -- "$UNKNOWN_ARG" <"$dump"
+  assert_failure
+
+  run --separate-stderr "$probe" read-extra "$SERVICE"
+  assert_success
+  assert_output "known"
+
+  # the same through files on the host
+  local file_dump="$BATS_TEST_TMPDIR/all-file.dump"
+  run --separate-stderr "$BIN" export "$PLUGIN" "$SERVICE" --all-databases --file "$file_dump"
+  assert_success
+  assert_output ""
+  [[ -s "$file_dump" ]] || fail "export --all-databases --file produced nothing"
+
+  run "$probe" clobber "$SERVICE"
+  assert_success
+  run "$probe" clobber-extra "$SERVICE"
+  assert_success
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" --all-databases --file "$file_dump" </dev/null
+  assert_success
+
+  run --separate-stderr "$probe" read "$SERVICE"
+  assert_success
+  assert_output "known"
+  run --separate-stderr "$probe" read-extra "$SERVICE"
+  assert_success
+  assert_output "known"
+
+  # without the flag only the service's own database is exported, so an import
+  # of it puts that back and leaves the other as it was
+  local single="$BATS_TEST_TMPDIR/single.dump"
+  "$BIN" export "$PLUGIN" "$SERVICE" >"$single" 2>"$single.err" || fail "export failed: $(cat "$single.err")"
+
+  run "$probe" clobber "$SERVICE"
+  assert_success
+  run "$probe" clobber-extra "$SERVICE"
+  assert_success
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" <"$single"
+  assert_success
+
+  run --separate-stderr "$probe" read "$SERVICE"
+  assert_success
+  assert_output "known"
+  run --separate-stderr "$probe" read-extra "$SERVICE"
+  assert_success
+  assert_output "clobbered"
+}
+
+@test "($DEFINITION) every database is refused where it cannot be exported" {
+  if exports_all_databases; then
+    skip "$DEFINITION exports every database"
+  fi
+
+  # refused before the destination is made, so nothing is left at the path
+  local file_dump="$BATS_TEST_TMPDIR/all.dump"
+  run "$BIN" export "$PLUGIN" "$SERVICE" --all-databases --file "$file_dump"
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement export"
+  fi
+  assert_failure
+  assert_output --partial "--all-databases is not supported"
+  [[ ! -e "$file_dump" ]] || fail "a refused export left $file_dump behind"
+  run ls -A "$BATS_TEST_TMPDIR"
+  assert_output ""
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" --all-databases </dev/null
+  assert_failure
+  assert_output --partial "--all-databases is not supported"
+}
+
 @test "($DEFINITION) import of a missing file leaves the data alone" {
   local probe
   probe="$(probe_path)"

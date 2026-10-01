@@ -47,8 +47,15 @@ func (c *BackupCommand) Documentation() string {
 dokku {{.CommandPrefix}}:backup lollipop my-s3-bucket --use-iam
 backup the 'lollipop' service under a path in the bucket
 dokku {{.CommandPrefix}}:backup lollipop my-s3-bucket/{{.CommandPrefix}}-backups
+{{- if .AllDatabases}}
+a backup holds every database in the service, so it is restored with --all-databases (assuming it was extracted via 'tar -xf backup.tgz')
+dokku {{.CommandPrefix}}:import lollipop --all-databases < backup-folder/export
+a backup made by an older version of the plugin holds only the database named for the service, and is restored without it
+dokku {{.CommandPrefix}}:import lollipop < backup-folder/export
+{{- else}}
 restore a backup file (assuming it was extracted via 'tar -xf backup.tgz')
-dokku {{.CommandPrefix}}:import lollipop < backup-folder/export`
+dokku {{.CommandPrefix}}:import lollipop < backup-folder/export
+{{- end}}`
 }
 
 // Group is the readme usage section the command is documented under
@@ -504,7 +511,7 @@ func (c *ExportCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *ExportCommand) Usage() string {
-	return `<service> [-f|--file <path>] [--force]{{if .ExportArgs}} [-- <export-args...>]{{end}}`
+	return `<service> [-f|--file <path>] [--force]{{if .AllDatabases}} [--all-databases]{{end}}{{if .ExportArgs}} [-- <export-args...>]{{end}}`
 }
 
 // Documentation returns the long form documentation for the command
@@ -518,6 +525,11 @@ the path is on the dokku host, not on the machine running ssh.
 dokku {{.CommandPrefix}}:export lollipop --file /var/lib/dokku/data/storage/data.dump
 a file that already exists is not overwritten unless --force is given
 dokku {{.CommandPrefix}}:export lollipop --file /var/lib/dokku/data/storage/data.dump --force
+{{- if .AllDatabases}}
+only the database named for the service is exported unless --all-databases is given, which exports every database in the service, leaving out the ones the server keeps for itself.
+it is imported again with import --all-databases, into the databases it was exported from.
+dokku {{.CommandPrefix}}:export lollipop --all-databases > all.dump
+{{- end}}
 {{- if .ExportArgs}}
 arguments after -- are passed to the tool that makes the dump, in place of the export-args property
 dokku {{.CommandPrefix}}:export lollipop -- <export-args...>
@@ -572,7 +584,7 @@ func (c *ImportCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *ImportCommand) Usage() string {
-	return `<service> [-f|--file <path>]{{if .ImportArgs}} [-- <import-args...>]{{end}}`
+	return `<service> [-f|--file <path>]{{if .AllDatabases}} [--all-databases]{{end}}{{if .ImportArgs}} [-- <import-args...>]{{end}}`
 }
 
 // Documentation returns the long form documentation for the command
@@ -582,6 +594,11 @@ dokku {{.CommandPrefix}}:import lollipop < data.dump
 a dump that is already on the dokku host can be imported with --file.
 the path is on the dokku host, not on the machine running ssh.
 dokku {{.CommandPrefix}}:import lollipop --file /var/lib/dokku/data/storage/data.dump
+{{- if .AllDatabases}}
+a dump of every database, as written by export --all-databases or a backup, is imported with --all-databases.
+each database in the dump is replaced under the name it was exported from, and any other database is left alone.
+dokku {{.CommandPrefix}}:import lollipop --all-databases < all.dump
+{{- end}}
 {{- if .ImportArgs}}
 arguments after -- are passed to the tool that loads the dump, in place of the import-args property
 dokku {{.CommandPrefix}}:import lollipop -- <import-args...> < data.dump

@@ -26,6 +26,8 @@ type ImportCommand struct {
 
 	// file is a path on the dokku host to import instead of stdin
 	file string
+	// allDatabases loads a dump of every database in the service
+	allDatabases bool
 }
 
 // Name returns the name of the command
@@ -50,6 +52,7 @@ func (c *ImportCommand) Examples() map[string]string {
 		"Imports into a redis service named test":                           fmt.Sprintf("%s %s redis test", appName, c.Name()),
 		"Imports a file on the dokku host into a redis service":             fmt.Sprintf("%s %s redis test --file /var/lib/dokku/data/storage/data.dump", appName, c.Name()),
 		"Imports into a mysql service named test with a larger packet size": fmt.Sprintf("%s %s mysql test -- --max-allowed-packet=1G", appName, c.Name()),
+		"Imports a dump of every database into a postgres service":          fmt.Sprintf("%s %s postgres test --all-databases", appName, c.Name()),
 	}
 }
 
@@ -86,6 +89,7 @@ func (c *ImportCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
 	f.StringVarP(&c.file, "file", "f", "", "a file on the dokku host to import instead of reading stdin")
+	f.BoolVar(&c.allDatabases, "all-databases", false, "load a dump of every database in the service, as written by export --all-databases or a backup")
 	return f
 }
 
@@ -95,7 +99,8 @@ func (c *ImportCommand) AutocompleteFlags() complete.Flags {
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
 		complete.Flags{
-			"--file": complete.PredictFiles("*"),
+			"--file":          complete.PredictFiles("*"),
+			"--all-databases": complete.PredictNothing,
 		},
 	)
 }
@@ -190,6 +195,10 @@ func (c *ImportCommand) Run(args []string) int {
 		return 1
 	}
 
+	if code, refused := refuseAllDatabases(logger, datastore, c.allDatabases); refused {
+		return code
+	}
+
 	reader, err := importSource(c.file, os.Stdin)
 	if err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
@@ -198,10 +207,11 @@ func (c *ImportCommand) Run(args []string) int {
 	defer reader.Close() //nolint:errcheck
 
 	if err := datastore.ImportService(ctx, service.ImportServiceInput{
-		Datastore:   datastore,
-		Reader:      reader,
-		ServiceName: serviceName,
-		ExtraArgs:   extraArgs,
+		Datastore:    datastore,
+		Reader:       reader,
+		ServiceName:  serviceName,
+		ExtraArgs:    extraArgs,
+		AllDatabases: c.allDatabases,
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
@@ -245,4 +255,9 @@ func importSource(path string, stdin *os.File) (io.ReadCloser, error) {
 	}
 
 	return io.NopCloser(stdin), nil
+}
+
+// DocumentsFlag reports whether a flag is described for a datastore
+func (c *ImportCommand) DocumentsFlag(name string, data internal.DocumentationData) bool {
+	return documentsAllDatabases(name, data)
 }

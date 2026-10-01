@@ -99,6 +99,10 @@ type ExportServiceInput struct {
 	// ExtraArgs are passed to the export command for this export alone, in
 	// place of the service's export-args. Empty uses the property.
 	ExtraArgs []string
+
+	// AllDatabases exports every database in the service rather than only the
+	// one named for it, which only a datastore that declares it can do
+	AllDatabases bool
 }
 
 // ImportServiceInput is the input for the ImportService function
@@ -115,6 +119,10 @@ type ImportServiceInput struct {
 	// ExtraArgs are passed to the import command for this import alone, in
 	// place of the service's import-args. Empty uses the property.
 	ExtraArgs []string
+
+	// AllDatabases loads a dump of every database in a service, the kind an
+	// export with AllDatabases writes, rather than one of a single database
+	AllDatabases bool
 }
 
 // ResetServiceInput is the input for the ResetService function
