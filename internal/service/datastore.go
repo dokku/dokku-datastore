@@ -787,6 +787,15 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 		return err
 	}
 
+	// the payload is mounted into a container run beside the service or in its
+	// place, and was otherwise only written when the service container was made.
+	// A script added since then would be missing on the host, and docker would
+	// make its mount source a directory owned by root, which fails the verb and
+	// every later write of the script.
+	if err := s.writePayload(serviceName); err != nil {
+		return err
+	}
+
 	if command != nil && command.Image != "" {
 		if err := EnsureTaggedImage(ctx, EnsureTaggedImageInput{
 			Action:      verbAction(name),

@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -176,6 +178,45 @@ func TestWritePayloadOverwrites(t *testing.T) {
 	// not executable fails when the verb runs rather than when it is written
 	if info.Mode().Perm() != 0755 {
 		t.Errorf("expected the script to be executable, got %v", info.Mode().Perm())
+	}
+}
+
+// A verb mounts the payload into the container it runs in, and a service made
+// before a script was added has nothing on the host to mount. Docker would make
+// the missing source a directory owned by root, so the payload is written before
+// the verb runs rather than only when the service container is made.
+func TestRunWritesThePayloadFirst(t *testing.T) {
+	redis := redisDatastore(t)
+	serviceRoot := withServiceRoot(t, redis, "lollipop")
+	writeRecord(t, serviceRoot, "redis", "8.8.0")
+	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
+
+	// docker is never reached for real: each call is recorded and succeeds
+	docker := filepath.Join(t.TempDir(), "docker")
+	if err := os.WriteFile(docker, []byte("#!/usr/bin/env bash\nexit 0\n"), 0755); err != nil {
+		t.Fatalf("unable to write the fake docker: %s", err)
+	}
+	t.Setenv("DOCKER_BIN", docker)
+
+	script := filepath.Join(serviceRoot, "rootfs", "usr", "local", "bin", "dokku-redis-export")
+	if _, err := os.Stat(script); !os.IsNotExist(err) {
+		t.Fatalf("expected no script before the verb runs, got %v", err)
+	}
+
+	if err := redis.ExportService(context.Background(), ExportServiceInput{
+		ServiceName: "lollipop",
+		Writer:      io.Discard,
+	}); err != nil {
+		t.Fatalf("unable to run the export: %s", err)
+	}
+
+	info, err := os.Stat(script)
+	if err != nil {
+		t.Fatalf("expected the script to be written: %s", err)
+	}
+
+	if !info.Mode().IsRegular() {
+		t.Errorf("expected the script to be a regular file, got %v", info.Mode())
 	}
 }
 
