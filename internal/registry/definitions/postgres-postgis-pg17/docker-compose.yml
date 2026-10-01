@@ -269,12 +269,95 @@ x-dokku:
       env:
         PGPASSWORD: "{{ .Secret.password }}"
 
+      # every database but the templates, and the maintenance database unless
+      # it is the service's own, as plain sql that psql loads. pg_dumpall is
+      # not used because it dumps the roles too, and loading them would set the
+      # postgres password to the one the dump was taken with, leaving every
+      # linked app holding the wrong one. Each database is dropped and made
+      # again from template0 with the encoding and locale it had, the way reset
+      # makes it, and marked as restoring until it is loaded, which keeps the
+      # timescaledb background workers from writing into its catalog while the
+      # dump copies it back. The databases are owned by postgres, as the dump
+      # carries no owners. Every postgres definition carries the same text,
+      # which a test holds them to.
+      all_databases:
+        extra_args: true
+        exec:
+          - sh
+          - -c
+          - |
+            set -e
+            own="$1"
+            shift
+            sql() {
+              psql -h localhost -U postgres -w -qtAX -v ON_ERROR_STOP=1 -d template1 "$@"
+            }
+            databases="$(sql -v "own=$own" <<'SQL'
+            SELECT datname FROM pg_database
+             WHERE NOT datistemplate AND (datname <> 'postgres' OR datname = :'own')
+             ORDER BY datname;
+            SQL
+            )"
+            printf '%s\n' "$databases" | while IFS= read -r database; do
+              sql -v "database=$database" <<'SQL'
+            SELECT format('DROP DATABASE IF EXISTS %I WITH (FORCE);', datname) || chr(10)
+                || format('CREATE DATABASE %I TEMPLATE template0 ENCODING %L LC_COLLATE %L LC_CTYPE %L',
+                          datname, pg_encoding_to_char(encoding), datcollate, datctype)
+                || CASE datlocprovider
+                     WHEN 'i' THEN format(' LOCALE_PROVIDER icu ICU_LOCALE %L', datlocale)
+                       || CASE WHEN daticurules IS NULL THEN '' ELSE format(' ICU_RULES %L', daticurules) END
+                     WHEN 'b' THEN format(' LOCALE_PROVIDER builtin BUILTIN_LOCALE %L', datlocale)
+                     ELSE ' LOCALE_PROVIDER libc'
+                   END || ';' || chr(10)
+                || format('ALTER DATABASE %I SET timescaledb.restoring = %L;', datname, 'on') || chr(10)
+                || format('\connect %I', datname)
+              FROM pg_database WHERE datname = :'database';
+            SQL
+              pg_dump -Fp --no-acl --no-owner -h localhost -U postgres -w "$@" "$database"
+              sql -v "database=$database" <<'SQL'
+            SELECT format('ALTER DATABASE %I RESET timescaledb.restoring;', datname) || chr(10)
+                || 'SELECT pg_catalog.format(''SELECT %I.timescaledb_post_restore();'', n.nspname)'
+                || ' FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace'
+                || ' WHERE e.extname = ''timescaledb'' \gexec'
+              FROM pg_database WHERE datname = :'database';
+            SQL
+            done
+          - dokku-postgres-export-all
+          - "{{ .Database }}"
+        env:
+          PGPASSWORD: "{{ .Secret.password }}"
+
     import:
       extra_args: true
       stdin: true
       exec: ["pg_restore", "-h", "localhost", "-cO", "--if-exists", "-d", "{{ .Database }}", "-U", "postgres", "-w"]
       env:
         PGPASSWORD: "{{ .Secret.password }}"
+
+      # a dump of every database, which drops and makes each database in it
+      # again, so it is loaded from template1 rather than from any database it
+      # might drop. A load that stops part way leaves a database it made marked
+      # as restoring, where timescaledb runs no background workers, so the mark
+      # is cleared whether the load worked or not. Every postgres definition
+      # carries the same text, which a test holds them to.
+      all_databases:
+        extra_args: true
+        stdin: true
+        exec:
+          - sh
+          - -c
+          - |
+            status=0
+            psql -X -q -o /dev/null -v ON_ERROR_STOP=1 -h localhost -U postgres -w -d template1 "$@" || status=$?
+            psql -X -q -o /dev/null -v ON_ERROR_STOP=1 -h localhost -U postgres -w -d template1 <<'SQL' || exit $?
+            SELECT format('ALTER DATABASE %I RESET timescaledb.restoring', d.datname)
+              FROM pg_db_role_setting s JOIN pg_database d ON d.oid = s.setdatabase
+             WHERE s.setrole = 0 AND 'timescaledb.restoring=on' = ANY (s.setconfig) \gexec
+            SQL
+            exit "$status"
+          - dokku-postgres-import-all
+        env:
+          PGPASSWORD: "{{ .Secret.password }}"
 
     # the database is dropped and made again from template0 with the owner,
     # encoding and locale it had, rather than emptied, so nothing an app made in

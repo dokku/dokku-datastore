@@ -359,10 +359,12 @@ func TestCouchdbSidecarImageIsOnePluginShips(t *testing.T) {
 	}
 
 	commands := map[string]definition.Command{
-		"export":            couchdb.Dokku.Commands["export"],
-		"import":            couchdb.Dokku.Commands["import"],
-		"reset":             couchdb.Dokku.Commands["reset"],
-		"hooks.post_create": *couchdb.Dokku.Hooks.PostCreate,
+		"export":               couchdb.Dokku.Commands["export"],
+		"export.all_databases": *couchdb.Dokku.Commands["export"].AllDatabases,
+		"import":               couchdb.Dokku.Commands["import"],
+		"import.all_databases": *couchdb.Dokku.Commands["import"].AllDatabases,
+		"reset":                couchdb.Dokku.Commands["reset"],
+		"hooks.post_create":    *couchdb.Dokku.Hooks.PostCreate,
 	}
 
 	for name, command := range commands {
@@ -1150,6 +1152,67 @@ func TestEveryDatastoreWithDataCanBeReset(t *testing.T) {
 				t.Errorf("expected reset to be implemented=%t, got %t", !stateless[parsed.Dokku.Plugin], implements)
 			}
 		})
+	}
+}
+
+// Every datastore that exports a server able to hold more than one database
+// can export every one of them, which is what its backups hold. redis dumps
+// the whole server already, so it has nothing more to offer.
+func TestEveryDatastoreWithManyDatabasesExportsThemAll(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	many := map[string]bool{
+		"clickhouse": true,
+		"couchdb":    true,
+		"mariadb":    true,
+		"mongo":      true,
+		"mysql":      true,
+		"postgres":   true,
+	}
+	for _, name := range loaded.Names() {
+		t.Run(name, func(t *testing.T) {
+			parsed, _ := loaded.Definition(name)
+			if exports := parsed.ExportsAllDatabases(); exports != many[parsed.Dokku.Plugin] {
+				t.Errorf("expected every database to be exported=%t, got %t", many[parsed.Dokku.Plugin], exports)
+			}
+		})
+	}
+}
+
+// The every-database dumps are written once and copied to every postgres
+// definition, as the reset is, so that no major or flavor dumps them otherwise.
+func TestEveryDatabaseDumpsAreTheSameForPostgres(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	script := func(name string, verb string) string {
+		t.Helper()
+
+		parsed, ok := loaded.Definition(name)
+		if !ok {
+			t.Fatalf("expected a %s definition", name)
+		}
+
+		command := parsed.Dokku.Commands[verb].AllDatabases
+		if command == nil || len(command.Exec) < 3 || command.Exec[0] != "sh" {
+			t.Fatalf("expected %s to %s every database with an inline script", name, verb)
+		}
+
+		return command.Exec[2]
+	}
+
+	postgres := loaded.NamesFor("postgres")
+	for _, verb := range []string{"export", "import"} {
+		for _, name := range postgres[1:] {
+			if script(name, verb) != script(postgres[0], verb) {
+				t.Errorf("expected %s to %s every database as %s does", name, verb, postgres[0])
+			}
+		}
 	}
 }
 

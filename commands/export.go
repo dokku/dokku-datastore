@@ -30,6 +30,8 @@ type ExportCommand struct {
 	file string
 	// force is whether a file already at that path is replaced
 	force bool
+	// allDatabases exports every database in the service
+	allDatabases bool
 }
 
 // Name returns the name of the command
@@ -54,6 +56,7 @@ func (c *ExportCommand) Examples() map[string]string {
 		"Exports a redis service named test":                             fmt.Sprintf("%s %s redis test", appName, c.Name()),
 		"Exports a redis service named test to a file on the dokku host": fmt.Sprintf("%s %s redis test --file /var/lib/dokku/data/storage/test.rdb", appName, c.Name()),
 		"Exports a mysql service named test with binary columns as hex":  fmt.Sprintf("%s %s mysql test -- --hex-blob", appName, c.Name()),
+		"Exports every database in a postgres service named test":        fmt.Sprintf("%s %s postgres test --all-databases", appName, c.Name()),
 	}
 }
 
@@ -91,6 +94,7 @@ func (c *ExportCommand) FlagSet() *flag.FlagSet {
 	c.GlobalFlags(f)
 	f.StringVarP(&c.file, "file", "f", "", "a file on the dokku host to export to instead of writing stdout")
 	f.BoolVar(&c.force, "force", false, "replace the file named with --file if it already exists")
+	f.BoolVar(&c.allDatabases, "all-databases", false, "export every database in the service rather than only the one named for it")
 	return f
 }
 
@@ -100,8 +104,9 @@ func (c *ExportCommand) AutocompleteFlags() complete.Flags {
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
 		complete.Flags{
-			"--file":  complete.PredictFiles("*"),
-			"--force": complete.PredictNothing,
+			"--file":          complete.PredictFiles("*"),
+			"--force":         complete.PredictNothing,
+			"--all-databases": complete.PredictNothing,
 		},
 	)
 }
@@ -181,26 +186,12 @@ func (c *ExportCommand) Run(args []string) int {
 		return 1
 	}
 
-	// the destination is created before anything is exported, so a path that
-	// cannot be written fails without exporting a dump only to throw it away
 	if c.force && c.file == "" {
 		logger.Error(internal.ErrorInput{
 			Message: command.CommandErrorText(c),
 			Error:   fmt.Errorf("--force only applies to a file named with --file"),
 		})
 		return 1
-	}
-
-	var writer io.Writer = os.Stdout
-	var destination *service.AtomicFile
-	if c.file != "" {
-		destination, err = exportDestination(c.file, c.force)
-		if err != nil {
-			logger.Error(internal.ErrorInput{Error: err})
-			return 1
-		}
-		defer destination.Abort()
-		writer = destination
 	}
 
 	// a service runs the definition it was created with, which for a datastore
@@ -218,11 +209,33 @@ func (c *ExportCommand) Run(args []string) int {
 		return 1
 	}
 
+	if code, refused := refuseAllDatabases(logger, datastore, c.allDatabases); refused {
+		return code
+	}
+
+	// the destination is created before anything is exported, so a path that
+	// cannot be written fails without exporting a dump only to throw it away.
+	// After the service is resolved rather than before, since whether every
+	// database can be exported depends on the definition it runs, and a refused
+	// export should leave nothing behind at the path.
+	var writer io.Writer = os.Stdout
+	var destination *service.AtomicFile
+	if c.file != "" {
+		destination, err = exportDestination(c.file, c.force)
+		if err != nil {
+			logger.Error(internal.ErrorInput{Error: err})
+			return 1
+		}
+		defer destination.Abort()
+		writer = destination
+	}
+
 	if err := datastore.ExportService(ctx, service.ExportServiceInput{
-		Datastore:   datastore,
-		ServiceName: serviceName,
-		Writer:      writer,
-		ExtraArgs:   extraArgs,
+		Datastore:    datastore,
+		ServiceName:  serviceName,
+		Writer:       writer,
+		ExtraArgs:    extraArgs,
+		AllDatabases: c.allDatabases,
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
@@ -292,4 +305,9 @@ func exportDestination(path string, force bool) (*service.AtomicFile, error) {
 // replace.
 func errExportFileExists(path string) error {
 	return fmt.Errorf("unable to export to %s: the file already exists on the dokku host, pass --force to replace it", path)
+}
+
+// DocumentsFlag reports whether a flag is described for a datastore
+func (c *ExportCommand) DocumentsFlag(name string, data internal.DocumentationData) bool {
+	return documentsAllDatabases(name, data)
 }

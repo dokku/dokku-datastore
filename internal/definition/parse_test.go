@@ -259,6 +259,52 @@ func TestParseRejects(t *testing.T) {
 			expected: `command "reset" cannot take extra arguments`,
 		},
 		{
+			// every database is a form of the dumps alone
+			name:     "every database on a connect",
+			compose:  validCompose + "\n  commands:\n    connect:\n      exec: [thing]\n      all_databases:\n        exec: [thing]\n",
+			expected: `command "connect" cannot declare all_databases`,
+		},
+		{
+			name:     "every database on a custom command",
+			compose:  validCompose + "\n  custom_commands:\n    thing-dump:\n      description: dump\n      exec: [thing]\n      all_databases:\n        exec: [thing]\n",
+			expected: `command "thing-dump" cannot declare all_databases`,
+		},
+		{
+			// a backup is a dump of every database wherever one can be made,
+			// and one nothing can load is no backup
+			name:     "every database exported but not imported",
+			compose:  validCompose + "\n  commands:\n    export:\n      exec: [dump]\n      all_databases:\n        exec: [dump-all]\n    import:\n      stdin: true\n      exec: [load]\n",
+			expected: "export and import must declare all_databases together",
+		},
+		{
+			name:     "every database imported but not exported",
+			compose:  validCompose + "\n  commands:\n    export:\n      exec: [dump]\n    import:\n      stdin: true\n      exec: [load]\n      all_databases:\n        stdin: true\n        exec: [load-all]\n",
+			expected: "export and import must declare all_databases together",
+		},
+		{
+			name:     "every database imported without reading stdin",
+			compose:  validCompose + "\n  commands:\n    export:\n      exec: [dump]\n      all_databases:\n        exec: [dump-all]\n    import:\n      stdin: true\n      exec: [load]\n      all_databases:\n        exec: [load-all]\n",
+			expected: `command "import.all_databases" reads the dump from stdin`,
+		},
+		{
+			// the export-args a service keeps are used by every export, a
+			// backup's of every database included
+			name:     "every database taking extra arguments its export does not",
+			compose:  validCompose + "\n  commands:\n    export:\n      exec: [dump]\n      all_databases:\n        extra_args: true\n        exec: [dump-all]\n    import:\n      stdin: true\n      exec: [load]\n      all_databases:\n        stdin: true\n        exec: [load-all]\n",
+			expected: `command "export" must take extra arguments in its all_databases form exactly when it does itself`,
+		},
+		{
+			name:     "every database within every database",
+			compose:  validCompose + "\n  commands:\n    export:\n      exec: [dump]\n      all_databases:\n        exec: [dump-all]\n        all_databases:\n          exec: [dump-all]\n    import:\n      stdin: true\n      exec: [load]\n      all_databases:\n        stdin: true\n        exec: [load-all]\n",
+			expected: `command "export" declares all_databases inside all_databases`,
+		},
+		{
+			// checked as any other command is
+			name:     "every database with no exec",
+			compose:  validCompose + "\n  commands:\n    export:\n      exec: [dump]\n      all_databases:\n        mode: sidecar\n    import:\n      stdin: true\n      exec: [load]\n      all_databases:\n        stdin: true\n        exec: [load-all]\n",
+			expected: `command "export.all_databases" needs an exec`,
+		},
+		{
 			name:     "reset under custom_commands",
 			compose:  validCompose + "\n  custom_commands:\n    reset:\n      description: reset\n      exec: [thing]\n",
 			expected: "declare it under commands",
@@ -481,6 +527,32 @@ func TestParseKeepsTheEntrypointOfAContainerCommand(t *testing.T) {
 				t.Errorf("expected an empty entrypoint, got %v", entrypoint)
 			}
 		})
+	}
+}
+
+// A definition that can dump every database says so on export, and only one
+// that does is offered the flag.
+func TestParseReadsEveryDatabase(t *testing.T) {
+	parsed, err := parseCompose(t, validCompose+"\n  commands:\n    export:\n      exec: [dump]\n      all_databases:\n        exec: [dump-all]\n    import:\n      stdin: true\n      exec: [load]\n      all_databases:\n        stdin: true\n        exec: [load-all]\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if !parsed.ExportsAllDatabases() {
+		t.Error("expected the definition to export every database")
+	}
+
+	if exec := parsed.Dokku.Commands["export"].AllDatabases.Exec; len(exec) != 1 || exec[0] != "dump-all" {
+		t.Errorf("expected the every-database export to run dump-all, got %q", exec)
+	}
+
+	single, err := parseCompose(t, validCompose+"\n  commands:\n    export:\n      exec: [dump]\n    import:\n      stdin: true\n      exec: [load]\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if single.ExportsAllDatabases() {
+		t.Error("expected a definition with no every-database export not to export every database")
 	}
 }
 

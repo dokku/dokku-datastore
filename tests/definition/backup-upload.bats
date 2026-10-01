@@ -93,6 +93,15 @@ setup() {
     assert_success
   fi
 
+  # a backup holds every database wherever the datastore can export them, so
+  # one an app made beside the service's own comes back with it
+  local restore_flags=()
+  if exports_all_databases; then
+    restore_flags=(--all-databases)
+    run "$probe" write-extra "$SERVICE"
+    assert_success
+  fi
+
   run "$BIN" backup "$PLUGIN" "$SERVICE" "$S3_BUCKET"
   if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
     skip "$PLUGIN does not implement backup"
@@ -113,12 +122,21 @@ setup() {
     run "$probe" clobber "$SERVICE"
     assert_success
   fi
+  if exports_all_databases; then
+    run "$probe" clobber-extra "$SERVICE"
+    assert_success
+  fi
 
-  run "$BIN" import "$PLUGIN" "$SERVICE" --file "$BATS_TEST_TMPDIR/extracted/backup/export" </dev/null
+  run "$BIN" import "$PLUGIN" "$SERVICE" "${restore_flags[@]}" --file "$BATS_TEST_TMPDIR/extracted/backup/export" </dev/null
   assert_success
 
   if [[ -x "$probe" ]]; then
     run --separate-stderr "$probe" read "$SERVICE"
+    assert_success
+    assert_output "known"
+  fi
+  if exports_all_databases; then
+    run --separate-stderr "$probe" read-extra "$SERVICE"
     assert_success
     assert_output "known"
   fi

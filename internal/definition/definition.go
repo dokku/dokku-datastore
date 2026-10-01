@@ -376,6 +376,14 @@ type Command struct {
 	// without a word, so a command that does not declare this refuses them.
 	ExtraArgs bool `yaml:"extra_args"`
 
+	// AllDatabases is the command export and import run in place of their own
+	// when asked for every database in the service rather than the one named for
+	// it. A server can hold databases an app made for itself, and a dump of the
+	// service's own alone leaves them out. Backups run it wherever it is
+	// declared, which is why export and import declare it together or not at
+	// all: a backup nothing can restore is no backup.
+	AllDatabases *Command `yaml:"all_databases"`
+
 	// Description and Arguments document a custom command. The base verbs take
 	// theirs from the tool.
 	Description string     `yaml:"description"`
@@ -585,6 +593,13 @@ func (d Definition) Implements(subcommand string) bool {
 	}
 }
 
+// ExportsAllDatabases reports whether the definition can export, and so import,
+// every database in a service rather than only the one named for it.
+func (d Definition) ExportsAllDatabases() bool {
+	command, ok := d.Dokku.Commands["export"]
+	return ok && command.AllDatabases != nil
+}
+
 // HostRootTemplate is the prefix every bind mount source starts with. It is
 // matched literally rather than rendered, because the path the tool writes to is
 // ServiceRoot while the path in the source is HostRoot, and the two differ on a
@@ -740,6 +755,10 @@ func (d Definition) CommandFor(name string) (Command, bool) {
 	command, ok := d.Dokku.CustomCommands[name]
 	return command, ok
 }
+
+// AllDatabasesSuffix names the every-database form of export and import where
+// commands are addressed by name, as in the checks a definition is parsed with.
+const AllDatabasesSuffix = ".all_databases"
 
 // TriggerFor returns the command a definition declares for a dokku trigger.
 func (d Definition) TriggerFor(name string) (Command, bool) {

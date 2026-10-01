@@ -591,9 +591,15 @@ func (s *Datastore) ConnectToService(ctx context.Context, input ConnectToService
 
 // ExportService writes a dump of the service's data to a writer.
 func (s *Datastore) ExportService(ctx context.Context, input ExportServiceInput) error {
+	command, err := s.dumpCommand("export", input.AllDatabases)
+	if err != nil {
+		return err
+	}
+
 	// the dump is streamed to the writer rather than buffered into a string,
 	// which is what makes it safe for binary data of any size
 	return s.run(ctx, input.ServiceName, "export", runOptions{
+		Command:   command,
 		ExtraArgs: input.ExtraArgs,
 		Stdout:    input.Writer,
 		Stderr:    os.Stderr,
@@ -602,7 +608,13 @@ func (s *Datastore) ExportService(ctx context.Context, input ExportServiceInput)
 
 // ImportService replaces the service's data with what is read from a reader.
 func (s *Datastore) ImportService(ctx context.Context, input ImportServiceInput) error {
+	command, err := s.dumpCommand("import", input.AllDatabases)
+	if err != nil {
+		return err
+	}
+
 	return s.run(ctx, input.ServiceName, "import", runOptions{
+		Command:   command,
 		ExtraArgs: input.ExtraArgs,
 		Stdin:     input.Reader,
 		Stderr:    os.Stderr,
@@ -660,6 +672,46 @@ func (s *Datastore) ImportForUpgrade(ctx context.Context, previous *Datastore, s
 		Stdin:   reader,
 		Stderr:  os.Stderr,
 	})
+}
+
+// ExportsAllDatabases reports whether the definition a service runs can export
+// and import every database in it rather than only the one named for it.
+func (s *Datastore) ExportsAllDatabases() bool {
+	return s.Definition.ExportsAllDatabases()
+}
+
+// dumpCommand is the command export or import runs in place of the one its name
+// resolves to. A dump of the service's own database leaves it to the name; one
+// of every database is a command of its own, which a definition that declares
+// none cannot run.
+func (s *Datastore) dumpCommand(name string, allDatabases bool) (*definition.Command, error) {
+	if !allDatabases {
+		return nil, nil
+	}
+
+	command, ok := s.Definition.CommandFor(name)
+	if !ok || command.AllDatabases == nil {
+		return nil, ErrAllDatabasesUnsupported{
+			Plugin: s.Definition.Dokku.Plugin,
+			Name:   name,
+		}
+	}
+
+	return command.AllDatabases, nil
+}
+
+// ErrAllDatabasesUnsupported is returned for an export or import of every
+// database in a service whose datastore declares no way to make one.
+type ErrAllDatabasesUnsupported struct {
+	// Plugin is the datastore type
+	Plugin string
+
+	// Name is the verb that was asked for every database
+	Name string
+}
+
+func (e ErrAllDatabasesUnsupported) Error() string {
+	return fmt.Sprintf("%s %s does not support --all-databases", e.Plugin, e.Name)
 }
 
 // ResetService deletes all of the service's data, leaving the service, its

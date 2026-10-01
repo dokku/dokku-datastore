@@ -1,6 +1,9 @@
 package commands
 
 import (
+	"fmt"
+
+	"github.com/dokku/dokku-datastore/internal"
 	"github.com/dokku/dokku-datastore/internal/service"
 )
 
@@ -16,4 +19,25 @@ func requireImplemented(datastore *service.Datastore, subcommand string) (int, b
 	}
 
 	return notImplementedExit(), true
+}
+
+// refuseAllDatabases reports the exit code an export or import asked for every
+// database should return when the definition the service runs cannot make or
+// load such a dump, and whether it has to. It is a failure rather than a missing
+// command: the datastore exports and imports, just not every database at once.
+func refuseAllDatabases(logger internal.Ui, datastore *service.Datastore, allDatabases bool) (int, bool) {
+	if !allDatabases || datastore.ExportsAllDatabases() {
+		return 0, false
+	}
+
+	logger.Error(internal.ErrorInput{
+		Error: fmt.Errorf("the %s datastore only exports and imports the database named for the service, so --all-databases is not supported", datastore.Definition.Dokku.Plugin),
+	})
+	return 1, true
+}
+
+// documentsAllDatabases is whether a datastore's help and readme describe
+// --all-databases, which only one that can export every database accepts.
+func documentsAllDatabases(name string, data internal.DocumentationData) bool {
+	return name != "all-databases" || data.AllDatabases
 }

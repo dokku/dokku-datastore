@@ -485,6 +485,40 @@ dokku postgres:export lollipop --file /var/lib/dokku/data/storage/data.dump --fo
 ssh dokku@dokku.me postgres:export lollipop > data.dump
 ```
 
+## Exporting every database in a service
+
+`export` dumped only the database named after the service, but an app can make databases of its own on the same server. Prisma, for one, makes a `prisma` database beside the one it is given. Those databases were left out of every export and every backup, with nothing to say so, and the dump of a service holding its data elsewhere came back empty.
+
+`export` now takes `--all-databases`, which dumps every database in the service rather than only the one named after it, and `import` takes `--all-databases` to load such a dump. Neither is the default. Each database in the dump is replaced under the name it was exported from, and a database the dump does not hold is left alone. The databases the server keeps for itself are not dumped, or are not loaded, so the accounts and passwords of the service it is imported into are left as they were.
+
+```shell
+# every database in the service
+dokku postgres:export lollipop --all-databases > all.dump
+
+# loaded back into the databases it was taken from
+dokku postgres:import lollipop --all-databases < all.dump
+```
+
+postgres, mysql, mariadb, mongo, couchdb and clickhouse take it, which every definition of them declares with `all_databases` on its `export` and `import` commands. redis already dumps every database the server holds, so it refuses the flag, as does a datastore with no `export` at all.
+
+What the dump holds is up to each datastore:
+
+- postgres dumps each database as plain sql rather than in `pg_dump`'s own format, which is loaded with `psql` rather than `pg_restore`. Each database is dropped and made again with the encoding and locale it had, owned by `postgres`, since the dump carries no owners. The templates are left out, as is the `postgres` database unless it is the service's own. `pg_dumpall` is not used, since it dumps the roles too, and loading them would set the `postgres` password back to the one the dump was taken with.
+- mysql and mariadb dump every database but `mysql`, `sys`, `information_schema` and `performance_schema`, as root. Each database is dropped and made again as it is loaded.
+- mongo dumps every database as the admin account. `mongodump` cannot leave a database out of such a dump, so `admin`, `config` and `local` are left out when it is loaded instead.
+- couchdb dumps every database whose name does not start with `_`, keyed by name.
+- clickhouse backs up every database but the ones it keeps for itself, under the names they have, leaving out `default` when it holds no tables. Every database is restored beside the live one before any is swapped in, so an archive that fails to restore leaves them all as they were.
+
+`backup` now always dumps every database wherever the datastore can, so a backup of one of these datastores is restored with `import --all-databases`. A backup made before this change holds only the service's own database, and is still restored without it.
+
+```shell
+dokku postgres:import lollipop --all-databases < backup-folder/export
+```
+
+`clone` still copies only the service's own database. A dump of every database loads each one under the name it was exported from, so the source's database would land beside the clone's own rather than in it.
+
+Arguments after `--`, and the `export-args` and `import-args` properties, are passed on by these dumps as well, a backup's included. They reach the same tools as before, with one exception: postgres loads every database with `psql` rather than `pg_restore`, so its `import-args` are handed to `psql`. postgres passes `export-args` to `pg_dump` once for each database, so a format such as `-Fc` there would leave a backup that cannot be loaded.
+
 ## Resetting a service's data
 
 Emptying a service meant destroying it and creating it again, which needed every linked app unlinked first and handed the new service new credentials, so each app had to be linked again.

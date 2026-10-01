@@ -414,6 +414,40 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		}
 	}
 
+	// every database is a form of the dumps alone. Backups export it wherever
+	// it is declared, so an export without the import that loads it would make
+	// backups nothing can restore, and the two take the same arguments so that
+	// the export-args and import-args a service keeps hold for either form
+	for name, command := range allCommands(definition) {
+		if command.AllDatabases == nil {
+			continue
+		}
+
+		if name != "export" && name != "import" {
+			return fail("command %q cannot declare all_databases; only export and import do", name)
+		}
+
+		if command.AllDatabases.AllDatabases != nil {
+			return fail("command %q declares all_databases inside all_databases", name)
+		}
+
+		if command.AllDatabases.ExtraArgs != command.ExtraArgs {
+			return fail("command %q must take extra arguments in its all_databases form exactly when it does itself", name)
+		}
+	}
+
+	exportCommand, hasExport := definition.Dokku.Commands["export"]
+	importCommand, hasImport := definition.Dokku.Commands["import"]
+	exportsAll := hasExport && exportCommand.AllDatabases != nil
+	importsAll := hasImport && importCommand.AllDatabases != nil
+	if exportsAll != importsAll {
+		return fail("export and import must declare all_databases together, so a dump of every database can be loaded again")
+	}
+
+	if importsAll && !importCommand.AllDatabases.Stdin {
+		return fail("command %q reads the dump from stdin, so it needs stdin: true", "import"+AllDatabasesSuffix)
+	}
+
 	for name, command := range allCommands(definition) {
 		if len(command.Exec) == 0 {
 			return fail("command %q needs an exec", name)
@@ -434,7 +468,7 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 
 		// nothing else passes arguments on, so extra_args anywhere else would
 		// be a setting that does nothing
-		if command.ExtraArgs && name != "export" && name != "import" {
+		if command.ExtraArgs && !takesExtraArgs(name) {
 			return fail("command %q cannot take extra arguments; only export and import do", name)
 		}
 
@@ -625,12 +659,20 @@ func allCommands(definition Definition) map[string]Command {
 		commands["hooks.post_create"] = *definition.Dokku.Hooks.PostCreate
 	}
 
+	// the every-database forms are commands of their own, checked and rendered
+	// as the rest are
 	for name, command := range definition.Dokku.Commands {
 		commands[name] = command
+		if command.AllDatabases != nil {
+			commands[name+AllDatabasesSuffix] = *command.AllDatabases
+		}
 	}
 
 	for name, command := range definition.Dokku.CustomCommands {
 		commands[name] = command
+		if command.AllDatabases != nil {
+			commands[name+AllDatabasesSuffix] = *command.AllDatabases
+		}
 	}
 
 	for name, command := range definition.Dokku.Triggers {
@@ -650,4 +692,15 @@ func allCommands(definition Definition) map[string]Command {
 	}
 
 	return commands
+}
+
+// takesExtraArgs reports whether a command, addressed as allCommands names it,
+// is one an operator's extra arguments are passed on to.
+func takesExtraArgs(name string) bool {
+	switch strings.TrimSuffix(name, AllDatabasesSuffix) {
+	case "export", "import":
+		return true
+	default:
+		return false
+	}
 }

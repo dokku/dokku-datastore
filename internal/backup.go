@@ -88,6 +88,19 @@ const (
 	backupArchiveExport = "backup/export"
 )
 
+// backupExport is the export a backup is made from. It holds every database
+// rather than the one named for the service, wherever the datastore can export
+// them: an app free to make databases of its own on the server would otherwise
+// be backed up without them, with nothing to say so.
+func backupExport(s *service.Datastore, serviceName string, w io.Writer) service.ExportServiceInput {
+	return service.ExportServiceInput{
+		Datastore:    s,
+		ServiceName:  serviceName,
+		Writer:       w,
+		AllDatabases: s.ExportsAllDatabases(),
+	}
+}
+
 // backupArchive writes the tar stream the backup image reads from stdin: the
 // backup directory and the export inside it
 func backupArchive(w io.Writer, exportFile string) error {
@@ -960,11 +973,7 @@ func Backup(ctx context.Context, input BackupInput) error {
 	exportFile := handle.Name()
 	defer os.Remove(exportFile)
 
-	if err := input.Datastore.ExportService(ctx, service.ExportServiceInput{
-		Datastore:   input.Datastore,
-		ServiceName: input.ServiceName,
-		Writer:      handle,
-	}); err != nil {
+	if err := input.Datastore.ExportService(ctx, backupExport(input.Datastore, input.ServiceName, handle)); err != nil {
 		handle.Close()
 		return err
 	}

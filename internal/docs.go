@@ -71,6 +71,10 @@ type DocumentationData struct {
 	ExportArgs bool
 	ImportArgs bool
 
+	// AllDatabases is whether the datastore can export and import every
+	// database in a service, which is also what its backups then hold
+	AllDatabases bool
+
 	// ReservedNames are the service names create and clone refuse, because the
 	// database a service is named after would be one the datastore keeps
 	ReservedNames []string
@@ -162,6 +166,7 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		Title:          input.Datastore.Title(),
 		ExportArgs:     input.Datastore.AcceptsExtraArgs("export"),
 		ImportArgs:     input.Datastore.AcceptsExtraArgs("import"),
+		AllDatabases:   input.Datastore.ExportsAllDatabases(),
 		ReservedNames:  input.Datastore.Definition.Dokku.ReservedNames,
 		Sections:       input.Datastore.Documentation(),
 		Flavors:        documentedFlavors(input.Datastore),
@@ -415,8 +420,13 @@ type DocumentedFlag struct {
 func DocumentedFlags(c PluginCommand, data DocumentationData) ([]DocumentedFlag, error) {
 	flags := []DocumentedFlag{}
 	var err error
+	documenter, filters := c.(FlagDocumenter)
 	c.FlagSet().VisitAll(func(f *flag.Flag) {
 		if err != nil || globalFlags[f.Name] {
+			return
+		}
+
+		if filters && !documenter.DocumentsFlag(f.Name, data) {
 			return
 		}
 
@@ -440,6 +450,14 @@ func DocumentedFlags(c PluginCommand, data DocumentationData) ([]DocumentedFlag,
 	})
 
 	return flags, err
+}
+
+// FlagDocumenter is a command with flags only some datastores accept. A flag it
+// does not document for a datastore is still parsed, and refused when given, but
+// is left out of that datastore's help and readme rather than described as
+// something it can do.
+type FlagDocumenter interface {
+	DocumentsFlag(name string, data DocumentationData) bool
 }
 
 // DocumentedArguments returns the positional arguments a command accepts. The

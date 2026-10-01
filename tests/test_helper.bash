@@ -206,6 +206,12 @@ extra_arg() {
   esac
 }
 
+# whether this definition can export and import every database in a service,
+# which it declares on its export and import alike
+exports_all_databases() {
+  grep -Eq "^      all_databases:\$" "$DEFINITION_ROOT/docker-compose.yml"
+}
+
 # a flag no export or import tool has, to prove extra arguments reach the tool
 # by having it refuse one
 # shellcheck disable=SC2034

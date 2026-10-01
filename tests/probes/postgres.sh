@@ -3,17 +3,21 @@
 # survived rather than only that the service came back up.
 set -eo pipefail
 
-ACTION="${1:?usage: $0 <write|clobber|read|cluster|read-cluster|templates|extension|has-extension|hypertable> <service> [extension]}"
-SERVICE="${2:?usage: $0 <write|clobber|read|cluster|read-cluster|templates|extension|has-extension|hypertable> <service> [extension]}"
+ACTION="${1:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|cluster|read-cluster|templates|extension|has-extension|hypertable> <service> [extension]}"
+SERVICE="${2:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|cluster|read-cluster|templates|extension|has-extension|hypertable> <service> [extension]}"
 CONTAINER="dokku.postgres.$SERVICE"
 PASSWORD="$(cat "$DOKKU_LIB_ROOT/services/postgres/$SERVICE/PASSWORD")"
 # the database the service was created with, which is the service name with
 # anything a datastore would refuse in one replaced, rather than the name itself
 DATABASE="$(cat "$DOKKU_LIB_ROOT/services/postgres/$SERVICE/DATABASE_NAME")"
 
+# the -extra actions do the same in a second database the service holds, which
+# only an export of every database carries
+EXTRA_DATABASE="probe_extra"
+
 sql() {
   docker container exec --env "PGPASSWORD=$PASSWORD" -i "$CONTAINER" \
-    psql -qtAX -h localhost -U postgres -d "$DATABASE" -c "$1"
+    psql -qtAX -h localhost -U postgres -d "${2:-$DATABASE}" -c "$1"
 }
 
 case "$ACTION" in
@@ -25,6 +29,19 @@ clobber)
   ;;
 read)
   sql "SELECT value FROM probe;"
+  ;;
+write-extra)
+  # a database cannot be made inside a transaction, so it is made on its own
+  if [[ -z "$(sql "SELECT 1 FROM pg_database WHERE datname = '$EXTRA_DATABASE';")" ]]; then
+    sql "CREATE DATABASE $EXTRA_DATABASE;" >/dev/null
+  fi
+  sql "CREATE TABLE IF NOT EXISTS probe (value text); DELETE FROM probe; INSERT INTO probe VALUES ('known');" "$EXTRA_DATABASE" >/dev/null
+  ;;
+clobber-extra)
+  sql "UPDATE probe SET value = 'clobbered';" "$EXTRA_DATABASE" >/dev/null
+  ;;
+read-extra)
+  sql "SELECT value FROM probe;" "$EXTRA_DATABASE"
   ;;
 extension)
   # the extension a flavor's image exists to ship, created and then reported

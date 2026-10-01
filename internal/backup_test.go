@@ -1194,3 +1194,40 @@ func TestSetBackupEncryptionKeepsThePassphrasePrivate(t *testing.T) {
 		t.Errorf("expected %s to be %o, got %o", folder, BackupFolderMode, mode)
 	}
 }
+
+// A backup holds every database wherever the datastore can export them, and the
+// single dump it always made wherever it cannot.
+func TestBackupExportCoversEveryDatabase(t *testing.T) {
+	tests := map[string]bool{
+		"clickhouse": true,
+		"couchdb":    true,
+		"mariadb":    true,
+		"mongo":      true,
+		"mysql":      true,
+		"postgres":   true,
+		"redis":      false,
+	}
+
+	for name, expected := range tests {
+		t.Run(name, func(t *testing.T) {
+			datastore, ok := service.Datastores[name]
+			if !ok {
+				t.Fatalf("expected %s to be registered", name)
+			}
+
+			var dump bytes.Buffer
+			input := backupExport(datastore, "lollipop", &dump)
+			if input.AllDatabases != expected {
+				t.Errorf("expected a backup of every database=%t, got %t", expected, input.AllDatabases)
+			}
+
+			if input.ServiceName != "lollipop" || input.Writer != &dump || input.Datastore != datastore {
+				t.Errorf("expected the export of lollipop into the backup's file, got %+v", input)
+			}
+
+			if len(input.ExtraArgs) != 0 {
+				t.Errorf("expected the backup to leave the arguments to the export-args property, got %q", input.ExtraArgs)
+			}
+		})
+	}
+}

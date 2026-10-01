@@ -100,12 +100,47 @@ x-dokku:
       env:
         MYSQL_PWD: "{{ .Secret.root_password }}"
 
+      # every database but the ones the server keeps for itself, whose
+      # accounts and grants would otherwise be loaded over the target's. The
+      # dump drops and makes each database again before loading it, under the
+      # name it was exported from, so it is loaded without naming one.
+      all_databases:
+        extra_args: true
+        exec:
+          - bash
+          - -c
+          - |
+            set -eo pipefail
+            listing="$(mysql --user=root -N -B -e "
+              SELECT schema_name FROM information_schema.schemata
+               WHERE schema_name NOT IN ('mysql', 'sys', 'information_schema', 'performance_schema')
+               ORDER BY schema_name")"
+            mapfile -t databases <<<"$listing"
+            exec mysqldump "$@" --add-drop-database --databases "${databases[@]}"
+          - dokku-mysql-export-all
+          - --default-character-set=utf8mb4
+          - --user=root
+          - --single-transaction
+          - --no-tablespaces
+          - --quick
+          - --set-gtid-purged=OFF
+        env:
+          MYSQL_PWD: "{{ .Secret.root_password }}"
+
     import:
       extra_args: true
       stdin: true
       exec: ["mysql", "--user=root", "{{ .Database }}"]
       env:
         MYSQL_PWD: "{{ .Secret.root_password }}"
+
+      # a dump of every database names each one it loads, so none is named here
+      all_databases:
+        extra_args: true
+        stdin: true
+        exec: ["mysql", "--user=root"]
+        env:
+          MYSQL_PWD: "{{ .Secret.root_password }}"
 
     # the database is dropped and made again with the character set and
     # collation it had, which takes the tables, views, routines, triggers and
