@@ -148,6 +148,33 @@ func TestExposeServiceRefusesAnInvalidPort(t *testing.T) {
 	}
 }
 
+// More ports than a datastore has are refused, and the refusal names the order
+// they are published in, with the tls ports rabbitmq gained last. Fewer are
+// allowed down to its primary port, which an expose written before rabbitmq
+// served tls passes.
+func TestExposeServiceRefusesMorePortsThanTheDatastoreHas(t *testing.T) {
+	datastore := service.Datastores["rabbitmq"]
+	withPortFile(t, datastore, "lollipop", nil)
+
+	err := ExposeService(context.Background(), ExposeServiceInput{
+		Datastore:   datastore,
+		Ports:       []string{"1", "2", "3", "4", "5", "6", "7"},
+		ServiceName: "lollipop",
+	})
+	if err == nil {
+		t.Fatal("expected seven ports to be refused")
+	}
+
+	expected := "7 ports to be exposed need to be provided in the following order: 5672,4369,35197,15672,5671,15671"
+	if err.Error() != expected {
+		t.Errorf("expected %q, got %q", expected, err)
+	}
+
+	if IsExposed(datastore, "lollipop") {
+		t.Error("expected no port file after the refusal")
+	}
+}
+
 func ptr(s string) *string {
 	return &s
 }

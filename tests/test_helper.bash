@@ -327,6 +327,46 @@ rebuild_service() {
   "$BIN" start "$PLUGIN" "${1:-$SERVICE}"
 }
 
+# whether this definition encrypts its connections, which every one that does
+# says by handing its certificate out
+serves_tls() {
+  grep -q '^    certificate:' "$DEFINITION_ROOT/docker-compose.yml"
+}
+
+# puts the certificate on stdin where a client in the service's container can
+# verify the server with it
+trust() {
+  docker container exec -i "$(service_container "$1")" sh -c 'cat > /tmp/trusted.crt'
+}
+
+# a tls handshake with a port, made from inside the service's container and
+# verified against the certificate it was last handed to trust. For a server
+# that speaks tls from the first byte, which postgres does not
+tls_handshake() {
+  docker container exec "$(service_container "$2")" sh -c \
+    "openssl s_client -connect localhost:$1 -CAfile /tmp/trusted.crt -verify_return_error </dev/null"
+}
+
+# what a rabbitmq port answers an amqp client's greeting with, in plain text.
+# The broker replies with the properties it starts a connection with, its
+# product name among them
+amqp_greeting() {
+  # shellcheck disable=SC2016
+  docker container exec "$(service_container "$2")" bash -c '
+    exec 3<>"/dev/tcp/127.0.0.1/$1"
+    printf "AMQP\x00\x00\x09\x01" >&3
+    timeout 5 head -c 512 <&3 | tr -cd "[:print:]"
+  ' _ "$1"
+}
+
+# the status an http client beside the service gets for a url. Certificates are
+# not checked here, since the one a service makes names no host: tls_handshake
+# is what verifies it
+http_status() {
+  docker container run --rm --network "container:$(service_container "$2")" curlimages/curl:8.16.0 \
+    -ks -o /dev/null -w '%{http_code}' "$1"
+}
+
 # the mode of a file or folder, as octal permission bits
 assert_mode() {
   local expected="$1" path="$2" mode

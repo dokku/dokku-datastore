@@ -180,6 +180,28 @@ psql "postgres://postgres:<password>@db.example.com:5432/lollipop?sslmode=verify
 
 The certificate names no host, so `verify-full` fails where `verify-ca` succeeds. It is made once and kept when the service is rebuilt or upgraded. A certificate of your own is written over the service's `certs/server.crt` and `certs/server.key` as root, which keeps the owner and mode the server needs to read its key, and is served once the service is restarted.
 
+## Encrypted rabbitmq connections
+
+Rabbitmq serves tls on its own ports, 5671 for amqps and 15671 for the management interface over https, rather than on the ones it listens on in plain text. A service had no certificate to serve, a certificate copied into its data directory before `create` stopped the service being created, and the settings that turn tls on had to be written into its `ENV` by hand and the container removed for them to be read.
+
+Every rabbitmq service is now created with a self-signed certificate, as a postgres service is, and serves amqps and https beside its plain listeners. A linked app keeps the `amqp://` dsn it was given, and a client asks for an encrypted connection by connecting to a tls port. `certificate` prints the certificate, read from the running container, and the plugin readme explains how a client verifies the server with it.
+
+```shell
+# the certificate a client verifies the server with
+dokku-datastore invoke rabbitmq certificate lollipop > server.crt
+```
+
+The certificate names no host, so a client verifies it against the certificate rather than the hostname it connects to. It is made once and kept when the service is rebuilt or upgraded, and one of your own is written over `certs/server.crt` and `certs/server.key` as root and served once the service is restarted. The settings that turn tls on are seeded once into `config/tls.conf`, which rabbitmq reads beside the operator's own `rabbitmq.conf`, and find the certificate wherever its volume is mounted.
+
+A service created before this has no certificate and serves no tls until its container is next made. A `stop` and a `start` make it, as does an `upgrade`; a `restart` starts the container the service already has, which was made without tls. The certificate and the settings are made then, and the service's data is left as it was.
+
+```shell
+dokku rabbitmq:stop lollipop
+dokku rabbitmq:start lollipop
+```
+
+A service exposed before this keeps the four ports it was exposed on, and its tls ports are left unexposed until it is exposed again.
+
 ## Postgres database encoding and locale
 
 The bash plugin made a postgres service's database itself with `createdb -E utf8`. A custom env that set the locale to `C`, such as `LC_ALL=C`, had the image make its template databases in `SQL_ASCII`, which refused a utf8 copy, and the error was swallowed, so the service was created without its database. There was also no way to ask for a utf8 database with the `C` collation some applications require.
@@ -692,6 +714,21 @@ dokku graphite:expose lollipop 8125 8126 8080 8081 2003
 
 # a service exposed before this picks it up without a restart
 dokku graphite:reexpose lollipop
+```
+
+### A definition that gains a port
+
+A service's port file holds a host port for each port its definition had when it was exposed, in their order. A definition adds a port at the end of its list, so a service exposed before that holds fewer host ports than the definition has ports. Starting such a service through an ambassador used to fail outright - `port file ... holds 4 ports, expected 6` - leaving none of its ports published, and its `exposed-dsn` was empty.
+
+The ports it holds are now published where they were and the new ones are left unexposed, as a service exposed directly already did, and `exposed-dsn` is reported so long as the port it names is exposed. `expose` takes fewer ports than the definition has as well, down to its primary port, so an `expose` written for a datastore before it gained a port keeps working. More ports than the definition has are still refused. A service is exposed on every port by exposing it again.
+
+```shell
+# exposed on the four ports rabbitmq had before it served tls
+dokku rabbitmq:expose lollipop 5672 4369 35197 15672
+
+# and on its tls ports as well
+dokku rabbitmq:unexpose lollipop
+dokku rabbitmq:expose lollipop
 ```
 
 ### Limiting where and to whom a service is exposed

@@ -372,11 +372,20 @@ func TestExposedURL(t *testing.T) {
 			expected:  "redis://:secret@dokku.me:33202",
 		},
 		{
-			name:      "fewer ports than the datastore declares",
+			name:      "fewer ports than the datastore declares, missing the one the dsn names",
 			datastore: dsnSecondPortDatastore(t),
 			portFile:  ptr("33201\n"),
 			vhost:     ptr("dokku.me\n"),
 			expected:  "",
+		},
+		{
+			// exposed before rabbitmq served tls, so its tls ports come after
+			// the ones the port file holds and are not exposed
+			name:      "fewer ports than the datastore declares, holding the one the dsn names",
+			datastore: Datastores["rabbitmq"],
+			portFile:  ptr("33201 33202 33203 33204\n"),
+			vhost:     ptr("dokku.me\n"),
+			expected:  "amqp://lollipop:secret@dokku.me:33201/lollipop",
 		},
 		{
 			name:      "a database in the dsn",

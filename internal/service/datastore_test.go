@@ -526,6 +526,7 @@ func TestBindDirectoriesLeaveAFileToWhatMakesIt(t *testing.T) {
 		directory string
 	}{
 		{datastore: "rabbitmq", file: "/config/rabbitmq.conf", directory: "/config"},
+		{datastore: "rabbitmq", file: "/config/tls.conf", directory: "/config"},
 		{datastore: "graphite", file: "/data/graphite-web/graphite.db", directory: "/data/graphite-web"},
 	} {
 		t.Run(test.datastore, func(t *testing.T) {
@@ -547,16 +548,29 @@ func TestBindDirectoriesLeaveAFileToWhatMakesIt(t *testing.T) {
 	}
 }
 
+// rabbitmqWithoutHooks is rabbitmq with its pre_create hook taken away. The
+// hook makes the certificate in a container, and these tests are about what is
+// made on the host before it runs.
+func rabbitmqWithoutHooks(t *testing.T) *Datastore {
+	t.Helper()
+
+	rabbitmq, ok := Datastores["rabbitmq"]
+	if !ok {
+		t.Fatal("expected rabbitmq to be registered")
+	}
+
+	copied := *rabbitmq
+	copied.Definition.Dokku.Hooks.PreCreate = nil
+	return &copied
+}
+
 // A service made before a definition bound something new has nothing there,
 // and one made by an earlier release has a directory where its config file
 // belongs. Either is put right before a container is made on it, rather than
 // left for docker to make a directory of, which for a file stops the container
 // starting at all.
 func TestEnsureBindSourcesMakesWhatIsMissing(t *testing.T) {
-	rabbitmq, ok := Datastores["rabbitmq"]
-	if !ok {
-		t.Fatal("expected rabbitmq to be registered")
-	}
+	rabbitmq := rabbitmqWithoutHooks(t)
 
 	root := withServiceRoot(t, rabbitmq, "lollipop")
 	config := filepath.Join(root, "config", "rabbitmq.conf")
@@ -582,6 +596,18 @@ func TestEnsureBindSourcesMakesWhatIsMissing(t *testing.T) {
 		t.Errorf("expected the data directory to be made, got %v and %v", info, err)
 	}
 
+	// a service made before rabbitmq served tls has neither of these. The
+	// certificate is made in them by the hook, which needs docker and is
+	// covered by the migration bats tests rather than here
+	if info, err := os.Stat(filepath.Join(root, "certs")); err != nil || !info.IsDir() {
+		t.Errorf("expected the certs directory to be made, got %v and %v", info, err)
+	}
+
+	tls, err := os.ReadFile(filepath.Join(root, "config", "tls.conf"))
+	if err != nil || !strings.Contains(string(tls), "listeners.ssl.default = 5671") {
+		t.Errorf("expected the tls config to be seeded, got %q and %v", tls, err)
+	}
+
 	// what an operator put there since is theirs, and is left alone
 	if err := os.WriteFile(config, []byte("edited\n"), 0644); err != nil {
 		t.Fatalf("unable to edit the config: %s", err)
@@ -599,10 +625,7 @@ func TestEnsureBindSourcesMakesWhatIsMissing(t *testing.T) {
 // A directory where a file belongs that has something in it is not the empty
 // one an earlier release made, so it is reported rather than removed.
 func TestEnsureBindSourcesLeavesADirectoryWithSomethingInIt(t *testing.T) {
-	rabbitmq, ok := Datastores["rabbitmq"]
-	if !ok {
-		t.Fatal("expected rabbitmq to be registered")
-	}
+	rabbitmq := rabbitmqWithoutHooks(t)
 
 	root := withServiceRoot(t, rabbitmq, "lollipop")
 	config := filepath.Join(root, "config", "rabbitmq.conf")

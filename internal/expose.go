@@ -71,7 +71,11 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 		}
 	}
 
-	if len(input.Ports) != len(input.Datastore.Properties().Ports) {
+	// fewer ports than the definition has are allowed, so long as they reach
+	// its primary port: they are published on the definition's first ports, and
+	// the rest are left unexposed. That keeps an expose written for a datastore
+	// before it gained a port working, the same as a port file written then
+	if service.CheckExposedPortCount(input.Datastore, len(input.Ports)) != nil {
 		var ports []string
 		for _, port := range input.Datastore.Properties().Ports {
 			ports = append(ports, fmt.Sprintf("%d", port))
