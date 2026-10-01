@@ -912,6 +912,32 @@ func (c *PromoteCommand) Group() string {
 
 // Description returns the one line description of the command, in the idiom of the
 // plugin rather than of the binary
+func (c *ResetCommand) Description() string {
+	return `delete all data in the {{.Title}} service, keeping the service and its links`
+}
+
+// Usage returns the argument sketch rendered after the command name
+func (c *ResetCommand) Usage() string {
+	return `<service> [-f|--force]`
+}
+
+// Documentation returns the long form documentation for the command
+func (c *ResetCommand) Documentation() string {
+	return `delete all data in the service, leaving it as empty as a newly created one.
+the service, its credentials, and the apps it is linked to are kept, so linked apps do not need to be relinked.
+connections the apps hold open may be closed.
+dokku {{.CommandPrefix}}:reset lollipop
+the service name is asked for before anything is deleted, unless --force is given
+dokku {{.CommandPrefix}}:reset lollipop --force`
+}
+
+// Group is the readme usage section the command is documented under
+func (c *ResetCommand) Group() string {
+	return definition.GroupDataManagement
+}
+
+// Description returns the one line description of the command, in the idiom of the
+// plugin rather than of the binary
 func (c *RestartCommand) Description() string {
 	return `graceful shutdown and restart of the {{.Title}} service container`
 }

@@ -526,7 +526,7 @@ func (d Definition) Implements(subcommand string) bool {
 	_, hasImport := d.Dokku.Commands["import"]
 
 	switch subcommand {
-	case "connect", "export", "import":
+	case "connect", "export", "import", "reset":
 		_, ok := d.Dokku.Commands[subcommand]
 		return ok
 	case "clone":
@@ -686,6 +686,7 @@ var BaseCommands = map[string]bool{
 	"connect": true,
 	"export":  true,
 	"import":  true,
+	"reset":   true,
 }
 
 // CommandFor returns a command by name, base or custom.

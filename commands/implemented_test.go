@@ -61,6 +61,19 @@ func TestRequireImplemented(t *testing.T) {
 			unimplemented: true,
 		},
 		{
+			// how a datastore's data is deleted is the definition's to say, so
+			// a reset is not assumed for one that says nothing
+			name:          "a reset the datastore does not declare",
+			datastore:     withoutVerbs(t),
+			subcommand:    "reset",
+			unimplemented: true,
+		},
+		{
+			name:       "a declared reset",
+			datastore:  service.Datastores["redis"],
+			subcommand: "reset",
+		},
+		{
 			// the backup family is built on export, which is what the backup
 			// path actually calls
 			name:          "the backup family without an export",

@@ -361,6 +361,7 @@ func TestCouchdbSidecarImageIsOnePluginShips(t *testing.T) {
 	commands := map[string]definition.Command{
 		"export":            couchdb.Dokku.Commands["export"],
 		"import":            couchdb.Dokku.Commands["import"],
+		"reset":             couchdb.Dokku.Commands["reset"],
 		"hooks.post_create": *couchdb.Dokku.Hooks.PostCreate,
 	}
 
@@ -1123,6 +1124,104 @@ func TestRethinkdbOffersNothingItCannotDo(t *testing.T) {
 	// to generate and none in the url
 	if len(rethinkdb.Dokku.Secrets) != 0 {
 		t.Errorf("expected no secrets, got %v", rethinkdb.Dokku.Secrets)
+	}
+
+	// the queries a reset needs go through the administrative endpoint, which
+	// needs no client
+	if !rethinkdb.Implements("reset") {
+		t.Error("expected rethinkdb to implement reset")
+	}
+}
+
+// Every datastore that keeps data can have it deleted. nats and pushpin keep
+// none - nats holds no messages without jetstream, and pushpin only proxies - so
+// a reset of either would be a restart, and they say so by leaving it out.
+func TestEveryDatastoreWithDataCanBeReset(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	stateless := map[string]bool{"nats": true, "pushpin": true}
+	for _, name := range loaded.Names() {
+		t.Run(name, func(t *testing.T) {
+			parsed, _ := loaded.Definition(name)
+			if implements := parsed.Implements("reset"); implements == stateless[parsed.Dokku.Plugin] {
+				t.Errorf("expected reset to be implemented=%t, got %t", !stateless[parsed.Dokku.Plugin], implements)
+			}
+		})
+	}
+}
+
+// A reset is written once and copied to every definition that runs it, since a
+// definition embeds what it runs rather than pointing at another's. A copy that
+// drifted would leave one major or flavor deleting its data differently.
+func TestResetsAreTheSameWhereTheDatastoreIs(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	resetScript := func(name string) string {
+		t.Helper()
+
+		parsed, ok := loaded.Definition(name)
+		if !ok {
+			t.Fatalf("expected a %s definition", name)
+		}
+
+		reset, ok := parsed.Dokku.Commands["reset"]
+		if !ok {
+			t.Fatalf("expected %s to declare a reset", name)
+		}
+
+		// the script, without the label and the arguments after it
+		if len(reset.Exec) < 3 || reset.Exec[0] != "sh" {
+			t.Fatalf("expected %s to reset with an inline script, got %q", name, reset.Exec)
+		}
+
+		return reset.Exec[2]
+	}
+
+	rootfsScript := func(name string, path string) string {
+		t.Helper()
+
+		parsed, ok := loaded.Definition(name)
+		if !ok {
+			t.Fatalf("expected a %s definition", name)
+		}
+
+		contents, ok := parsed.Rootfs[path]
+		if !ok {
+			t.Fatalf("expected %s to ship %s", name, path)
+		}
+
+		return string(contents)
+	}
+
+	postgres := loaded.NamesFor("postgres")
+	if len(postgres) != 8 {
+		t.Errorf("expected eight postgres definitions, got %v", postgres)
+	}
+	for _, name := range postgres[1:] {
+		if resetScript(name) != resetScript(postgres[0]) {
+			t.Errorf("expected %s to reset as %s does", name, postgres[0])
+		}
+	}
+
+	if resetScript("mariadb") != resetScript("mysql") {
+		t.Error("expected mariadb to reset as mysql does")
+	}
+
+	elasticsearch := loaded.NamesFor("elasticsearch")
+	if len(elasticsearch) != 3 {
+		t.Errorf("expected three elasticsearch definitions, got %v", elasticsearch)
+	}
+	for _, name := range elasticsearch[1:] {
+		path := "usr/local/bin/dokku-elasticsearch-reset"
+		if rootfsScript(name, path) != rootfsScript(elasticsearch[0], path) {
+			t.Errorf("expected %s to reset as %s does", name, elasticsearch[0])
+		}
 	}
 }
 

@@ -56,7 +56,7 @@ var readmeSections = []struct {
 		Group:    definition.GroupDataManagement,
 		Title:    "Data Management",
 		Intro:    []string{"The underlying service data can be imported and exported with the following commands:"},
-		Commands: []string{"import", "export"},
+		Commands: []string{"import", "export", "reset"},
 	},
 	{
 		Group: definition.GroupBackups,

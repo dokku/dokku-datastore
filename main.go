@@ -125,6 +125,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"readme": func() (cli.Command, error) {
 			return &commands.ReadmeCommand{Meta: meta, CommandFunc: Commands}, nil
 		},
+		"reset": func() (cli.Command, error) {
+			return &commands.ResetCommand{Meta: meta}, nil
+		},
 		"restart": func() (cli.Command, error) {
 			return &commands.RestartCommand{Meta: meta}, nil
 		},

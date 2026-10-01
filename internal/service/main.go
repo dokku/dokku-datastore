@@ -117,6 +117,15 @@ type ImportServiceInput struct {
 	ExtraArgs []string
 }
 
+// ResetServiceInput is the input for the ResetService function
+type ResetServiceInput struct {
+	// Datastore is the service to reset
+	Datastore *Datastore
+
+	// ServiceName is the name of the service to reset
+	ServiceName string
+}
+
 var (
 	// PluginDataRoot is the root of the plugin data
 	PluginDataRoot string
