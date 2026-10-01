@@ -361,6 +361,22 @@ func TestParseReadsAnUpgrade(t *testing.T) {
 	if step.Image != "thing-upgrade:1-to-2" || step.Env["OLD"] != "/service/{{ .PreviousData }}" {
 		t.Errorf("expected the step as declared, got %+v", step)
 	}
+
+	if parsed.Dokku.Upgrade.Export != nil || parsed.Dokku.Upgrade.Import != nil {
+		t.Error("expected no export and import of its own")
+	}
+
+	parsed, err = parseCompose(t, migratingCompose+"    export:\n      exec: [dumpall]\n    import:\n      stdin: true\n      exec: [restoreall]\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if parsed.Dokku.Upgrade.Export == nil || parsed.Dokku.Upgrade.Export.Exec[0] != "dumpall" {
+		t.Errorf("expected the export as declared, got %+v", parsed.Dokku.Upgrade.Export)
+	}
+	if parsed.Dokku.Upgrade.Import == nil || !parsed.Dokku.Upgrade.Import.Stdin {
+		t.Errorf("expected the import as declared, got %+v", parsed.Dokku.Upgrade.Import)
+	}
 }
 
 func TestParseRejectsABrokenUpgrade(t *testing.T) {
@@ -398,6 +414,21 @@ func TestParseRejectsABrokenUpgrade(t *testing.T) {
 			name:     "the previous data named outside an upgrade step",
 			compose:  strings.Replace(migratingCompose, "      exec: [dump]", `      exec: [dump, "{{ .PreviousData }}"]`, 1),
 			expected: "only x-dokku.upgrade.from steps are given",
+		},
+		{
+			name:     "a migration export with no import",
+			compose:  migratingCompose + "    export:\n      exec: [dumpall]\n",
+			expected: "are declared together",
+		},
+		{
+			name:     "a migration import that reads nothing",
+			compose:  migratingCompose + "    export:\n      exec: [dumpall]\n    import:\n      exec: [restoreall]\n",
+			expected: "needs stdin: true",
+		},
+		{
+			name:     "a migration export on a definition that does not migrate",
+			compose:  validCompose + "  upgrade:\n    export:\n      exec: [dumpall]\n    import:\n      stdin: true\n      exec: [restoreall]\n",
+			expected: "x-dokku.upgrade.export needs x-dokku.upgrade.migrate",
 		},
 		{
 			name:     "a volume on a command exec'd into the service",

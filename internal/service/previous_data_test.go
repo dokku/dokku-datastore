@@ -105,3 +105,31 @@ func TestPreviousDataDirectoriesOnlyListsWhatAnUpgradeKept(t *testing.T) {
 		t.Errorf("expected a missing root to have nothing kept aside, got %v (%v)", missing, err)
 	}
 }
+
+// A migration uses the export and import declared for it only when the
+// definition it leaves declares the one and the definition it lands on the
+// other, since only then is what is written known to be what is read.
+func TestCarriesDataTo(t *testing.T) {
+	seventeen, err := Datastores["postgres"].WithDefinitionNamed("postgres-17")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	eighteen, err := Datastores["postgres"].WithDefinitionNamed("postgres-18")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if !seventeen.CarriesDataTo(eighteen) || !eighteen.CarriesDataTo(seventeen) {
+		t.Error("expected postgres definitions to carry their data to each other")
+	}
+
+	without := *eighteen
+	without.Definition.Dokku.Upgrade.Import = nil
+	if seventeen.CarriesDataTo(&without) {
+		t.Error("expected a definition with no import of its own to take the import subcommand")
+	}
+
+	if !without.CarriesDataTo(seventeen) {
+		t.Error("expected the export to still be used where the other definition imports it")
+	}
+}

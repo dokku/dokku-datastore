@@ -430,6 +430,16 @@ type Upgrade struct {
 	// definition and imported into this one, unless a From step does it first.
 	Migrate bool `yaml:"migrate"`
 
+	// Export and Import carry a service's data between two definitions in
+	// place of the export and import subcommands, which dump what an operator
+	// asks for rather than everything the service holds: postgres's dump one
+	// database, and a migration has to carry every database and role. They are
+	// declared together, and used when the definition a service is moved off
+	// declares Export and the one it is moved onto declares Import, so that
+	// what one writes is what the other reads.
+	Export *Command `yaml:"export"`
+	Import *Command `yaml:"import"`
+
 	// From are the steps that migrate the data in place, keyed by the exact
 	// definition the service is moved off. Each runs in a container of its own
 	// with the service down, and can name the directory the old data was moved

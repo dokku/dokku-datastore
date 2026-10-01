@@ -104,6 +104,69 @@ x-dokku:
   upgrade:
     migrate: true
 
+    # every database and role the cluster holds, rather than the one database
+    # the export subcommand dumps, so that nothing an app or an operator made
+    # beside it is left behind in the data kept aside. --clean drops what the
+    # new cluster made of its own before it is made again from the dump.
+    export:
+      exec: ["pg_dumpall", "-h", "localhost", "-U", "postgres", "-w", "--clean", "--if-exists"]
+      env:
+        PGPASSWORD: "{{ .Secret.password }}"
+
+    # the dump is replayed from the maintenance database, which pg_dumpall
+    # drops and makes again from whichever database it last connected to. The
+    # superuser it is replayed as already exists and cannot be dropped, so the
+    # two statements that would try are left out of the roles at the top of the
+    # dump, before its first \connect and so before any of its rows.
+    #
+    # timescaledb's catalog has to be restored with its workers stopped and
+    # its triggers off, which timescaledb_pre_restore does for a database. The
+    # dump drops and makes every database again, so restoring is also turned on
+    # for the whole server until the dump is in, and each database is told the
+    # restore is over afterwards. Every postgres definition carries the same
+    # text, which a test holds them to, and the timescaledb steps do nothing on
+    # an image without the extension.
+    import:
+      stdin: true
+      exec:
+        - sh
+        - -c
+        - |
+          set -e
+          sql() {
+            psql -h localhost -U postgres -w -qtAX -v ON_ERROR_STOP=1 -d "$1"
+          }
+          databases() {
+            echo "SELECT datname FROM pg_database WHERE datallowconn ORDER BY datname;" | sql postgres
+          }
+          timescaledb="$(echo "SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb';" | sql postgres)"
+          if [ -n "$timescaledb" ]; then
+            echo "ALTER SYSTEM SET timescaledb.restoring = on;" | sql postgres >/dev/null
+            echo "SELECT pg_reload_conf();" | sql postgres >/dev/null
+            for database in $(databases); do
+              echo "SELECT timescaledb_pre_restore() FROM pg_extension WHERE extname = 'timescaledb';" | sql "$database" >/dev/null
+            done
+          fi
+          status=0
+          awk -v user=postgres '
+            /^\\connect / { connected = 1 }
+            !connected && ($0 == "CREATE ROLE " user ";" || $0 == "DROP ROLE IF EXISTS " user ";") { next }
+            { print }
+          ' | psql -h localhost -U postgres -w -q -v ON_ERROR_STOP=1 -d postgres >/dev/null || status=$?
+          if [ -n "$timescaledb" ]; then
+            echo "ALTER SYSTEM RESET timescaledb.restoring;" | sql postgres >/dev/null
+            echo "SELECT pg_reload_conf();" | sql postgres >/dev/null
+            for database in $(databases); do
+              echo "SELECT timescaledb_post_restore() FROM pg_extension WHERE extname = 'timescaledb';" | sql "$database" >/dev/null
+              echo "ALTER DATABASE \"$database\" RESET timescaledb.restoring;" | sql "$database" >/dev/null
+            done
+          fi
+          exit "$status"
+        - dokku-postgres-upgrade-import
+      env:
+        PGPASSWORD: "{{ .Secret.password }}"
+        PGOPTIONS: "-c client_min_messages=warning"
+
   # the certificate the server was started with, so that a client off the host
   # can verify it is talking to this service. Read from the running container
   # rather than the host, which keeps it following a moved certs volume
@@ -184,7 +247,7 @@ x-dokku:
         the linked apps are stopped while the data is copied, so the upgrade has to be given '--restart-apps':
         dokku {{.CommandPrefix}}:upgrade lollipop --definition postgres-18 --restart-apps
         from 17 to 18 on the official image the data is copied with 'pg_upgrade', which needs as much free disk as the data takes up.
-        every other move exports the database from the old version and imports it into the new one.
+        every other move exports every database and role from the old version with 'pg_dumpall' and replays it into the new one.
         a move that fails puts the service back on the version it ran, with the data it had.
         the old data is kept in a 'data.<definition>.<timestamp>' directory beside the service's data, and is removed once the upgrade is confirmed:
         dokku {{.CommandPrefix}}:upgrade-cleanup lollipop

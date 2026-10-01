@@ -380,6 +380,21 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		return fail("x-dokku.upgrade.migrate needs an export and an import to carry the data across")
 	}
 
+	// what one definition's export writes is only known to be what another's
+	// import reads when both are declared, and a definition that declares
+	// neither still has the export and import subcommands to fall back to
+	if (upgrade.Export == nil) != (upgrade.Import == nil) {
+		return fail("x-dokku.upgrade.export and x-dokku.upgrade.import are declared together, since a migration uses one definition's export with another's import")
+	}
+
+	if upgrade.Export != nil && !upgrade.Migrate {
+		return fail("x-dokku.upgrade.export needs x-dokku.upgrade.migrate, since only a migration runs it")
+	}
+
+	if upgrade.Import != nil && !upgrade.Import.Stdin {
+		return fail("x-dokku.upgrade.import reads what the export wrote, so it needs stdin: true")
+	}
+
 	// the data volume is what a migration moves aside and starts empty again
 	if upgrade.Migrate && !seenKey["data"] {
 		return fail("x-dokku.upgrade.migrate moves the data volume aside, so it needs a volume mounted from {{ .HostRoot }}/data")
@@ -624,6 +639,14 @@ func allCommands(definition Definition) map[string]Command {
 
 	for name, command := range definition.Dokku.Upgrade.From {
 		commands["upgrade.from."+name] = command
+	}
+
+	if definition.Dokku.Upgrade.Export != nil {
+		commands["upgrade.export"] = *definition.Dokku.Upgrade.Export
+	}
+
+	if definition.Dokku.Upgrade.Import != nil {
+		commands["upgrade.import"] = *definition.Dokku.Upgrade.Import
 	}
 
 	return commands

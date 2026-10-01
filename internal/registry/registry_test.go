@@ -2162,3 +2162,35 @@ func TestEveryMigratingDefinitionCleansUpTheSameWay(t *testing.T) {
 		t.Errorf("expected the cleanup to match only the directories an upgrade keeps, got %q", script)
 	}
 }
+
+// A migration between postgres definitions carries every database and role, so
+// every one of them dumps the whole cluster and replays it the same way: the
+// export of one is the import of any other.
+func TestPostgresMigratesTheWholeCluster(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	names := loaded.NamesFor("postgres")
+	first, _ := loaded.Definition(names[0])
+	for _, name := range names {
+		found, _ := loaded.Definition(name)
+		upgrade := found.Dokku.Upgrade
+		if upgrade.Export == nil || upgrade.Import == nil {
+			t.Fatalf("expected %s to declare an export and an import for a migration", name)
+		}
+
+		if upgrade.Export.Exec[0] != "pg_dumpall" {
+			t.Errorf("expected %s to dump the whole cluster, got %q", name, upgrade.Export.Exec)
+		}
+
+		if strings.Join(upgrade.Export.Exec, " ") != strings.Join(first.Dokku.Upgrade.Export.Exec, " ") {
+			t.Errorf("expected %s to export as %s does", name, names[0])
+		}
+
+		if strings.Join(upgrade.Import.Exec, "\n") != strings.Join(first.Dokku.Upgrade.Import.Exec, "\n") {
+			t.Errorf("expected %s to import as %s does", name, names[0])
+		}
+	}
+}

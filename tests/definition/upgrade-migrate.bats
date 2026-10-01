@@ -76,8 +76,18 @@ flavor_extension() {
     assert_success
     assert_output "$extension"
   fi
+  if [[ "$extension" == "timescaledb" ]]; then
+    run --separate-stderr "$(probe_path)" hypertable "$SERVICE"
+    assert_success
+    assert_output "probe_metrics"
+  fi
 
   run "$(probe_path)" write "$SERVICE"
+  assert_success
+
+  # a role and a database beside the service's own, which the export
+  # subcommand alone would leave behind
+  run "$(probe_path)" cluster "$SERVICE"
   assert_success
 
   run --separate-stderr "$BIN" upgrade "$PLUGIN" "$SERVICE" --definition "$NEXT_DEFINITION" --restart-apps
@@ -93,12 +103,24 @@ flavor_extension() {
     assert_output --partial "Importing the data"
   fi
 
+  # a timescaledb whose catalog did not come back whole would refuse this, and
+  # one left restoring would run no jobs
+  if [[ "$extension" == "timescaledb" ]]; then
+    run --separate-stderr "$(probe_path)" hypertable "$SERVICE"
+    assert_success
+    assert_output "probe_metrics"
+  fi
+
   run cat "$(service_root)/DEFINITION"
   assert_output "$NEXT_DEFINITION"
 
   run --separate-stderr "$(probe_path)" read "$SERVICE"
   assert_success
   assert_output "known"
+
+  run --separate-stderr "$(probe_path)" read-cluster "$SERVICE"
+  assert_success
+  assert_output "probe_role:other"
 
   if [[ -n "$extension" ]]; then
     run --separate-stderr "$(probe_path)" has-extension "$SERVICE" "$extension"

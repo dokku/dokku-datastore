@@ -152,7 +152,7 @@ func migrateOnce(ctx context.Context, input migrateServiceInput, plan migration)
 	// data it is a copy of
 	dump := ""
 	if plan == migrationExport {
-		staged, err := stageExport(ctx, upgrade)
+		staged, err := stageExport(ctx, upgrade, input.Target)
 		if err != nil {
 			return fmt.Errorf("unable to export %s: %w", upgrade.ServiceName, err)
 		}
@@ -217,11 +217,7 @@ func migrateOnto(ctx context.Context, input migrateServiceInput, plan migration,
 	}
 	defer reader.Close()
 
-	if err := input.Target.ImportService(ctx, service.ImportServiceInput{
-		Datastore:   input.Target,
-		Reader:      reader,
-		ServiceName: upgrade.ServiceName,
-	}); err != nil {
+	if err := input.Target.ImportForUpgrade(ctx, input.Upgrade.Datastore, upgrade.ServiceName, reader); err != nil {
 		return fmt.Errorf("unable to import into %s: %w", upgrade.ServiceName, err)
 	}
 
@@ -231,7 +227,7 @@ func migrateOnto(ctx context.Context, input migrateServiceInput, plan migration,
 // stageExport exports a service into a private file under its service root,
 // starting the service first if it is not running, since an export reads from
 // the running service.
-func stageExport(ctx context.Context, upgrade UpgradeServiceInput) (string, error) {
+func stageExport(ctx context.Context, upgrade UpgradeServiceInput, target *service.Datastore) (string, error) {
 	if err := service.Start(ctx, service.StartInput{
 		Datastore:   upgrade.Datastore,
 		ServiceName: upgrade.ServiceName,
@@ -256,11 +252,7 @@ func stageExport(ctx context.Context, upgrade UpgradeServiceInput) (string, erro
 		return "", fmt.Errorf("unable to create a file to export into: %w", err)
 	}
 
-	if err := upgrade.Datastore.ExportService(ctx, service.ExportServiceInput{
-		Datastore:   upgrade.Datastore,
-		ServiceName: upgrade.ServiceName,
-		Writer:      file,
-	}); err != nil {
+	if err := upgrade.Datastore.ExportForUpgrade(ctx, target, upgrade.ServiceName, file); err != nil {
 		file.Close()
 		os.Remove(file.Name())
 		return "", err

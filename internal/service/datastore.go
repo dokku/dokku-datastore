@@ -609,6 +609,59 @@ func (s *Datastore) ImportService(ctx context.Context, input ImportServiceInput)
 	})
 }
 
+// CarriesDataTo reports whether a migration from this definition onto another
+// uses the export and import the two declare for a migration, rather than the
+// export and import subcommands. Both have to: what one writes is only known to
+// be what the other reads when both are declared for the purpose.
+func (s *Datastore) CarriesDataTo(target *Datastore) bool {
+	return s.Definition.Dokku.Upgrade.Export != nil && target.Definition.Dokku.Upgrade.Import != nil
+}
+
+// ExportForUpgrade writes everything a service holds to a writer, the way the
+// definition declares for carrying it onto another, falling back to the export
+// subcommand when the definition the service is moved onto declares no import
+// of its own.
+//
+// The service's export-args are not applied in either case: they shape a dump
+// an operator asked for, and a migration that carried only part of the data
+// would lose the rest when the old data is removed.
+func (s *Datastore) ExportForUpgrade(ctx context.Context, target *Datastore, serviceName string, writer io.Writer) error {
+	command, ok := s.Definition.CommandFor("export")
+	if s.CarriesDataTo(target) {
+		command, ok = *s.Definition.Dokku.Upgrade.Export, true
+	}
+	if !ok {
+		return verb.ErrNotImplemented{Plugin: s.Definition.Dokku.Plugin, Name: "export"}
+	}
+
+	// run under a name of its own, which no export-args are kept for
+	return s.run(ctx, serviceName, "upgrade.export", runOptions{
+		Command: &command,
+		Stdout:  writer,
+		Stderr:  os.Stderr,
+	})
+}
+
+// ImportForUpgrade reads what ExportForUpgrade wrote into a service moved onto
+// this definition from another, without the service's import-args for the same
+// reason the export goes without its export-args.
+func (s *Datastore) ImportForUpgrade(ctx context.Context, previous *Datastore, serviceName string, reader io.Reader) error {
+	command, ok := s.Definition.CommandFor("import")
+	if previous.CarriesDataTo(s) {
+		command, ok = *s.Definition.Dokku.Upgrade.Import, true
+	}
+	if !ok {
+		return verb.ErrNotImplemented{Plugin: s.Definition.Dokku.Plugin, Name: "import"}
+	}
+
+	// run under a name of its own, which no import-args are kept for
+	return s.run(ctx, serviceName, "upgrade.import", runOptions{
+		Command: &command,
+		Stdin:   reader,
+		Stderr:  os.Stderr,
+	})
+}
+
 // ResetService deletes all of the service's data, leaving the service, its
 // credentials and its links as they were.
 func (s *Datastore) ResetService(ctx context.Context, input ResetServiceInput) error {
@@ -777,6 +830,10 @@ type runOptions struct {
 func verbAction(name string) string {
 	if strings.HasPrefix(name, "hooks.") {
 		return "creation"
+	}
+
+	if strings.HasPrefix(name, "upgrade.") {
+		return "upgrade"
 	}
 
 	return strings.TrimPrefix(name, "triggers.")
