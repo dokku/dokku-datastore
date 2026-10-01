@@ -192,6 +192,12 @@ dokku postgres:create lollipop --custom-env "POSTGRES_INITDB_ARGS=--encoding=UTF
 
 They are only read when the data directory is first made, so changing the custom env of an existing service leaves its database as it was. A database is moved to another encoding or locale by importing an export of it into a service created with the new ones, and the plugin readme says so.
 
+## Timescaledb imports
+
+An import into a timescaledb service failed now and then with `duplicate key value violates unique constraint "metadata_pkey"` on the key `exported_uuid`. `pg_restore` drops and remakes the timescaledb extension before copying its catalog back, and the extension's background workers could write their own `exported_uuid` into that catalog in between, so whether an import worked came down to which got there first.
+
+An import now runs `timescaledb_pre_restore()` before `pg_restore` and `timescaledb_post_restore()` after it, the way timescale documents a restore, which stops the background workers for the restore and starts them again once it is done. They are started again when the restore fails as well, and the database's `timescaledb.restoring` setting is reset by name, so a restore that fails after dropping the extension does not leave the database with its workers stopped. Arguments passed to `import` still reach `pg_restore`.
+
 ## The version a service runs
 
 A service records the image it runs in `IMAGE` and `IMAGE_VERSION` beside its data, and that record is what it is placed by every time its container has to be made again. A release that ships a newer image does not move a service that already exists onto it - only `upgrade` changes the version a service runs.

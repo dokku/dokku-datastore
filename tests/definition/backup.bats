@@ -396,3 +396,38 @@ teardown_file() {
   run "$BIN" import "$PLUGIN" "$SERVICE" --file "$dump" </dev/null
   assert_success
 }
+
+# whether timescaledb holds the service's database in restore mode, which keeps
+# its background workers from running. Asked in a session of its own, so it
+# reads what the database was left set to rather than what one session set
+restoring_of() {
+  local password database
+  password="$(cat "$(service_root)/PASSWORD")"
+  database="$(cat "$(service_root)/DATABASE_NAME")"
+  docker container exec --env "PGPASSWORD=$password" "$(service_container)" \
+    psql -qtAX -h localhost -U postgres -d "$database" -c "SHOW timescaledb.restoring;"
+}
+
+@test "($DEFINITION) a timescaledb import leaves the database out of restore mode" {
+  [[ "$DEFINITION" == postgres-timescaledb-* ]] || skip "$DEFINITION has no background workers to stop for an import"
+
+  # the workers are stopped for the restore, so that one cannot write the
+  # catalog row the restore is about to copy back, and started again after
+  local dump="$BATS_TEST_TMPDIR/timescaledb.dump"
+  run "$BIN" export "$PLUGIN" "$SERVICE" --file "$dump"
+  assert_success
+  run "$BIN" import "$PLUGIN" "$SERVICE" --file "$dump" </dev/null
+  assert_success
+  run --separate-stderr restoring_of
+  assert_success
+  assert_output "off"
+
+  # and started again when the restore fails, rather than left stopped
+  local not_a_dump="$BATS_TEST_TMPDIR/not-a-dump"
+  echo "not a dump" >"$not_a_dump"
+  run "$BIN" import "$PLUGIN" "$SERVICE" --file "$not_a_dump" </dev/null
+  assert_failure
+  run --separate-stderr restoring_of
+  assert_success
+  assert_output "off"
+}

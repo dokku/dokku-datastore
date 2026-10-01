@@ -1733,7 +1733,9 @@ func TestExtraArgsAreDeclaredWhereTheToolReadsThem(t *testing.T) {
 		"mysql":       true,
 		"postgres-17": true,
 		"postgres-18": true,
-		// the flavors run the same pg_dump and pg_restore
+		// the flavors run the same pg_dump and pg_restore, timescaledb's
+		// restore wrapped to stop its background workers around it
+
 		"postgres-pgvector-pg17":    true,
 		"postgres-pgvector-pg18":    true,
 		"postgres-postgis-pg17":     true,
