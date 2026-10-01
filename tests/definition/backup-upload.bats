@@ -98,6 +98,11 @@ setup() {
     skip "$PLUGIN does not implement backup"
   fi
   assert_success
+
+  # each run is marked with when it started and finished, since a scheduled
+  # backup appends all of this to the service's backup log
+  assert_output --regexp "Backing up $SERVICE to $S3_BUCKET at [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z"
+  assert_output --regexp "Backup of $SERVICE finished at [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z"
   assert_output --partial "finished successfully"
 
   download_backup

@@ -85,6 +85,12 @@ func DestroyService(ctx context.Context, input DestroyServiceInput) error {
 		return fmt.Errorf("failed to remove backup schedule: %w", err)
 	}
 
+	// a service created later under the same name would otherwise be shown
+	// the output of this one's backups
+	if err := removeIfExists(BackupLogFile(input.Datastore.Properties().CommandPrefix, input.ServiceName)); err != nil {
+		return err
+	}
+
 	// the argv is built, and the image it names fetched, before the container
 	// goes: a destroy that cannot widen the data would otherwise stop with the
 	// service already gone and its files still owned by somebody the dokku user

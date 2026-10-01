@@ -251,8 +251,8 @@ func TestCronEntriesForTrigger(t *testing.T) {
 			}
 
 			expected := []CronTask{
-				{Schedule: "0 3 * * *", Command: "dokku redis:backup apple my-bucket", LogFile: "/var/log/dokku/redis.log"},
-				{Schedule: "@daily", Command: "dokku redis:backup cherry other-bucket --use-iam", LogFile: "/var/log/dokku/redis.log"},
+				{Schedule: "0 3 * * *", Command: "dokku redis:backup apple my-bucket", LogFile: "/var/log/dokku/redis.apple.backup.log"},
+				{Schedule: "@daily", Command: "dokku redis:backup cherry other-bucket --use-iam", LogFile: "/var/log/dokku/redis.cherry.backup.log"},
 			}
 			if !slices.Equal(tasks, expected) {
 				t.Errorf("expected %+v, got %+v", expected, tasks)
@@ -287,7 +287,7 @@ func TestCronEntriesForTriggerWithAMailto(t *testing.T) {
 	}
 
 	expected := []CronTask{
-		{Schedule: "0 3 * * *", Command: "dokku redis:backup apple my-bucket", LogFile: "/var/log/dokku/redis.log", Mailto: "ops@example.com"},
+		{Schedule: "0 3 * * *", Command: "dokku redis:backup apple my-bucket", LogFile: "/var/log/dokku/redis.apple.backup.log", Mailto: "ops@example.com"},
 	}
 
 	tasks, warnings, err := CronEntriesForTrigger(t.Context(), cronEntriesInput(datastore, CronEntryFormatJSON))

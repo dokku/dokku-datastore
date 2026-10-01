@@ -531,7 +531,7 @@ func (d Definition) Implements(subcommand string) bool {
 		return ok
 	case "clone":
 		return hasExport && hasImport
-	case "backup", "backup-auth", "backup-deauth", "backup-schedule",
+	case "backup", "backup-auth", "backup-deauth", "backup-logs", "backup-schedule",
 		"backup-schedule-cat", "backup-set-encryption",
 		"backup-set-public-key-encryption", "backup-unschedule",
 		"backup-unset-encryption", "backup-unset-public-key-encryption":

@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
@@ -376,9 +377,34 @@ func ReadBackupSchedule(s *service.Datastore, serviceName string) (BackupSchedul
 	return schedule, true
 }
 
-// BackupLogFile is where the output of a datastore's scheduled backups goes
-func BackupLogFile(commandPrefix string) string {
-	return fmt.Sprintf("/var/log/dokku/%s.log", commandPrefix)
+// defaultLogsDir is where dokku keeps its logs when DOKKU_LOGS_DIR is not set,
+// the same default the dokku script exports
+const defaultLogsDir = "/var/log/dokku"
+
+// logsDir is where dokku keeps its logs. Both the cron-entries trigger and
+// backup-logs are run by dokku, which exports DOKKU_LOGS_DIR to each, so the two
+// agree on it.
+func logsDir() string {
+	if dir := strings.TrimSpace(os.Getenv("DOKKU_LOGS_DIR")); dir != "" {
+		return dir
+	}
+
+	return defaultLogsDir
+}
+
+// BackupLogFile is where the output of a service's scheduled backups goes. Each
+// service has one of its own, since a file shared by a datastore's services has
+// no way of telling whose backup wrote a line. Neither a command prefix nor a
+// service name can hold a dot, so no two services share a file, and the name
+// ends in .log so that dokku's logrotate configuration rotates it.
+func BackupLogFile(commandPrefix string, serviceName string) string {
+	return filepath.Join(logsDir(), fmt.Sprintf("%s.%s.backup.log", commandPrefix, serviceName))
+}
+
+// BackupTimestamp is how the time a backup starts and ends at is printed, so
+// that each run can be told apart in the log it is appended to
+func BackupTimestamp(t time.Time) string {
+	return t.UTC().Format(time.RFC3339)
 }
 
 // backupCommand is the command a scheduled backup runs. It is run from the dokku
@@ -433,7 +459,7 @@ func CronEntry(commandPrefix string, serviceName string, schedule BackupSchedule
 	return CronTask{
 		Schedule: schedule.Schedule,
 		Command:  backupCommand(commandPrefix, serviceName, schedule),
-		LogFile:  BackupLogFile(commandPrefix),
+		LogFile:  BackupLogFile(commandPrefix, serviceName),
 		Mailto:   schedule.Mailto,
 	}
 }

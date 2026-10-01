@@ -349,6 +349,8 @@ func TestImplements(t *testing.T) {
 		{name: "clone with both halves", definition: withCommands("export", "import"), subcommand: "clone", expected: true},
 		{name: "backup follows export", definition: withCommands("export"), subcommand: "backup", expected: true},
 		{name: "backup-schedule-cat follows export", definition: withCommands(), subcommand: "backup-schedule-cat", expected: false},
+		{name: "backup-logs follows export", definition: withCommands(), subcommand: "backup-logs", expected: false},
+		{name: "backup-logs with export", definition: withCommands("export"), subcommand: "backup-logs", expected: true},
 		{name: "anything else is always available", definition: withCommands(), subcommand: "info", expected: true},
 	}
 

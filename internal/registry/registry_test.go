@@ -317,7 +317,7 @@ func TestMemcachedImplementsOnlyWhatItCan(t *testing.T) {
 	}
 
 	for _, subcommand := range []string{
-		"backup", "backup-auth", "backup-deauth", "backup-schedule",
+		"backup", "backup-auth", "backup-deauth", "backup-logs", "backup-schedule",
 		"backup-schedule-cat", "backup-set-encryption", "backup-unschedule",
 		"backup-unset-encryption", "clone", "export", "import",
 	} {

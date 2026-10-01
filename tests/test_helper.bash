@@ -58,6 +58,11 @@ datastore_setup_file() {
   export DOKKU_LIB_HOST_ROOT="${DOKKU_LIB_HOST_ROOT:-$DOKKU_LIB_ROOT}"
   export DOKKU_SYSTEM_USER="${DOKKU_SYSTEM_USER:-$(id -un)}"
   export DOKKU_SYSTEM_GROUP="${DOKKU_SYSTEM_GROUP:-$(id -gn)}"
+
+  # where scheduled backups are logged, rather than the logs of the host the
+  # tests run on
+  export DOKKU_LOGS_DIR="$BATS_FILE_TMPDIR/logs"
+  mkdir -p "$DOKKU_LOGS_DIR"
 }
 
 # destroys the named services, and the data root only when it was made here: a

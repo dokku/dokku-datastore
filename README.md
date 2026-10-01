@@ -39,6 +39,7 @@ Available commands are:
     backup                                Backs a service up to an s3 bucket
     backup-auth                           Stores the credentials backups are shipped with
     backup-deauth                         Removes the stored backup credentials for a service
+    backup-logs                           Shows the log of a service's scheduled backups
     backup-schedule                       Schedules a recurring backup of a service to an s3 bucket
     backup-schedule-cat                   Prints the crontab line of a service's scheduled backup
     backup-set-encryption                 Encrypts future backups of a service with a passphrase
@@ -551,7 +552,7 @@ Both are read when a backup runs, so they apply to the next backup, scheduled on
 
 ## Scheduled backup email
 
-The bash plugins wrote each scheduled backup to a cron file of its own in `/etc/cron.d`, where a `MAILTO` line could be added by hand to have the backup's output mailed. Scheduled backups are now part of the dokku crontab, which only has the global `MAILTO` set with `dokku cron:set --global mailto`, and their output is appended to `/var/log/dokku/<prefix>.log`, so cron had nothing to mail. A service may now name who the output of its scheduled backups is mailed to through the `backup-mailto` property.
+The bash plugins wrote each scheduled backup to a cron file of its own in `/etc/cron.d`, where a `MAILTO` line could be added by hand to have the backup's output mailed. Scheduled backups are now part of the dokku crontab, which only has the global `MAILTO` set with `dokku cron:set --global mailto`, and their output is appended to the service's backup log, so cron had nothing to mail. A service may now name who the output of its scheduled backups is mailed to through the `backup-mailto` property.
 
 ```shell
 # mail the output of each scheduled backup to two people
@@ -568,6 +569,27 @@ The property is read when dokku writes its crontab, so setting or clearing it on
 The recipients are handed to dokku through the `cron-entries` trigger as a json entry, which only dokku versions including [dokku/dokku#9104](https://github.com/dokku/dokku/pull/9104) read. Older versions refuse the whole crontab when they see one, so the plugin hands them the entry it always has, and warns that the recipients are ignored. `backup-schedule-cat` shows the line a dokku version that reads them writes.
 
 A cron file an earlier version of the plugin wrote is migrated onto the dokku crontab when the plugin is installed. A `MAILTO` line added to it by hand is now kept as the service's `backup-mailto`, rather than leaving the file where it was, unless it cannot be written into the crontab, in which case it is dropped with a warning.
+
+## Scheduled backup logs
+
+The output of every scheduled backup of a datastore was appended to a single `/var/log/dokku/<prefix>.log`, and nothing in it said which service a line came from or when it was written. `backup` printed nothing of its own when it succeeded, so a run that worked and one that never started looked the same, and nothing read the file back. Each service's scheduled backups are now appended to a log of their own, `/var/log/dokku/<prefix>.<service>.backup.log`, which the `backup-logs` command prints.
+
+```shell
+# the last 100 lines
+dokku redis:backup-logs lollipop
+
+# followed
+dokku redis:backup-logs lollipop --tail
+
+# followed, starting from the last 50 lines
+dokku redis:backup-logs lollipop --tail=50
+```
+
+`backup` now starts with a line saying which service it is backing up, to which bucket and at what time, and ends with a line saying whether it finished or failed and at what time, in utc, so each run can be picked out of the log.
+
+The log is kept under `DOKKU_LOGS_DIR` when dokku keeps its logs somewhere other than `/var/log/dokku`, and is rotated by the logrotate configuration dokku installs for that directory. It is removed along with the service, so a service created later under the same name does not start with its output.
+
+The dokku crontab is written again when the plugin is installed on a host with a scheduled backup, which moves every scheduled backup onto its own log. The shared `/var/log/dokku/<prefix>.log` is left where it was, since it holds the only record of the backups that ran before, and can be removed by hand once it is no longer needed.
 
 ## Backups when dokku runs in a container
 
