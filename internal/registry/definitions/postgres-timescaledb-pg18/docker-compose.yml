@@ -162,10 +162,38 @@ x-dokku:
       env:
         PGPASSWORD: "{{ .Secret.password }}"
 
+    # pg_restore drops and remakes the timescaledb extension, then copies its
+    # catalog back. The extension's background workers can write their own
+    # exported_uuid into that catalog in between, and the copy then fails on
+    # the duplicate. Timescale's restore functions stop the workers for the
+    # restore and start them again after, which they are told to whether the
+    # restore worked or not. The setting is reset by name as well, since a
+    # restore that fails after dropping the extension leaves no function to
+    # reset it with, and a database left restoring runs no workers at all.
+    #
+    # written inline rather than shipped as a script, since a script is only
+    # mounted into a container made after it was added, and an import runs in
+    # the container the service already has
     import:
       extra_args: true
       stdin: true
-      exec: ["pg_restore", "-h", "localhost", "-cO", "--if-exists", "-d", "{{ .Database }}", "-U", "postgres", "-w"]
+      exec:
+        - sh
+        - -c
+        - |
+          database="$1"
+          shift
+          sql() {
+            printf '%s\n' "$1" | psql -h localhost -U postgres -w -qtAX -v ON_ERROR_STOP=1 -v "database=$database" -d "$database" >/dev/null
+          }
+          sql "SELECT timescaledb_pre_restore() FROM pg_extension WHERE extname = 'timescaledb';" || exit $?
+          status=0
+          pg_restore -h localhost -cO --if-exists -d "$database" -U postgres -w "$@" || status=$?
+          sql "SELECT timescaledb_post_restore() FROM pg_extension WHERE extname = 'timescaledb';
+          ALTER DATABASE :\"database\" RESET timescaledb.restoring;" || exit $?
+          exit "$status"
+        - dokku-timescaledb-import
+        - "{{ .Database }}"
       env:
         PGPASSWORD: "{{ .Secret.password }}"
 

@@ -680,6 +680,8 @@ func TestResolveAppendsExtraArgs(t *testing.T) {
 		{definition: "mysql", verb: "export", extraArgs: []string{"--hex-blob", "--where=id > 1"}, last: "lollipop"},
 		{definition: "mariadb", verb: "import", extraArgs: []string{"--max-allowed-packet=1G"}, last: "lollipop"},
 		{definition: "postgres-18", verb: "import", extraArgs: []string{"--single-transaction"}, last: "-w"},
+		// handed to the wrapper after the database, which passes them to pg_restore
+		{definition: "postgres-timescaledb-pg18", verb: "import", extraArgs: []string{"--single-transaction"}, last: "lollipop"},
 		{definition: "mongo", verb: "export", extraArgs: []string{"--numParallelCollections=1"}, last: "--archive"},
 	}
 
@@ -707,6 +709,48 @@ func TestResolveAppendsExtraArgs(t *testing.T) {
 
 			if actual := resolved.Argv[rendered:]; !slices.Equal(actual, test.extraArgs) {
 				t.Errorf("expected %q appended, got %q", test.extraArgs, actual)
+			}
+		})
+	}
+}
+
+// A timescaledb import restores with the extension's background workers stopped,
+// since one that writes its own catalog row mid-restore fails the copy of that
+// catalog, and starts them again afterwards. The extra arguments still reach
+// pg_restore, as the wrapper's own arguments after the database.
+func TestResolveTimescaledbImportStopsTheWorkersAroundTheRestore(t *testing.T) {
+	for _, name := range []string{"postgres-timescaledb-pg17", "postgres-timescaledb-pg18"} {
+		t.Run(name, func(t *testing.T) {
+			scope := redisScope()
+			scope.Plugin = "postgres"
+			scope.Secret = map[string]string{"password": "hunter2"}
+
+			resolved, err := Resolve(RunInput{
+				Definition: definitionFor(t, name),
+				Scope:      scope,
+				Name:       "import",
+				Names:      backend.Names{Container: "dokku.postgres.lollipop"},
+				ExtraArgs:  []string{"--single-transaction"},
+			})
+			if err != nil {
+				t.Fatalf("unable to resolve import: %s", err)
+			}
+
+			if len(resolved.Argv) != 6 || resolved.Argv[0] != "sh" || resolved.Argv[1] != "-c" {
+				t.Fatalf("expected sh -c, a script, its name, the database and the extra argument, got %q", resolved.Argv)
+			}
+
+			if actual := resolved.Argv[4:]; !slices.Equal(actual, []string{"lollipop", "--single-transaction"}) {
+				t.Errorf("expected the database and then the extra argument, got %q", actual)
+			}
+
+			script := resolved.Argv[2]
+			pre := strings.Index(script, "timescaledb_pre_restore()")
+			restore := strings.Index(script, `pg_restore -h localhost -cO --if-exists -d "$database" -U postgres -w "$@"`)
+			post := strings.Index(script, "timescaledb_post_restore()")
+			reset := strings.Index(script, "RESET timescaledb.restoring")
+			if pre < 0 || restore < pre || post < restore || reset < post {
+				t.Errorf("expected the workers stopped, the restore, then the workers started and the setting reset, got %q", script)
 			}
 		})
 	}
