@@ -76,7 +76,7 @@ func (c *BackupAuthCommand) Arguments() []command.Argument {
 	})
 	args = append(args, command.Argument{
 		Name:        "aws-default-region",
-		Description: "a valid amazon s3 region",
+		Description: "the region of the bucket",
 		Optional:    true,
 		Type:        command.ArgumentString,
 	})
@@ -88,7 +88,7 @@ func (c *BackupAuthCommand) Arguments() []command.Argument {
 	})
 	args = append(args, command.Argument{
 		Name:        "endpoint-url",
-		Description: "an alternate endpoint to upload to",
+		Description: "the endpoint of an s3 compatible service, such as https://nyc3.digitaloceanspaces.com",
 		Optional:    true,
 		Type:        command.ArgumentString,
 	})

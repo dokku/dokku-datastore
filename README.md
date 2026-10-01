@@ -550,6 +550,25 @@ Without a timestamp, each backup replaces the one before it unless the bucket ha
 
 Both are read when a backup runs, so they apply to the next backup, scheduled ones included, without rescheduling. `info` reports them under `--backup-object-name`, empty when nothing was set, and `--backup-timestamp`, `true` unless it was turned off. `clone` copies `backup-timestamp` but not `backup-object-name`, since a clone backed up to the same bucket under the source's name would replace the source's backups.
 
+## Backups to s3 compatible services
+
+Backups are uploaded by the aws cli in the backup image, which names the upload `s3://<bucket>/<key>` whatever service it is sent to. The `s3://` is not where the backup goes. When `backup-auth` is given an endpoint url, the upload is sent to that endpoint instead of to aws, so any s3 compatible service such as [minio](https://github.com/minio/minio) or [DigitalOcean Spaces](https://docs.digitalocean.com/products/spaces/) works.
+
+```shell
+# a space in the nyc3 region, whose endpoint does not include the space name
+dokku redis:backup-auth lollipop SPACES_ACCESS_KEY SPACES_SECRET_KEY nyc3 s3v4 https://nyc3.digitaloceanspaces.com
+
+# backed up to the my-space space
+dokku redis:backup lollipop my-space
+```
+
+A bucket named `s3://my-space` was passed through as it was, so the backup was uploaded to `s3://s3://my-space` and failed after the service had been exported, and an endpoint without a scheme was only refused by the aws cli at the same point. Both are now refused before anything else is done:
+
+- `backup` and `backup-schedule` refuse a bucket that does not follow the [s3 general purpose bucket naming rules](https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html), a bucket named with a scheme such as `s3://`, and a path after the bucket that ends in a slash or holds an empty, `.` or `..` segment.
+- `backup-auth` refuses an endpoint url that is not an `http` or `https` url with a host, and leaves the settings it stored earlier as they were.
+
+Buckets created in `us-east-1` before March 2018 may have uppercase letters and underscores, which the naming rules no longer allow, and are refused as well. A backup already scheduled to one keeps its entry in the dokku crontab, but the backup it runs is refused, and the reason is written to the service's backup log.
+
 ## Scheduled backup email
 
 The bash plugins wrote each scheduled backup to a cron file of its own in `/etc/cron.d`, where a `MAILTO` line could be added by hand to have the backup's output mailed. Scheduled backups are now part of the dokku crontab, which only has the global `MAILTO` set with `dokku cron:set --global mailto`, and their output is appended to the service's backup log, so cron had nothing to mail. A service may now name who the output of its scheduled backups is mailed to through the `backup-mailto` property.

@@ -62,7 +62,8 @@ var readmeSections = []struct {
 		Group: definition.GroupBackups,
 		Title: "Backups",
 		Intro: []string{
-			"Datastore backups are supported via AWS S3 and S3 compatible services like [minio](https://github.com/minio/minio).",
+			"Datastore backups are supported via AWS S3 and S3 compatible services like [minio](https://github.com/minio/minio) and [DigitalOcean Spaces](https://docs.digitalocean.com/products/spaces/).",
+			"The endpoint of an S3 compatible service is passed as the `endpoint-url` argument of `backup-auth`, such as `https://nyc3.digitaloceanspaces.com`, and must not include the bucket. The bucket is passed to `backup` and `backup-schedule` by its name alone, such as `my-s3-bucket` rather than `s3://my-s3-bucket`, and must follow the [S3 bucket naming rules](https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html).",
 			"You may skip the `backup-auth` step if your dokku install is running within EC2 and has access to the bucket via an IAM profile. In that case, use the `--use-iam` option with the `backup` command.",
 			"If both passphrase and public key forms of encryption are set, the public key encryption will take precedence.",
 			"Backups are uploaded with the bucket's default storage class unless the service sets the `backup-storage-class` property with the `set` command.",

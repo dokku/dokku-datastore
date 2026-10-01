@@ -199,6 +199,11 @@ func (c *BackupCommand) Run(args []string) int {
 		return 1
 	}
 
+	if err := internal.ValidateBucketName(bucketName); err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
+	}
+
 	// the start and end of each run are marked with the time, since a scheduled
 	// backup appends everything it prints to the service's backup log
 	logger.Header2(fmt.Sprintf("Backing up %s to %s at %s", serviceName, bucketName, internal.BackupTimestamp(time.Now()))) //nolint:errcheck
