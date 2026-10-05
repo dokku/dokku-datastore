@@ -3,8 +3,8 @@
 # survived rather than only that the service came back up.
 set -eo pipefail
 
-ACTION="${1:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|cluster|read-cluster|templates|extension|has-extension|hypertable> <service> [extension]}"
-SERVICE="${2:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|cluster|read-cluster|templates|extension|has-extension|hypertable> <service> [extension]}"
+ACTION="${1:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|cluster|read-cluster|templates|extension|has-extension|old-extension|drop-old-extension|hypertable> <service> [extension]}"
+SERVICE="${2:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|cluster|read-cluster|templates|extension|has-extension|old-extension|drop-old-extension|hypertable> <service> [extension]}"
 CONTAINER="dokku.postgres.$SERVICE"
 PASSWORD="$(cat "$DOKKU_LIB_ROOT/services/postgres/$SERVICE/PASSWORD")"
 # the database the service was created with, which is the service name with
@@ -14,6 +14,10 @@ DATABASE="$(cat "$DOKKU_LIB_ROOT/services/postgres/$SERVICE/DATABASE_NAME")"
 # the -extra actions do the same in a second database the service holds, which
 # only an export of every database carries
 EXTRA_DATABASE="probe_extra"
+
+# the old-extension actions hold an extension at an older version in a
+# database of its own
+OLD_EXTENSION_DATABASE="probe_old_extension"
 
 sql() {
   docker container exec --env "PGPASSWORD=$PASSWORD" -i "$CONTAINER" \
@@ -55,6 +59,25 @@ has-extension)
   # database already had it
   EXTENSION="${3:?usage: $0 has-extension <service> <extension>}"
   sql "SELECT extname FROM pg_extension WHERE extname = '$EXTENSION';"
+  ;;
+old-extension)
+  # an extension at a version older than the one the image installs by
+  # default, in a database of its own so the service's is left alone, reported
+  # back by version. Nothing is printed where the image installs no other
+  # version, which is how a test knows to skip
+  EXTENSION="${3:?usage: $0 old-extension <service> <extension>}"
+  VERSION="$(sql "SELECT version FROM pg_available_extension_versions WHERE name = '$EXTENSION' AND version <> (SELECT default_version FROM pg_available_extensions WHERE name = '$EXTENSION') AND version ~ '^[0-9.]+\$' ORDER BY string_to_array(version, '.')::int[] DESC LIMIT 1;")"
+  [[ -n "$VERSION" ]] || exit 0
+  # made from template0, since an image may install the extension into
+  # template1 at its default version
+  if [[ -z "$(sql "SELECT 1 FROM pg_database WHERE datname = '$OLD_EXTENSION_DATABASE';")" ]]; then
+    sql "CREATE DATABASE $OLD_EXTENSION_DATABASE TEMPLATE template0;" >/dev/null
+  fi
+  sql "CREATE EXTENSION IF NOT EXISTS $EXTENSION VERSION '$VERSION';" "$OLD_EXTENSION_DATABASE" >/dev/null
+  sql "SELECT extversion FROM pg_extension WHERE extname = '$EXTENSION';" "$OLD_EXTENSION_DATABASE"
+  ;;
+drop-old-extension)
+  sql "DROP DATABASE IF EXISTS $OLD_EXTENSION_DATABASE WITH (FORCE);" >/dev/null
   ;;
 cluster)
   # a role and a database of its own beside the service's, holding a known

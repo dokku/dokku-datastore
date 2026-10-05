@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -224,22 +225,57 @@ func migrateOnto(ctx context.Context, input migrateServiceInput, plan migration,
 	return nil
 }
 
-// stageExport exports a service into a private file under its service root,
-// starting the service first if it is not running, since an export reads from
-// the running service.
-func stageExport(ctx context.Context, upgrade UpgradeServiceInput, target *service.Datastore) (string, error) {
+// startToRead starts a service that is not running and waits for it, since
+// what a migration reads from the definition it is moved off is read from the
+// running service.
+func startToRead(ctx context.Context, upgrade UpgradeServiceInput) error {
 	if err := service.Start(ctx, service.StartInput{
 		Datastore:   upgrade.Datastore,
 		ServiceName: upgrade.ServiceName,
 	}); err != nil {
-		return "", err
+		return err
 	}
 
-	if err := WaitForService(ctx, WaitForServiceInput{
+	return WaitForService(ctx, WaitForServiceInput{
 		Datastore:   upgrade.Datastore,
 		ServiceName: upgrade.ServiceName,
 		Logger:      upgrade.Logger,
-	}); err != nil {
+	})
+}
+
+// checkUpgradeCompatible refuses a migration the image a service is moved onto
+// cannot hold, while the old container is still there to keep running. It is
+// only asked when both definitions declare their half of the check: what the
+// data needs is read from the running service, and checked in a container of
+// the new image.
+func checkUpgradeCompatible(ctx context.Context, upgrade UpgradeServiceInput, target *service.Datastore, plan migration, taggedImage string) error {
+	if plan == migrationNone || !upgrade.Datastore.ChecksUpgradeTo(target) {
+		return nil
+	}
+
+	if err := startToRead(ctx, upgrade); err != nil {
+		return err
+	}
+
+	upgrade.Logger.Info(fmt.Sprintf("Checking %s can hold the data of %s", taggedImage, upgrade.ServiceName))
+
+	requires := bytes.Buffer{}
+	if err := upgrade.Datastore.RequiresForUpgrade(ctx, upgrade.ServiceName, &requires); err != nil {
+		return fmt.Errorf("unable to read what the data of %s needs from %s: %w", upgrade.ServiceName, upgrade.Datastore.DefinitionName(), err)
+	}
+
+	if err := target.CheckForUpgrade(ctx, upgrade.ServiceName, taggedImage, &requires); err != nil {
+		return fmt.Errorf("unable to move %s from %s onto %s, which cannot hold its data: %w", upgrade.ServiceName, upgrade.Datastore.DefinitionName(), target.DefinitionName(), err)
+	}
+
+	return nil
+}
+
+// stageExport exports a service into a private file under its service root,
+// starting the service first if it is not running, since an export reads from
+// the running service.
+func stageExport(ctx context.Context, upgrade UpgradeServiceInput, target *service.Datastore) (string, error) {
+	if err := startToRead(ctx, upgrade); err != nil {
 		return "", err
 	}
 

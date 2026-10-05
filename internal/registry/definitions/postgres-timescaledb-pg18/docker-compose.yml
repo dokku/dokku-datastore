@@ -175,6 +175,54 @@ x-dokku:
         PGPASSWORD: "{{ .Secret.password }}"
         PGOPTIONS: "-c client_min_messages=warning"
 
+    # what the data needs of the image a service is moved onto, read and
+    # checked before anything of the service is touched. timescaledb only
+    # restores a dump into the version of the extension that made it, so each
+    # version a database runs is printed, and the check compares it with the
+    # version the new image installs. Every postgres definition carries the
+    # same text, which a test holds them to, and both do nothing where the
+    # extension is not installed.
+    requires:
+      exec:
+        - sh
+        - -c
+        - |
+          set -e
+          sql() {
+            psql -h localhost -U postgres -w -qtAX -v ON_ERROR_STOP=1 -d "$1"
+          }
+          versions=""
+          for database in $(echo "SELECT datname FROM pg_database WHERE datallowconn ORDER BY datname;" | sql postgres); do
+            versions="$versions$(echo "SELECT 'timescaledb ' || extversion FROM pg_extension WHERE extname = 'timescaledb';" | sql "$database")
+          "
+          done
+          printf '%s' "$versions" | sed '/^$/d' | sort -u
+        - dokku-postgres-upgrade-requires
+      env:
+        PGPASSWORD: "{{ .Secret.password }}"
+    check:
+      stdin: true
+      exec:
+        - sh
+        - -c
+        - |
+          set -e
+          while read -r name version; do
+            [ -n "$name" ] || continue
+            sharedir="$(pg_config --sharedir 2>/dev/null || true)"
+            control="$sharedir/extension/$name.control"
+            if [ -z "$sharedir" ] || [ ! -f "$control" ]; then
+              echo "the data uses $name $version, which the new image does not install" >&2
+              exit 1
+            fi
+            installs="$(sed -n "s/^default_version *= *'\(.*\)'.*/\1/p" "$control")"
+            if [ "$installs" != "$version" ]; then
+              echo "the data uses $name $version, but the new image installs $name $installs, and a dump is only restored into the version that made it. Run ALTER EXTENSION $name UPDATE in each database on the current definition, or upgrade onto an image that installs $name $version" >&2
+              exit 1
+            fi
+          done
+        - dokku-postgres-upgrade-check
+
   # the certificate the server was started with, so that a client off the host
   # can verify it is talking to this service. Read from the running container
   # rather than the host, which keeps it following a moved certs volume

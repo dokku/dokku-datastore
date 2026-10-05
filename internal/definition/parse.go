@@ -396,6 +396,20 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		return fail("x-dokku.upgrade.import reads what the export wrote, so it needs stdin: true")
 	}
 
+	// what one definition's requires prints is only known to be what another's
+	// check reads when both are declared, as with the export and import
+	if (upgrade.Requires == nil) != (upgrade.Check == nil) {
+		return fail("x-dokku.upgrade.requires and x-dokku.upgrade.check are declared together, since a migration checks one definition's requires with another's check")
+	}
+
+	if upgrade.Requires != nil && !upgrade.Migrate {
+		return fail("x-dokku.upgrade.requires needs x-dokku.upgrade.migrate, since only a migration runs it")
+	}
+
+	if upgrade.Check != nil && !upgrade.Check.Stdin {
+		return fail("x-dokku.upgrade.check reads what the requires printed, so it needs stdin: true")
+	}
+
 	// the data volume is what a migration moves aside and starts empty again
 	if upgrade.Migrate && !seenKey["data"] {
 		return fail("x-dokku.upgrade.migrate moves the data volume aside, so it needs a volume mounted from {{ .HostRoot }}/data")
@@ -484,10 +498,9 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 
 		// a mount of its own belongs to a container started for the command,
 		// and is resolved against the service root the way the service's are
-		ownContainer := strings.HasPrefix(name, "hooks.") || strings.HasPrefix(name, "upgrade.from.") ||
-			command.Mode == ModeSidecar || command.Mode == ModeOffline
+		ownContainer := runsOnItsOwn(name) || command.Mode == ModeSidecar || command.Mode == ModeOffline
 		if len(command.Volumes) > 0 && !ownContainer {
-			return fail("command %q cannot mount volumes of its own; only hooks, upgrade steps, and sidecar and offline commands run in a container of their own", name)
+			return fail("command %q cannot mount volumes of its own; only hooks, upgrade steps and checks, and sidecar and offline commands run in a container of their own", name)
 		}
 
 		for _, volume := range command.Volumes {
@@ -504,9 +517,9 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 	// an entrypoint belongs to a container started for the command. One exec'd
 	// into the running service, or run on the host, has none to replace, so the
 	// setting would do nothing. Hooks and upgrade steps are left out: they
-	// always run in a container of their own.
+	// always run in a container of their own, as does an upgrade's check.
 	for name, command := range allCommands(definition) {
-		if command.Entrypoint == nil || strings.HasPrefix(name, "hooks.") || strings.HasPrefix(name, "upgrade.from.") {
+		if command.Entrypoint == nil || runsOnItsOwn(name) {
 			continue
 		}
 
@@ -701,7 +714,21 @@ func allCommands(definition Definition) map[string]Command {
 		commands["upgrade.import"] = *definition.Dokku.Upgrade.Import
 	}
 
+	if definition.Dokku.Upgrade.Requires != nil {
+		commands["upgrade.requires"] = *definition.Dokku.Upgrade.Requires
+	}
+
+	if definition.Dokku.Upgrade.Check != nil {
+		commands["upgrade.check"] = *definition.Dokku.Upgrade.Check
+	}
+
 	return commands
+}
+
+// runsOnItsOwn reports whether a command, addressed as allCommands names it,
+// always runs in a container started for it rather than in the service's own.
+func runsOnItsOwn(name string) bool {
+	return strings.HasPrefix(name, "hooks.") || strings.HasPrefix(name, "upgrade.from.") || name == "upgrade.check"
 }
 
 // takesExtraArgs reports whether a command, addressed as allCommands names it,

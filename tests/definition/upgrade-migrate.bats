@@ -68,6 +68,42 @@ flavor_extension() {
   assert_output ""
 }
 
+@test "($DEFINITION) an upgrade onto an image that cannot restore the data is refused first" {
+  [[ "$(flavor_extension)" == "timescaledb" ]] || skip "only timescaledb restores into the version that made the dump alone"
+
+  run "$(probe_path)" write "$SERVICE"
+  assert_success
+
+  # data on a version the new image does not install by default, which it
+  # cannot restore
+  local version
+  version="$("$(probe_path)" old-extension "$SERVICE" timescaledb)"
+  [[ -n "$version" ]] || skip "the image installs no older timescaledb"
+
+  run --separate-stderr "$BIN" upgrade "$PLUGIN" "$SERVICE" --definition "$NEXT_DEFINITION" --restart-apps
+  local status_was="$status" stderr_was="$stderr" output_was="$output"
+
+  # dropped before anything is asserted, so a failure here still leaves the
+  # next test the service it expects
+  "$(probe_path)" drop-old-extension "$SERVICE"
+
+  status="$status_was" stderr="$stderr_was" output="$output_was"
+  assert_failure
+  assert_stderr --partial "the data uses timescaledb $version"
+  refute_output --partial "Stopping all linked apps"
+
+  # nothing was touched: the service runs where it did, on the data it had
+  run cat "$(service_root)/DEFINITION"
+  assert_output "$DEFINITION"
+
+  run --separate-stderr "$(probe_path)" read "$SERVICE"
+  assert_success
+  assert_output "known"
+
+  run previous_data
+  assert_output ""
+}
+
 @test "($DEFINITION) an upgrade onto the next major carries the data across" {
   local extension
   extension="$(flavor_extension)"

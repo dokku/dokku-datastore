@@ -674,6 +674,47 @@ func (s *Datastore) ImportForUpgrade(ctx context.Context, previous *Datastore, s
 	})
 }
 
+// ChecksUpgradeTo reports whether a migration from this definition onto
+// another is checked before anything of the service is touched. Both have to
+// declare their half: what one prints is only known to be what the other reads
+// when both are declared for the purpose.
+func (s *Datastore) ChecksUpgradeTo(target *Datastore) bool {
+	return s.Definition.Dokku.Upgrade.Requires != nil && target.Definition.Dokku.Upgrade.Check != nil
+}
+
+// RequiresForUpgrade writes what the data of a service needs from the
+// definition it is moved onto, read from the running service.
+func (s *Datastore) RequiresForUpgrade(ctx context.Context, serviceName string, writer io.Writer) error {
+	command := s.Definition.Dokku.Upgrade.Requires
+	if command == nil {
+		return fmt.Errorf("%s declares nothing a migration requires", s.DefinitionName())
+	}
+
+	return s.run(ctx, serviceName, "upgrade.requires", runOptions{
+		Command: command,
+		Stdout:  writer,
+		Stderr:  os.Stderr,
+	})
+}
+
+// CheckForUpgrade reads what RequiresForUpgrade wrote and fails when the image
+// a service is moved onto cannot hold the data.
+//
+// It is a container of its own, from the image the service is moved onto, for
+// the reason a step is: nothing of the service runs that image yet, and the
+// service's record still names the image it is moved off.
+func (s *Datastore) CheckForUpgrade(ctx context.Context, serviceName string, image string, reader io.Reader) error {
+	command := s.Definition.Dokku.Upgrade.Check
+	if command == nil {
+		return fmt.Errorf("%s declares no check for a migration", s.DefinitionName())
+	}
+
+	return s.runOneOff(ctx, serviceName, "upgrade.check", "upgrade", command, s.scope(serviceName), oneOffOptions{
+		Image: image,
+		Stdin: reader,
+	})
+}
+
 // ExportsAllDatabases reports whether the definition a service runs can export
 // and import every database in it rather than only the one named for it.
 func (s *Datastore) ExportsAllDatabases() bool {
@@ -736,7 +777,7 @@ func (s *Datastore) RunPreCreate(ctx context.Context, serviceName string) error 
 		return nil
 	}
 
-	return s.runOneOff(ctx, serviceName, "hooks.pre_create", "creation", hook, s.scope(serviceName))
+	return s.runOneOff(ctx, serviceName, "hooks.pre_create", "creation", hook, s.scope(serviceName), oneOffOptions{})
 }
 
 // HasUpgradeStep reports whether this definition migrates the data of a
@@ -761,12 +802,22 @@ func (s *Datastore) RunUpgradeStep(ctx context.Context, serviceName string, from
 
 	scope := s.scope(serviceName)
 	scope.PreviousData = previousData
-	return s.runOneOff(ctx, serviceName, "upgrade.from."+from, "upgrade", &step, scope)
+	return s.runOneOff(ctx, serviceName, "upgrade.from."+from, "upgrade", &step, scope, oneOffOptions{})
+}
+
+// oneOffOptions are what a container of its own is given beyond the command.
+type oneOffOptions struct {
+	// Image runs the command in an image other than the service's, when the
+	// command names none of its own
+	Image string
+
+	// Stdin is wired to the command when set
+	Stdin io.Reader
 }
 
 // runOneOff runs a hook or an upgrade step in a container of its own, with the
 // mounts it declares rather than the service's.
-func (s *Datastore) runOneOff(ctx context.Context, serviceName string, name string, action string, hook *definition.Command, scope definition.Scope) error {
+func (s *Datastore) runOneOff(ctx context.Context, serviceName string, name string, action string, hook *definition.Command, scope definition.Scope, options oneOffOptions) error {
 	resolved, err := verb.Resolve(verb.RunInput{
 		Definition: s.Definition,
 		Scope:      scope,
@@ -778,6 +829,9 @@ func (s *Datastore) runOneOff(ctx context.Context, serviceName string, name stri
 	}
 
 	reference := hook.Image
+	if reference == "" {
+		reference = options.Image
+	}
 	if reference == "" {
 		reference = s.taggedImage(serviceName)
 	}
@@ -803,6 +857,7 @@ func (s *Datastore) runOneOff(ctx context.Context, serviceName string, name stri
 		Volumes:    verb.Volumes(nil, *hook, scope),
 		User:       hook.User,
 		Entrypoint: hook.Entrypoint,
+		Stdin:      options.Stdin,
 		Stdout:     os.Stderr,
 		Stderr:     os.Stderr,
 	})

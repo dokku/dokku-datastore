@@ -448,6 +448,18 @@ type Upgrade struct {
 	Export *Command `yaml:"export"`
 	Import *Command `yaml:"import"`
 
+	// Requires and Check refuse a migration the definition a service is moved
+	// onto cannot hold, before anything of the service is touched. Requires
+	// runs against the running service on the definition it is moved off and
+	// prints what its data needs, and Check runs in a container of its own from
+	// the image the service is moved onto, reads that on stdin, and fails when
+	// the image cannot restore it: timescaledb only restores a dump into the
+	// version of the extension that made it. They are declared together, and
+	// used when the definition a service is moved off declares Requires and
+	// the one it is moved onto declares Check.
+	Requires *Command `yaml:"requires"`
+	Check    *Command `yaml:"check"`
+
 	// From are the steps that migrate the data in place, keyed by the exact
 	// definition the service is moved off. Each runs in a container of its own
 	// with the service down, and can name the directory the old data was moved
