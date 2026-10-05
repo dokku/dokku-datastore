@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -417,8 +418,17 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 	// every database is a form of the dumps alone. Backups export it wherever
 	// it is declared, so an export without the import that loads it would make
 	// backups nothing can restore, and the two take the same arguments so that
-	// the export-args and import-args a service keeps hold for either form
-	for name, command := range allCommands(definition) {
+	// the export-args and import-args a service keeps hold for either form.
+	// Checked in order of name, so that a command is always checked before its
+	// own every-database form and the same mistake reports the same error
+	commands := allCommands(definition)
+	names := make([]string, 0, len(commands))
+	for name := range commands {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		command := commands[name]
 		if command.AllDatabases == nil {
 			continue
 		}
