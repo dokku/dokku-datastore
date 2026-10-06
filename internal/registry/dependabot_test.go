@@ -13,14 +13,28 @@ import (
 
 // dependabotConfig is the part of .github/dependabot.yml these tests read.
 type dependabotConfig struct {
-	Updates []struct {
-		PackageEcosystem string `yaml:"package-ecosystem"`
-		Directory        string `yaml:"directory"`
-		Ignore           []struct {
-			DependencyName string   `yaml:"dependency-name"`
-			UpdateTypes    []string `yaml:"update-types"`
-		} `yaml:"ignore"`
-	} `yaml:"updates"`
+	Updates []dependabotUpdate `yaml:"updates"`
+}
+
+// dependabotUpdate is one entry of the updates list, which watches either a
+// single directory or several bumped together.
+type dependabotUpdate struct {
+	PackageEcosystem string   `yaml:"package-ecosystem"`
+	Directory        string   `yaml:"directory"`
+	Directories      []string `yaml:"directories"`
+	Ignore           []struct {
+		DependencyName string   `yaml:"dependency-name"`
+		UpdateTypes    []string `yaml:"update-types"`
+	} `yaml:"ignore"`
+}
+
+// watched lists every directory an entry watches, however it names them.
+func (update dependabotUpdate) watched() []string {
+	if update.Directory == "" {
+		return update.Directories
+	}
+
+	return append([]string{update.Directory}, update.Directories...)
 }
 
 // definitionsDirectory is where dependabot finds the definitions, as it names
@@ -59,14 +73,16 @@ func TestEveryDefinitionIsWatchedByDependabot(t *testing.T) {
 			continue
 		}
 
-		name, found := strings.CutPrefix(update.Directory, definitionsDirectory)
-		if !found {
-			continue
-		}
+		for _, directory := range update.watched() {
+			name, found := strings.CutPrefix(directory, definitionsDirectory)
+			if !found {
+				continue
+			}
 
-		watched = append(watched, name)
-		if _, ok := loaded.Definition(name); !ok {
-			t.Errorf("dependabot watches %s, which is not a definition", update.Directory)
+			watched = append(watched, name)
+			if _, ok := loaded.Definition(name); !ok {
+				t.Errorf("dependabot watches %s, which is not a definition", directory)
+			}
 		}
 	}
 
@@ -94,14 +110,16 @@ func TestAnOlderVariantIsHeldInsideItsMajorByDependabot(t *testing.T) {
 
 	ignoresMajors := map[string]string{}
 	for _, update := range loadDependabot(t).Updates {
-		name, found := strings.CutPrefix(update.Directory, definitionsDirectory)
-		if !found {
-			continue
-		}
+		for _, directory := range update.watched() {
+			name, found := strings.CutPrefix(directory, definitionsDirectory)
+			if !found {
+				continue
+			}
 
-		for _, ignore := range update.Ignore {
-			if slices.Contains(ignore.UpdateTypes, "version-update:semver-major") {
-				ignoresMajors[name] = ignore.DependencyName
+			for _, ignore := range update.Ignore {
+				if slices.Contains(ignore.UpdateTypes, "version-update:semver-major") {
+					ignoresMajors[name] = ignore.DependencyName
+				}
 			}
 		}
 	}

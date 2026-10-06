@@ -423,6 +423,19 @@ func TestParseReadsAnUpgrade(t *testing.T) {
 	if parsed.Dokku.Upgrade.Import == nil || !parsed.Dokku.Upgrade.Import.Stdin {
 		t.Errorf("expected the import as declared, got %+v", parsed.Dokku.Upgrade.Import)
 	}
+
+	// a check runs in a container of its own, so it may replace the entrypoint
+	parsed, err = parseCompose(t, migratingCompose+"    requires:\n      exec: [versions]\n    check:\n      stdin: true\n      entrypoint: \"\"\n      exec: [compare]\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if parsed.Dokku.Upgrade.Requires == nil || parsed.Dokku.Upgrade.Requires.Exec[0] != "versions" {
+		t.Errorf("expected the requires as declared, got %+v", parsed.Dokku.Upgrade.Requires)
+	}
+	if parsed.Dokku.Upgrade.Check == nil || !parsed.Dokku.Upgrade.Check.Stdin {
+		t.Errorf("expected the check as declared, got %+v", parsed.Dokku.Upgrade.Check)
+	}
 }
 
 func TestParseRejectsABrokenUpgrade(t *testing.T) {
@@ -475,6 +488,21 @@ func TestParseRejectsABrokenUpgrade(t *testing.T) {
 			name:     "a migration export on a definition that does not migrate",
 			compose:  validCompose + "  upgrade:\n    export:\n      exec: [dumpall]\n    import:\n      stdin: true\n      exec: [restoreall]\n",
 			expected: "x-dokku.upgrade.export needs x-dokku.upgrade.migrate",
+		},
+		{
+			name:     "a requires with no check",
+			compose:  migratingCompose + "    requires:\n      exec: [versions]\n",
+			expected: "x-dokku.upgrade.requires and x-dokku.upgrade.check are declared together",
+		},
+		{
+			name:     "a check that reads nothing",
+			compose:  migratingCompose + "    requires:\n      exec: [versions]\n    check:\n      exec: [compare]\n",
+			expected: "x-dokku.upgrade.check reads what the requires printed",
+		},
+		{
+			name:     "a requires on a definition that does not migrate",
+			compose:  validCompose + "  upgrade:\n    requires:\n      exec: [versions]\n    check:\n      stdin: true\n      exec: [compare]\n",
+			expected: "x-dokku.upgrade.requires needs x-dokku.upgrade.migrate",
 		},
 		{
 			name:     "a volume on a command exec'd into the service",

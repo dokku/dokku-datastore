@@ -133,3 +133,31 @@ func TestCarriesDataTo(t *testing.T) {
 		t.Error("expected the export to still be used where the other definition imports it")
 	}
 }
+
+// A migration is checked before anything is touched only when the definition
+// it leaves declares what its data requires and the definition it lands on a
+// check for it, for the same reason the export and import are paired.
+func TestChecksUpgradeTo(t *testing.T) {
+	seventeen, err := Datastores["postgres"].WithDefinitionNamed("postgres-timescaledb-pg17")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	eighteen, err := Datastores["postgres"].WithDefinitionNamed("postgres-timescaledb-pg18")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if !seventeen.ChecksUpgradeTo(eighteen) || !eighteen.ChecksUpgradeTo(seventeen) {
+		t.Error("expected postgres definitions to check a migration onto each other")
+	}
+
+	without := *eighteen
+	without.Definition.Dokku.Upgrade.Check = nil
+	if seventeen.ChecksUpgradeTo(&without) {
+		t.Error("expected a definition with no check of its own to go unchecked")
+	}
+
+	if !without.ChecksUpgradeTo(seventeen) {
+		t.Error("expected the requires to still be read where the other definition checks it")
+	}
+}

@@ -255,6 +255,9 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	if err := checkMigration(input, target, plan, recorded); err != nil {
 		return err
 	}
+	if err := checkUpgradeCompatible(ctx, input, target, plan, taggedImage); err != nil {
+		return err
+	}
 	if plan != migrationNone {
 		if err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
 			Action:      "upgrade",

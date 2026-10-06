@@ -2257,3 +2257,32 @@ func TestPostgresMigratesTheWholeCluster(t *testing.T) {
 		}
 	}
 }
+
+// A migration between postgres definitions is refused before anything is
+// touched when the new image cannot restore the extensions the data runs, so
+// every one of them reads and checks those the same way: what one requires is
+// what any other checks.
+func TestPostgresChecksAMigrationTheSameWay(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	names := loaded.NamesFor("postgres")
+	first, _ := loaded.Definition(names[0])
+	for _, name := range names {
+		found, _ := loaded.Definition(name)
+		upgrade := found.Dokku.Upgrade
+		if upgrade.Requires == nil || upgrade.Check == nil {
+			t.Fatalf("expected %s to declare a requires and a check for a migration", name)
+		}
+
+		if strings.Join(upgrade.Requires.Exec, "\n") != strings.Join(first.Dokku.Upgrade.Requires.Exec, "\n") {
+			t.Errorf("expected %s to read what its data requires as %s does", name, names[0])
+		}
+
+		if strings.Join(upgrade.Check.Exec, "\n") != strings.Join(first.Dokku.Upgrade.Check.Exec, "\n") {
+			t.Errorf("expected %s to check a migration as %s does", name, names[0])
+		}
+	}
+}

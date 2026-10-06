@@ -126,16 +126,19 @@ updates:
       interval: "daily"
 
   # the same -pg17 suffix as pgvector, so held inside its postgres major by the
-  # suffix rather than by an ignore
+  # suffix rather than by an ignore. Both majors are bumped in one pull request,
+  # since an upgrade from one onto the other only restores onto the same
+  # timescaledb version
   - package-ecosystem: "docker"
-    directory: "/internal/registry/definitions/postgres-timescaledb-pg17"
+    directories:
+      - "/internal/registry/definitions/postgres-timescaledb-pg17"
+      - "/internal/registry/definitions/postgres-timescaledb-pg18"
     schedule:
       interval: "daily"
-
-  - package-ecosystem: "docker"
-    directory: "/internal/registry/definitions/postgres-timescaledb-pg18"
-    schedule:
-      interval: "daily"
+    groups:
+      timescaledb:
+        patterns:
+          - "timescale/timescaledb"
 
   - package-ecosystem: "docker"
     directory: "/internal/registry/definitions/pushpin"
