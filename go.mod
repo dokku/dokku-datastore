@@ -3,6 +3,7 @@ module github.com/dokku/dokku-datastore
 go 1.26.2
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/dokku/docker-port-forward v0.0.0-20260927082313-8cbfc680c944
 	github.com/dokku/dokku/plugins/common v0.0.0-20260914154134-61ff696e0012
 	github.com/josegonzalez/cli-skeleton v0.25.0
@@ -10,6 +11,7 @@ require (
 	github.com/posener/complete v1.2.3
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/pflag v1.0.10
+	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
 	mvdan.cc/sh/v3 v3.14.1
@@ -72,6 +74,5 @@ require (
 	go.yaml.in/yaml/v4 v4.0.0-rc.4 // indirect
 	golang.org/x/crypto v0.56.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 )

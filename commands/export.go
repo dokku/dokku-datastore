@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
+	"github.com/dokku/dokku-datastore/internal/backend"
 	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -228,6 +229,24 @@ func (c *ExportCommand) Run(args []string) int {
 		}
 		defer destination.Abort()
 		writer = destination
+	} else {
+		// stdout is a terminal whenever the export runs through ssh -t, which
+		// would add a carriage return before every newline in the dump. Better
+		// to export nothing than a dump that cannot be read back
+		restore, err := backend.RawOutput(os.Stdout)
+		if err != nil {
+			logger.Error(internal.ErrorInput{
+				Error: fmt.Errorf("unable to turn off the terminal's output processing: %w", err),
+			})
+			return 1
+		}
+		defer func() {
+			if err := restore(); err != nil {
+				logger.Warn(internal.WarnInput{
+					Warning: fmt.Sprintf("unable to restore the terminal's output processing: %s", err),
+				})
+			}
+		}()
 	}
 
 	if err := datastore.ExportService(ctx, service.ExportServiceInput{
