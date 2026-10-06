@@ -44,6 +44,13 @@ func Run(ctx context.Context, input common.ExecCommandInput) (common.ExecCommand
 	}
 
 	result, err := common.CallExecCommandWithContext(ctx, input)
+	if err != nil && input.DisableStdioBuffer && !result.Cancelled && result.ExitCode != 0 {
+		// common makes the error of a failed command out of the stderr it
+		// buffered, which without a buffer is empty. What the command said went
+		// to the writer it was given instead
+		return result, errors.New("command exited non-zero")
+	}
+
 	if err != nil {
 		return result, err
 	}

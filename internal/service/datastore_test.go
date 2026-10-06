@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -217,6 +218,36 @@ func TestRunWritesThePayloadFirst(t *testing.T) {
 
 	if !info.Mode().IsRegular() {
 		t.Errorf("expected the script to be a regular file, got %v", info.Mode())
+	}
+}
+
+// A dump reaches its writer byte for byte, however binary it is, which a
+// writer that rewrote newlines would not.
+func TestExportServiceWritesTheDumpUnchanged(t *testing.T) {
+	redis := redisDatastore(t)
+	serviceRoot := withServiceRoot(t, redis, "lollipop")
+	writeRecord(t, serviceRoot, "redis", "8.8.0")
+	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
+
+	// the sidecar redis exports in is the only call that writes anything
+	docker := filepath.Join(t.TempDir(), "docker")
+	fake := "#!/usr/bin/env bash\n[[ \"$1 $2\" == \"container run\" ]] && printf 'REDIS\\n\\r\\000\\n\\377'\nexit 0\n"
+	if err := os.WriteFile(docker, []byte(fake), 0755); err != nil {
+		t.Fatalf("unable to write the fake docker: %s", err)
+	}
+	t.Setenv("DOCKER_BIN", docker)
+
+	var dump bytes.Buffer
+	if err := redis.ExportService(context.Background(), ExportServiceInput{
+		ServiceName: "lollipop",
+		Writer:      &dump,
+	}); err != nil {
+		t.Fatalf("unable to run the export: %s", err)
+	}
+
+	expected := []byte("REDIS\n\r\x00\n\xff")
+	if !bytes.Equal(dump.Bytes(), expected) {
+		t.Errorf("expected the dump %q, got %q", expected, dump.Bytes())
 	}
 }
 

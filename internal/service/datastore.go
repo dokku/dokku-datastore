@@ -597,12 +597,14 @@ func (s *Datastore) ExportService(ctx context.Context, input ExportServiceInput)
 	}
 
 	// the dump is streamed to the writer rather than buffered into a string,
-	// which is what makes it safe for binary data of any size
+	// which is what makes it safe for binary data of any size. Nothing keeps a
+	// copy of it on the way, or a dump would be held in memory in full
 	return s.run(ctx, input.ServiceName, "export", runOptions{
-		Command:   command,
-		ExtraArgs: input.ExtraArgs,
-		Stdout:    input.Writer,
-		Stderr:    os.Stderr,
+		Command:            command,
+		ExtraArgs:          input.ExtraArgs,
+		Stdout:             input.Writer,
+		Stderr:             os.Stderr,
+		DisableStdioBuffer: true,
 	})
 }
 
@@ -648,9 +650,10 @@ func (s *Datastore) ExportForUpgrade(ctx context.Context, target *Datastore, ser
 
 	// run under a name of its own, which no export-args are kept for
 	return s.run(ctx, serviceName, "upgrade.export", runOptions{
-		Command: &command,
-		Stdout:  writer,
-		Stderr:  os.Stderr,
+		Command:            &command,
+		Stdout:             writer,
+		Stderr:             os.Stderr,
+		DisableStdioBuffer: true,
 	})
 }
 
@@ -927,6 +930,10 @@ type runOptions struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+
+	// DisableStdioBuffer keeps no copy of what the command writes, for a dump
+	// streamed to Stdout
+	DisableStdioBuffer bool
 }
 
 // verbAction is what an operator is told could not be done when the image a
@@ -1021,6 +1028,8 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 		Stdout:     options.Stdout,
 		Stderr:     options.Stderr,
 		ExtraArgs:  extraArgs,
+
+		DisableStdioBuffer: options.DisableStdioBuffer,
 	})
 }
 

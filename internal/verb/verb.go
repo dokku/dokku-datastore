@@ -63,6 +63,11 @@ type RunInput struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
+	// DisableStdioBuffer keeps no copy of what the command writes, which export
+	// wants so that a dump is streamed to its writer rather than also held in
+	// memory
+	DisableStdioBuffer bool
+
 	// ExtraArgs are appended to the rendered argv, each as an argument of its
 	// own, for a command that declares it takes them
 	ExtraArgs []string
@@ -159,14 +164,15 @@ func Resolve(input RunInput) (backend.ExecInput, error) {
 	}
 
 	return backend.ExecInput{
-		Container: input.Names.Container,
-		Argv:      argv,
-		Env:       env,
-		User:      command.User,
-		TTY:       input.TTY,
-		Stdin:     input.Stdin,
-		Stdout:    input.Stdout,
-		Stderr:    input.Stderr,
+		Container:          input.Names.Container,
+		Argv:               argv,
+		Env:                env,
+		User:               command.User,
+		TTY:                input.TTY,
+		Stdin:              input.Stdin,
+		Stdout:             input.Stdout,
+		Stderr:             input.Stderr,
+		DisableStdioBuffer: input.DisableStdioBuffer,
 	}, nil
 }
 
@@ -224,17 +230,18 @@ func runSidecar(ctx context.Context, input RunInput) error {
 	}
 
 	return backend.Run(ctx, backend.RunInput{
-		Image:      image,
-		Argv:       exec.Argv,
-		Env:        exec.Env,
-		Volumes:    Volumes(input.Volumes, command, input.Scope),
-		Network:    "container:" + input.Names.Container,
-		User:       exec.User,
-		Entrypoint: command.Entrypoint,
-		TTY:        input.TTY,
-		Stdin:      exec.Stdin,
-		Stdout:     exec.Stdout,
-		Stderr:     exec.Stderr,
+		Image:              image,
+		Argv:               exec.Argv,
+		Env:                exec.Env,
+		Volumes:            Volumes(input.Volumes, command, input.Scope),
+		Network:            "container:" + input.Names.Container,
+		User:               exec.User,
+		Entrypoint:         command.Entrypoint,
+		TTY:                input.TTY,
+		Stdin:              exec.Stdin,
+		Stdout:             exec.Stdout,
+		Stderr:             exec.Stderr,
+		DisableStdioBuffer: exec.DisableStdioBuffer,
 	})
 }
 
@@ -277,15 +284,16 @@ func runOffline(ctx context.Context, input RunInput) error {
 	command, _ := input.command()
 
 	runErr := backend.Run(ctx, backend.RunInput{
-		Image:      input.Image,
-		Argv:       exec.Argv,
-		Env:        exec.Env,
-		Volumes:    Volumes(input.Volumes, command, input.Scope),
-		User:       exec.User,
-		Entrypoint: command.Entrypoint,
-		Stdin:      exec.Stdin,
-		Stdout:     exec.Stdout,
-		Stderr:     exec.Stderr,
+		Image:              input.Image,
+		Argv:               exec.Argv,
+		Env:                exec.Env,
+		Volumes:            Volumes(input.Volumes, command, input.Scope),
+		User:               exec.User,
+		Entrypoint:         command.Entrypoint,
+		Stdin:              exec.Stdin,
+		Stdout:             exec.Stdout,
+		Stderr:             exec.Stderr,
+		DisableStdioBuffer: exec.DisableStdioBuffer,
 	})
 
 	// the service comes back up either way: a datastore left down because an

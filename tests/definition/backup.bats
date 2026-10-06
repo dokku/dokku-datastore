@@ -220,6 +220,45 @@ teardown_file() {
   fi
 }
 
+@test "($DEFINITION) export through a terminal round trip" {
+  # ssh -t, which the dokku client runs whenever its stdin is a terminal, makes
+  # stdout a terminal, and a terminal adds a carriage return before every
+  # newline written to it unless the export turns that off
+  command -v script >/dev/null || skip "script is not installed"
+
+  local probe
+  probe="$(probe_path)"
+  if [[ -x "$probe" ]]; then
+    run "$probe" write "$SERVICE"
+    assert_success
+  fi
+
+  # stderr is kept out of the terminal, or what the export logs would end up in
+  # the dump script hands back
+  local dump="$BATS_TEST_TMPDIR/terminal.dump" export_status=0
+  script -qec "$(printf '%q ' "$BIN" export "$PLUGIN" "$SERVICE") 2>$(printf '%q' "$dump.err")" /dev/null >"$dump" || export_status=$?
+
+  if [[ "$export_status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement export"
+  fi
+  [[ "$export_status" -eq 0 ]] || fail "export failed with status $export_status: $(cat "$dump.err")"
+  [[ -s "$dump" ]] || fail "export produced nothing"
+
+  if [[ -x "$probe" ]]; then
+    run "$probe" clobber "$SERVICE"
+    assert_success
+  fi
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" <"$dump"
+  assert_success
+
+  if [[ -x "$probe" ]]; then
+    run --separate-stderr "$probe" read "$SERVICE"
+    assert_success
+    assert_output "known"
+  fi
+}
+
 @test "($DEFINITION) export to an existing file needs --force" {
   local existing="$BATS_TEST_TMPDIR/existing.dump"
   echo "old" >"$existing"

@@ -487,6 +487,18 @@ dokku postgres:export lollipop --file /var/lib/dokku/data/storage/data.dump --fo
 ssh dokku@dokku.me postgres:export lollipop > data.dump
 ```
 
+## Exporting through a terminal
+
+`export` wrote its dump through whatever stdout was. The dokku client runs `ssh -t` whenever its stdin is a terminal, which makes stdout on the dokku host a terminal too, and a terminal adds a carriage return before every newline written to it. A dump exported that way came back a byte larger for every newline in it: a postgres custom-format dump, a mongo archive, a redis dump or a clickhouse backup could not be read back at all, and a mysql, mariadb or couchdb dump had a carriage return at the end of every line.
+
+`export` now turns off the terminal's output processing while the dump is written, and turns it back on once the export is done, so the dump comes back unchanged however ssh was run. Anything logged to the same terminal while the dump is written is printed without that processing too. The dump is also no longer held in memory while it is written.
+
+```shell
+# both of these write a dump that can be read back
+dokku_client.sh postgres:export lollipop > data.dump
+ssh -T dokku@dokku.me postgres:export lollipop > data.dump
+```
+
 ## Exporting every database in a service
 
 `export` dumped only the database named after the service, but an app can make databases of its own on the same server. Prisma, for one, makes a `prisma` database beside the one it is given. Those databases were left out of every export and every backup, with nothing to say so, and the dump of a service holding its data elsewhere came back empty.
