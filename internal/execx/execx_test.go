@@ -81,3 +81,49 @@ func TestRunEchoesTheCommandWhenTracing(t *testing.T) {
 		t.Errorf("expected the command to be echoed, got %q", stderr)
 	}
 }
+
+// A dump streamed to a writer reaches it unchanged, and no copy is kept on the
+// way, which for a large dump would be held in memory in full.
+func TestRunWithoutABufferStreamsToTheWriterOnly(t *testing.T) {
+	var written strings.Builder
+	result, err := Run(t.Context(), common.ExecCommandInput{
+		Command:            "printf",
+		Args:               []string{"a\\nb\\n"},
+		StdoutWriter:       &written,
+		DisableStdioBuffer: true,
+	})
+	if err != nil {
+		t.Fatalf("unable to run the command: %s", err)
+	}
+
+	if written.String() != "a\nb\n" {
+		t.Errorf("expected the writer to get %q, got %q", "a\nb\n", written.String())
+	}
+
+	if result.Stdout != "" {
+		t.Errorf("expected no copy of stdout to be kept, got %q", result.Stdout)
+	}
+}
+
+// Without a buffer there is no stderr to repeat in the error, and what the
+// command said already went to the writer it was given.
+func TestRunWithoutABufferFailsWithoutStderr(t *testing.T) {
+	var stderr strings.Builder
+	_, err := Run(t.Context(), common.ExecCommandInput{
+		Command:            "sh",
+		Args:               []string{"-c", "echo broken >&2; exit 1"},
+		StderrWriter:       &stderr,
+		DisableStdioBuffer: true,
+	})
+	if err == nil {
+		t.Fatal("expected the command to fail")
+	}
+
+	if err.Error() != "command exited non-zero" {
+		t.Errorf("expected a plain error, got %q", err.Error())
+	}
+
+	if stderr.String() != "broken\n" {
+		t.Errorf("expected stderr to reach its writer, got %q", stderr.String())
+	}
+}

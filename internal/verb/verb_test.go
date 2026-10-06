@@ -714,6 +714,27 @@ func TestResolveAppendsExtraArgs(t *testing.T) {
 	}
 }
 
+// A dump is streamed to its writer with nothing keeping a copy of it on the way,
+// which for a large dump would be held in memory in full.
+func TestResolveCarriesTheUnbufferedStdio(t *testing.T) {
+	for _, disabled := range []bool{true, false} {
+		resolved, err := Resolve(RunInput{
+			Definition:         definitionFor(t, "redis"),
+			Scope:              redisScope(),
+			Name:               "export",
+			Names:              backend.Names{Container: "dokku.redis.lollipop"},
+			DisableStdioBuffer: disabled,
+		})
+		if err != nil {
+			t.Fatalf("unable to resolve export: %s", err)
+		}
+
+		if resolved.DisableStdioBuffer != disabled {
+			t.Errorf("expected DisableStdioBuffer %v, got %v", disabled, resolved.DisableStdioBuffer)
+		}
+	}
+}
+
 // The every-database forms of export and import resolve as commands of their
 // own: the accounts that can see every database, and the extra arguments after
 // what the definition renders, as the service's own dumps take them.

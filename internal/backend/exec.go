@@ -37,6 +37,11 @@ type ExecInput struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+
+	// DisableStdioBuffer keeps no copy of what the command writes, which a dump
+	// streamed to a writer wants: it would otherwise be held in memory in full
+	// on its way through
+	DisableStdioBuffer bool
 }
 
 // ExecArgs builds the argv for `docker container exec`. It is pure, so what a
@@ -75,11 +80,12 @@ func Exec(ctx context.Context, input ExecInput) error {
 	}
 
 	if _, err := execx.Run(ctx, common.ExecCommandInput{
-		Command:      common.DockerBin(),
-		Args:         ExecArgs(input),
-		Stdin:        input.Stdin,
-		StdoutWriter: input.Stdout,
-		StderrWriter: input.Stderr,
+		Command:            common.DockerBin(),
+		Args:               ExecArgs(input),
+		Stdin:              input.Stdin,
+		StdoutWriter:       input.Stdout,
+		StderrWriter:       input.Stderr,
+		DisableStdioBuffer: input.DisableStdioBuffer,
 	}); err != nil {
 		return fmt.Errorf("unable to run the command: %w", err)
 	}

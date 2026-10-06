@@ -489,7 +489,7 @@ ssh dokku@dokku.me postgres:export lollipop > data.dump
 
 `export` wrote its dump through whatever stdout was. The dokku client runs `ssh -t` whenever its stdin is a terminal, which makes stdout on the dokku host a terminal too, and a terminal adds a carriage return before every newline written to it. A dump exported that way came back a byte larger for every newline in it: a postgres custom-format dump, a mongo archive, a redis dump or a clickhouse backup could not be read back at all, and a mysql, mariadb or couchdb dump had a carriage return at the end of every line.
 
-`export` now turns off the terminal's output processing while the dump is written, and turns it back on once the export is done, so the dump comes back unchanged however ssh was run. Anything logged to the same terminal while the dump is written is printed without that processing too.
+`export` now turns off the terminal's output processing while the dump is written, and turns it back on once the export is done, so the dump comes back unchanged however ssh was run. Anything logged to the same terminal while the dump is written is printed without that processing too. The dump is also no longer held in memory while it is written.
 
 ```shell
 # both of these write a dump that can be read back
