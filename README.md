@@ -181,6 +181,8 @@ dokku-datastore create postgres db --image pgvector/pgvector --image-version pg1
 dokku-datastore create postgres db --image pgvector/pgvector
 ```
 
+A flavor is only used when its image or its definition is named. A create naming no image, version or definition runs the datastore's own image on its newest major, so `dokku-datastore create postgres db` lands on `postgres-18` and never on a flavor.
+
 An image no definition ships still runs on the datastore's own definitions, as it did before flavors existed. A service pinned to one of those keeps its pin: a service created with `pgvector/pgvector:pg17` before pgvector had definitions of its own was placed on `postgres-18`, and its data is where that definition mounts it. `upgrade` only moves a service onto a flavor's definition when the image it ran and the one it is moved to resolve to different definitions, so an upgrade inside a major leaves such a service where it is, and one across a major or onto another image moves it. An image of your own built on a flavor can be kept on that flavor's definition with `--definition`, such as `--definition postgres-pgvector-pg17`.
 
 The images are pinned in each definition's `Dockerfile`, and dependabot holds an older major inside it according to how the image writes its tags. A tag carrying the major as a suffix, such as `0.8.6-pg17`, is only ever moved to one with the same suffix, so it needs nothing more; a tag leading with the major, such as `17-3.5`, needs its semver-major updates ignored, as `postgres-17` does. `go test` checks both, and that every definition has an entry.

@@ -240,3 +240,36 @@ func TestCreateServiceRefusesAnUnknownDefinition(t *testing.T) {
 		})
 	}
 }
+
+// A create naming no image, version or definition runs the newest of the
+// datastore's own definitions, never a flavor shipping an extension nobody asked
+// for. A flavor is only ever chosen by naming its image or the definition itself.
+func TestCreateServiceResolvesTheDefinition(t *testing.T) {
+	datastore := service.Datastores["postgres"]
+
+	tests := []struct {
+		name     string
+		input    CreateServiceInput
+		expected string
+	}{
+		{name: "no options", input: CreateServiceInput{}, expected: "postgres-18"},
+		{name: "an older version", input: CreateServiceInput{ImageVersion: "17.2"}, expected: "postgres-17"},
+		{name: "a flavor's version with no image", input: CreateServiceInput{ImageVersion: "pg17"}, expected: "postgres-18"},
+		{name: "a flavor's image", input: CreateServiceInput{Image: "pgvector/pgvector"}, expected: "postgres-pgvector-pg18"},
+		{name: "a flavor named outright", input: CreateServiceInput{Definition: "postgres-postgis-pg17"}, expected: "postgres-postgis-pg17"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.input.Datastore = datastore
+			resolved, err := test.input.resolveDefinition()
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			if resolved.Definition.Name != test.expected {
+				t.Errorf("expected %s, got %s", test.expected, resolved.Definition.Name)
+			}
+		})
+	}
+}
