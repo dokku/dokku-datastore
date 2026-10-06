@@ -24,6 +24,28 @@ func TestEveryDefinitionIsRegistered(t *testing.T) {
 	}
 }
 
+// The datastore a command looks up is the one a create naming no image, version
+// or definition runs, so for postgres it is the newest postgres on the postgres
+// image rather than one of its flavors, which ship an extension nobody asked for.
+func TestTheDefaultDefinitionIsNotAFlavor(t *testing.T) {
+	postgres, ok := Datastores["postgres"]
+	if !ok {
+		t.Fatal("expected postgres to be registered")
+	}
+
+	if postgres.Definition.Name != "postgres-18" {
+		t.Errorf("expected postgres-18, got %s", postgres.Definition.Name)
+	}
+
+	if postgres.Definition.DefaultImage != "postgres" {
+		t.Errorf("expected the postgres image, got %s", postgres.Definition.DefaultImage)
+	}
+
+	if found := postgres.ForImage("", ""); found.Definition.Name != postgres.Definition.Name {
+		t.Errorf("expected no image and no version to keep %s, got %s", postgres.Definition.Name, found.Definition.Name)
+	}
+}
+
 // These are the values the rest of the binary reads a datastore's metadata
 // from, and they are what the hand written redis service returned, so the
 // forty call sites see no change.

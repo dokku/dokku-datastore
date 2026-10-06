@@ -126,6 +126,17 @@ func (input CreateServiceInput) secretOverrides() map[string]string {
 	return overrides
 }
 
+// resolveDefinition is the datastore a create runs on: the definition named
+// outright, or else the one its image and version select. With neither, that is
+// the newest of the datastore's own definitions and never one of its flavors.
+func (input CreateServiceInput) resolveDefinition() (*service.Datastore, error) {
+	if input.Definition != "" {
+		return input.Datastore.WithDefinitionNamed(input.Definition)
+	}
+
+	return input.Datastore.ForImage(input.Image, input.ImageVersion), nil
+}
+
 // CreateService creates a new service
 func CreateService(ctx context.Context, input CreateServiceInput) error {
 	if err := service.ValidateServiceName(input.ServiceName); err != nil {
@@ -138,15 +149,11 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	// the requirements checked below are the definition's own. A definition
 	// named outright wins over all of that, and the image and version it ships
 	// become the defaults the flags are laid over
-	if input.Definition != "" {
-		named, err := input.Datastore.WithDefinitionNamed(input.Definition)
-		if err != nil {
-			return err
-		}
-		input.Datastore = named
-	} else {
-		input.Datastore = input.Datastore.ForImage(input.Image, input.ImageVersion)
+	resolved, err := input.resolveDefinition()
+	if err != nil {
+		return err
 	}
+	input.Datastore = resolved
 
 	// the name decides the database, so one the datastore keeps for itself is
 	// refused before anything is made for it

@@ -283,16 +283,25 @@ teardown_file() {
   assert_mode 640 "$(service_root)/CONFIG_OPTIONS"
 }
 
-@test "($DEFINITION) a create with no version still records one" {
-  # only that both halves are there, not which version they name: with no version
-  # given, a datastore split by major version lands on its newest definition
-  # rather than on the one this run is for
+@test "($DEFINITION) a create with no options lands on the newest definition that is not a flavor" {
+  # with no image, version or definition given, a datastore split by major
+  # version lands on its newest definition rather than on the one this run is
+  # for, and a datastore with flavors lands on its own image rather than one
+  # shipping an extension nobody asked for
+  local expected
+  expected="$(default_definition)"
+  [[ -n "$expected" ]] || fail "expected $PLUGIN to have a definition of its own"
+
   run "$BIN" create "$PLUGIN" "$SERVICE-unpinned"
   assert_success
 
+  run cat "$(service_root "$SERVICE-unpinned")/DEFINITION"
+  assert_success
+  assert_output "$expected"
+
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE-unpinned" --image
   assert_success
-  assert [ -n "$output" ]
+  assert_output "$(awk '/^FROM / { split($2, parts, ":"); print parts[1]; exit }' "$REPO_ROOT/internal/registry/definitions/$expected/Dockerfile")"
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE-unpinned" --image-version
   assert_success

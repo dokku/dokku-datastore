@@ -821,6 +821,89 @@ func TestForImagePicksTheFlavor(t *testing.T) {
 	}
 }
 
+// A service created with no image, version or definition runs the datastore's
+// own image on its newest major. A flavor is postgres with an extension the
+// operator did not ask for, so it is never what a bare create lands on, however
+// its name sorts and whatever major it ships.
+func TestTheDefaultIsTheNewestPlainDefinition(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	// spelled out, so that a change to any of these names the datastore it moved
+	expected := map[string]string{
+		"elasticsearch": "elasticsearch-9",
+		"postgres":      "postgres-18",
+		"redis":         "redis",
+		"solr":          "solr-8",
+	}
+
+	for _, plugin := range loaded.Plugins() {
+		t.Run(plugin, func(t *testing.T) {
+			newest := ""
+			for _, name := range loaded.NamesFor(plugin) {
+				found := parseVariant(name)
+				if found.flavor != "" {
+					continue
+				}
+
+				if newest == "" || found.major > parseVariant(newest).major {
+					newest = name
+				}
+			}
+
+			if newest == "" {
+				t.Skipf("%s has no definition of its own", plugin)
+			}
+
+			if want, ok := expected[plugin]; ok && newest != want {
+				t.Fatalf("expected %s to be the newest %s definition, got %s", want, plugin, newest)
+			}
+
+			viaFor, err := loaded.For(plugin, "")
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			viaForImage, err := loaded.ForImage(plugin, "", "")
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			for _, found := range []definition.Definition{viaFor, viaForImage} {
+				if found.Name != newest {
+					t.Errorf("expected %s, got %s", newest, found.Name)
+				}
+			}
+		})
+	}
+}
+
+// A flavor shipping a newer major than the datastore's own is still not the
+// default: the default is the newest of the datastore's own definitions, not the
+// newest of all of them.
+func TestTheDefaultIsNotANewerFlavor(t *testing.T) {
+	pluginDir := t.TempDir()
+	writeOverride(t, pluginDir, "postgres-17", "postgres", "postgres:17.11")
+	writeOverride(t, pluginDir, "postgres-pgvector-pg19", "postgres", "pgvector/pgvector:0.8.7-pg19")
+	writeOverride(t, pluginDir, "postgres-timescaledb-pg20", "postgres", "timescale/timescaledb:2.30.2-pg20")
+
+	loaded, err := Load(LoadInput{PluginDir: pluginDir})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	found, err := loaded.For("postgres", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if found.Name != "postgres-17" {
+		t.Errorf("expected postgres-17, got %s", found.Name)
+	}
+}
+
 // Every flavor is postgres on another image, so it has to stay postgres in
 // everything but the image: the same plugin, and its data mounted where the
 // datastore's own definition of the same major mounts it, since a service moved

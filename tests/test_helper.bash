@@ -160,6 +160,20 @@ create_service() {
   "$BIN" create "$PLUGIN" "$1" --image "$IMAGE" --image-version "$IMAGE_VERSION"
 }
 
+# the definition a create naming no image, version or definition lands on: the
+# newest of the datastore's own, named <plugin> or <plugin>-<major>, and never a
+# flavor such as postgres-pgvector-pg18, whatever this run's definition is
+default_definition() {
+  local root="$REPO_ROOT/internal/registry/definitions" path name
+  for path in "$root"/*; do
+    name="$(basename "$path")"
+    [[ "$name" == "$PLUGIN" || "$name" =~ ^$PLUGIN-[0-9]+$ ]] || continue
+    [[ -f "$root/$name/docker-compose.yml" ]] || continue
+    [[ "$(awk '/^  plugin:/ { print $2; exit }' "$root/$name/docker-compose.yml")" == "$PLUGIN" ]] || continue
+    echo "$name"
+  done | sort -V | tail -n 1
+}
+
 # this definition's image under a name and tag no definition ships, the way a
 # build of one's own is, so that only --definition can place it. Tagged from the
 # pinned image, which every file's setup has already fetched, rather than pulled
