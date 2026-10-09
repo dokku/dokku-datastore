@@ -3,8 +3,8 @@
 # survived rather than only that the service came back up.
 set -eo pipefail
 
-ACTION="${1:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|cluster|read-cluster|templates|extension|has-extension|old-extension|drop-old-extension|hypertable> <service> [extension]}"
-SERVICE="${2:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|cluster|read-cluster|templates|extension|has-extension|old-extension|drop-old-extension|hypertable> <service> [extension]}"
+ACTION="${1:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|write-icu|clobber-icu|read-icu|cluster|read-cluster|templates|extension|has-extension|old-extension|drop-old-extension|hypertable> <service> [extension]}"
+SERVICE="${2:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|write-icu|clobber-icu|read-icu|cluster|read-cluster|templates|extension|has-extension|old-extension|drop-old-extension|hypertable> <service> [extension]}"
 CONTAINER="dokku.postgres.$SERVICE"
 PASSWORD="$(cat "$DOKKU_LIB_ROOT/services/postgres/$SERVICE/PASSWORD")"
 # the database the service was created with, which is the service name with
@@ -14,6 +14,9 @@ DATABASE="$(cat "$DOKKU_LIB_ROOT/services/postgres/$SERVICE/DATABASE_NAME")"
 # the -extra actions do the same in a second database the service holds, which
 # only an export of every database carries
 EXTRA_DATABASE="probe_extra"
+
+# the -icu actions do the same in a database on the icu locale provider
+ICU_DATABASE="probe_icu"
 
 # the old-extension actions hold an extension at an older version in a
 # database of its own
@@ -46,6 +49,28 @@ clobber-extra)
   ;;
 read-extra)
   sql "SELECT value FROM probe;" "$EXTRA_DATABASE"
+  ;;
+write-icu)
+  # a database on the icu locale provider holding a known record, reported
+  # back as read-icu reads it. Nothing is printed where the server has no icu
+  # provider, which fourteen does not, so a test knows to skip
+  [[ -n "$(sql "SELECT 1 FROM pg_collation WHERE collprovider = 'i' AND current_setting('server_version_num')::int >= 150000 LIMIT 1;")" ]] || exit 0
+  if [[ -z "$(sql "SELECT 1 FROM pg_database WHERE datname = '$ICU_DATABASE';")" ]]; then
+    sql "CREATE DATABASE $ICU_DATABASE TEMPLATE template0 LOCALE_PROVIDER icu ICU_LOCALE 'en-US';" >/dev/null
+  fi
+  sql "CREATE TABLE IF NOT EXISTS probe (value text); DELETE FROM probe; INSERT INTO probe VALUES ('known');" "$ICU_DATABASE" >/dev/null
+  "$0" read-icu "$SERVICE"
+  ;;
+clobber-icu)
+  sql "UPDATE probe SET value = 'clobbered';" "$ICU_DATABASE" >/dev/null
+  ;;
+read-icu)
+  # the provider and icu locale the database was made with, read from the row
+  # as json since each major names the locale column differently, and the
+  # record it holds
+  locale="$(sql "SELECT (to_jsonb(d) ->> 'datlocprovider') || ':' || coalesce(to_jsonb(d) ->> 'datlocale', to_jsonb(d) ->> 'daticulocale') FROM pg_database d WHERE datname = '$ICU_DATABASE';")"
+  value="$(sql "SELECT value FROM probe;" "$ICU_DATABASE")"
+  echo "$locale:$value"
   ;;
 extension)
   # the extension a flavor's image exists to ship, created and then reported

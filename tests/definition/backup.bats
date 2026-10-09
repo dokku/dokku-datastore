@@ -408,6 +408,34 @@ teardown_file() {
   assert_output "clobbered"
 }
 
+@test "($DEFINITION) an export of every database keeps the locale each was made with" {
+  if [[ "$PLUGIN" != "postgres" ]]; then
+    skip "only postgres makes each database again with its own locale"
+  fi
+
+  local probe
+  probe="$(probe_path)"
+  run --separate-stderr "$probe" write-icu "$SERVICE"
+  assert_success
+  [[ -n "$output" ]] || skip "$DEFINITION has no icu locale provider"
+  assert_output "i:en-US:known"
+
+  local dump="$BATS_TEST_TMPDIR/icu.dump" export_status=0
+  "$BIN" export "$PLUGIN" "$SERVICE" --all-databases >"$dump" 2>"$dump.err" || export_status=$?
+  [[ "$export_status" -eq 0 ]] || fail "export --all-databases failed with status $export_status: $(cat "$dump.err")"
+
+  run "$probe" clobber-icu "$SERVICE"
+  assert_success
+
+  run "$BIN" import "$PLUGIN" "$SERVICE" --all-databases <"$dump"
+  assert_success
+
+  # dropped and made again from the dump, on the provider and locale it had
+  run --separate-stderr "$probe" read-icu "$SERVICE"
+  assert_success
+  assert_output "i:en-US:known"
+}
+
 @test "($DEFINITION) every database is refused where it cannot be exported" {
   if exports_all_databases; then
     skip "$DEFINITION exports every database"

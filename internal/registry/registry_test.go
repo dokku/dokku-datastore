@@ -1299,6 +1299,48 @@ func TestEveryDatabaseDumpsAreTheSameForPostgres(t *testing.T) {
 	}
 }
 
+// The locale columns of pg_database differ by major: fourteen has none of them,
+// fifteen and sixteen call the icu locale daticulocale, sixteen adds the icu
+// rules and seventeen renames the locale to datlocale. A script naming any of
+// them as a column fails outright on every major that lacks it, which is how
+// backing up a postgres 15 service broke, so they are only ever read by name
+// from the row as json, where a missing one is null.
+func TestPostgresReadsTheLocaleOfEveryMajor(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	columns := []string{"datlocprovider", "datlocale", "daticulocale", "daticurules"}
+	for _, name := range loaded.NamesFor("postgres") {
+		t.Run(name, func(t *testing.T) {
+			found, _ := loaded.Definition(name)
+
+			scripts := map[string]string{"reset": strings.Join(found.Dokku.Commands["reset"].Exec, "\n")}
+			if export := found.Dokku.Commands["export"].AllDatabases; export != nil {
+				scripts["export.all_databases"] = strings.Join(export.Exec, "\n")
+			}
+
+			for verb, script := range scripts {
+				if !strings.Contains(script, "to_jsonb(d) AS fields") {
+					t.Errorf("expected %s to read pg_database as json", verb)
+				}
+
+				bare := script
+				for _, column := range columns {
+					bare = strings.ReplaceAll(bare, "fields ->> '"+column+"'", "")
+				}
+
+				for _, column := range columns {
+					if strings.Contains(bare, column) {
+						t.Errorf("expected %s to read %s from the json row rather than as a column", verb, column)
+					}
+				}
+			}
+		})
+	}
+}
+
 // A reset is written once and copied to every definition that runs it, since a
 // definition embeds what it runs rather than pointing at another's. A copy that
 // drifted would leave one major or flavor deleting its data differently.
