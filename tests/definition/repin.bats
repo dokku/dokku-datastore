@@ -40,15 +40,34 @@ misplace_pin() {
   echo "$NEWEST" >"$(service_root "${1:-$SERVICE}")/DEFINITION"
 }
 
+# install is a root step, as dokku runs it: it manages /etc/sudoers.d and
+# /usr/local/bin. The environment is kept, so it works on this run's data root
+# and writes everything as the user the run owns it as
+install_plugin() {
+  if [[ "$EUID" -eq 0 ]]; then
+    "$BIN" trigger-install "$PLUGIN"
+  else
+    sudo -n -E "$BIN" trigger-install "$PLUGIN"
+  fi
+}
+
+# skips a test that installs the plugin where it cannot be run as root
+needs_root() {
+  if [[ "$EUID" -ne 0 ]] && ! sudo -n true 2>/dev/null; then
+    skip "install needs root"
+  fi
+}
+
 # the directories an upgrade kept the old data in, one per line
 previous_data() {
   find "$(service_root)" -mindepth 1 -maxdepth 1 -type d -name 'data.*' -exec basename {} \;
 }
 
 @test "($DEFINITION) install puts back a pin its container contradicts" {
+  needs_root
   misplace_pin
 
-  run "$BIN" trigger-install "$PLUGIN"
+  run install_plugin
   assert_success
   assert_output --partial "pinning it to $DEFINITION"
 
@@ -91,6 +110,8 @@ previous_data() {
 }
 
 @test "($DEFINITION) install keeps a pin its container agrees with" {
+  needs_root
+
   # this major placed on the newest definition from the start, so its server
   # made its cluster where that definition mounts the data
   run "$BIN" create "$PLUGIN" "$NEWEST_PINNED" --definition "$NEWEST" --image "$IMAGE" --image-version "$IMAGE_VERSION"
@@ -98,7 +119,7 @@ previous_data() {
   run "$(probe_path)" write "$NEWEST_PINNED"
   assert_success
 
-  run "$BIN" trigger-install "$PLUGIN"
+  run install_plugin
   assert_success
   refute_output --partial "Service $NEWEST_PINNED was pinned"
 
