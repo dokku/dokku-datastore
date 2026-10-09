@@ -25,6 +25,12 @@ setup_file() {
 }
 
 teardown_file() {
+  # install run as root makes the parents of the folders it chowns as root,
+  # which this run could not remove otherwise
+  if [[ "$EUID" -ne 0 ]] && [[ -n "$DOKKU_LIB_ROOT" ]] && sudo -n true 2>/dev/null; then
+    sudo -n chown -R "$(id -u):$(id -g)" "$DOKKU_LIB_ROOT" || true
+  fi
+
   datastore_teardown_file "$SERVICE" "$NEWEST_PINNED"
 }
 
