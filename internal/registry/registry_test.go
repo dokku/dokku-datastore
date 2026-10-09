@@ -798,6 +798,9 @@ func TestForImagePicksTheFlavor(t *testing.T) {
 	}{
 		{image: "", version: "", expected: "postgres-18"},
 		{image: "", version: "pg17", expected: "postgres-18"},
+		{image: "postgres", version: "14.24", expected: "postgres-14"},
+		{image: "postgres", version: "15.7", expected: "postgres-15"},
+		{image: "postgres", version: "16.15", expected: "postgres-16"},
 		{image: "postgres", version: "17.11", expected: "postgres-17"},
 		{image: "ghcr.io/example/postgres", version: "17.11", expected: "postgres-17"},
 		{image: "pgvector/pgvector", version: "pg17", expected: "postgres-pgvector-pg17"},
@@ -816,6 +819,44 @@ func TestForImagePicksTheFlavor(t *testing.T) {
 
 			if found.Name != test.expected {
 				t.Errorf("expected %s, got %s", test.expected, found.Name)
+			}
+		})
+	}
+}
+
+// ForImageMajor only answers for a version naming the major of a definition
+// shipping the image, which is what says a pin elsewhere is wrong. Where
+// ForImage would fall back to the newest, it says nothing.
+func TestForImageMajorNeverFallsBack(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	tests := []struct {
+		image    string
+		version  string
+		expected string
+	}{
+		{image: "postgres", version: "15.7", expected: "postgres-15"},
+		{image: "library/postgres", version: "14.24", expected: "postgres-14"},
+		{image: "pgvector/pgvector", version: "0.8.1-pg17", expected: "postgres-pgvector-pg17"},
+		{image: "postgis/postgis", version: "18-3.6", expected: "postgres-postgis-pg18"},
+		// a major no definition has, which ForImage would place on the newest
+		{image: "postgres", version: "12.1", expected: ""},
+		// a version naming no major at all
+		{image: "postgres", version: "custom-3", expected: ""},
+		{image: "postgres", version: "", expected: ""},
+		// an image no definition ships, which ForImage places on the plain ones
+		{image: "myorg/postgres", version: "15.7", expected: ""},
+		{image: "", version: "15.7", expected: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.image+":"+test.version, func(t *testing.T) {
+			found, ok := loaded.ForImageMajor("postgres", test.image, test.version)
+			if ok != (test.expected != "") || found.Name != test.expected {
+				t.Errorf("expected %q, got %q (%t)", test.expected, found.Name, ok)
 			}
 		})
 	}
@@ -1014,6 +1055,9 @@ func TestPostgresMountsItsDataWhereTheVersionKeepsIt(t *testing.T) {
 		variant  string
 		expected string
 	}{
+		{name: "fourteen", variant: "postgres-14", expected: "/var/lib/postgresql/data"},
+		{name: "fifteen", variant: "postgres-15", expected: "/var/lib/postgresql/data"},
+		{name: "sixteen", variant: "postgres-16", expected: "/var/lib/postgresql/data"},
 		{name: "before eighteen", variant: "postgres-17", expected: "/var/lib/postgresql/data"},
 		{name: "eighteen and since", variant: "postgres-18", expected: "/var/lib/postgresql"},
 	}
@@ -1140,8 +1184,8 @@ func TestEveryPostgresDefinitionDocumentsItsCertificate(t *testing.T) {
 		})
 	}
 
-	if len(names) != 8 {
-		t.Errorf("expected eight postgres definitions, got %v", names)
+	if len(names) != 11 {
+		t.Errorf("expected eleven postgres definitions, got %v", names)
 	}
 }
 
@@ -1299,6 +1343,48 @@ func TestEveryDatabaseDumpsAreTheSameForPostgres(t *testing.T) {
 	}
 }
 
+// The locale columns of pg_database differ by major: fourteen has none of them,
+// fifteen and sixteen call the icu locale daticulocale, sixteen adds the icu
+// rules and seventeen renames the locale to datlocale. A script naming any of
+// them as a column fails outright on every major that lacks it, which is how
+// backing up a postgres 15 service broke, so they are only ever read by name
+// from the row as json, where a missing one is null.
+func TestPostgresReadsTheLocaleOfEveryMajor(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	columns := []string{"datlocprovider", "datlocale", "daticulocale", "daticurules"}
+	for _, name := range loaded.NamesFor("postgres") {
+		t.Run(name, func(t *testing.T) {
+			found, _ := loaded.Definition(name)
+
+			scripts := map[string]string{"reset": strings.Join(found.Dokku.Commands["reset"].Exec, "\n")}
+			if export := found.Dokku.Commands["export"].AllDatabases; export != nil {
+				scripts["export.all_databases"] = strings.Join(export.Exec, "\n")
+			}
+
+			for verb, script := range scripts {
+				if !strings.Contains(script, "to_jsonb(d) AS fields") {
+					t.Errorf("expected %s to read pg_database as json", verb)
+				}
+
+				bare := script
+				for _, column := range columns {
+					bare = strings.ReplaceAll(bare, "fields ->> '"+column+"'", "")
+				}
+
+				for _, column := range columns {
+					if strings.Contains(bare, column) {
+						t.Errorf("expected %s to read %s from the json row rather than as a column", verb, column)
+					}
+				}
+			}
+		})
+	}
+}
+
 // A reset is written once and copied to every definition that runs it, since a
 // definition embeds what it runs rather than pointing at another's. A copy that
 // drifted would leave one major or flavor deleting its data differently.
@@ -1346,8 +1432,8 @@ func TestResetsAreTheSameWhereTheDatastoreIs(t *testing.T) {
 	}
 
 	postgres := loaded.NamesFor("postgres")
-	if len(postgres) != 8 {
-		t.Errorf("expected eight postgres definitions, got %v", postgres)
+	if len(postgres) != 11 {
+		t.Errorf("expected eleven postgres definitions, got %v", postgres)
 	}
 	for _, name := range postgres[1:] {
 		if resetScript(name) != resetScript(postgres[0]) {
@@ -2004,6 +2090,9 @@ func TestExtraArgsAreDeclaredWhereTheToolReadsThem(t *testing.T) {
 		"mariadb":     true,
 		"mongo":       true,
 		"mysql":       true,
+		"postgres-14": true,
+		"postgres-15": true,
+		"postgres-16": true,
 		"postgres-17": true,
 		"postgres-18": true,
 		// the flavors run the same pg_dump and pg_restore, timescaledb's
@@ -2180,6 +2269,9 @@ func TestVolumeKeysArePinned(t *testing.T) {
 		"mysql":                     {"config", "data"},
 		"nats":                      {},
 		"omnisci":                   {"data"},
+		"postgres-14":               postgres,
+		"postgres-15":               postgres,
+		"postgres-16":               postgres,
 		"postgres-17":               postgres,
 		"postgres-18":               postgres,
 		"postgres-pgvector-pg17":    postgres,
@@ -2254,6 +2346,80 @@ func TestUpgradeStepsMoveForwardWithinAPlugin(t *testing.T) {
 
 	if steps == 0 {
 		t.Error("expected at least one step migrating data in place")
+	}
+}
+
+// Every postgres major on the official image is moved onto any newer one with
+// pg_upgrade, so each of them declares a step for every older one. The steps
+// are one script, written once and copied: they differ only in the pair of
+// majors the image is published for and in where the new major keeps its data,
+// which moved up a directory in eighteen.
+func TestPostgresUpgradesInPlaceFromEveryOlderMajor(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	plain := []string{}
+	for _, name := range loaded.NamesFor("postgres") {
+		if parseVariant(name).flavor == "" {
+			plain = append(plain, name)
+		}
+	}
+
+	if len(plain) < 2 {
+		t.Fatalf("expected more than one plain postgres definition, got %v", plain)
+	}
+
+	newest, _ := loaded.Definition(plain[len(plain)-1])
+	expected, ok := newest.Dokku.Upgrade.From[plain[len(plain)-2]]
+	if !ok {
+		t.Fatalf("expected %s to declare a step from %s", newest.Name, plain[len(plain)-2])
+	}
+
+	for index, name := range plain {
+		found, _ := loaded.Definition(name)
+		major := parseVariant(name).major
+
+		dataNew := "/service/data"
+		if major >= 18 {
+			dataNew = "/service/data/18/docker"
+		}
+
+		for _, from := range plain[:index] {
+			t.Run(name+" from "+from, func(t *testing.T) {
+				step, ok := found.Dokku.Upgrade.From[from]
+				if !ok {
+					t.Fatalf("expected %s to declare a step from %s", name, from)
+				}
+
+				if want := fmt.Sprintf("tianon/postgres-upgrade:%d-to-%d", parseVariant(from).major, major); step.Image != want {
+					t.Errorf("expected the step to run %s, got %q", want, step.Image)
+				}
+
+				if step.Env["PGDATANEW"] != dataNew {
+					t.Errorf("expected the new cluster at %s, got %q", dataNew, step.Env["PGDATANEW"])
+				}
+
+				if step.Env["PGDATAOLD"] != expected.Env["PGDATAOLD"] || len(step.Env) != len(expected.Env) {
+					t.Errorf("expected the step to be given %v, got %v", expected.Env, step.Env)
+				}
+
+				if strings.Join(step.Exec, "\n") != strings.Join(expected.Exec, "\n") {
+					t.Errorf("expected the step to run as %s from %s does", newest.Name, plain[len(plain)-2])
+				}
+
+				if step.User != expected.User || fmt.Sprint(step.Volumes) != fmt.Sprint(expected.Volumes) {
+					t.Errorf("expected the step to run as user %q with %v, got %q with %v", expected.User, expected.Volumes, step.User, step.Volumes)
+				}
+			})
+		}
+
+		for from := range found.Dokku.Upgrade.From {
+			if parseVariant(from).flavor != "" {
+				t.Errorf("expected %s to declare no step from the flavor %s, whose extensions the official image lacks", name, from)
+			}
+		}
 	}
 }
 

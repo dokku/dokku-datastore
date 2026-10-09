@@ -27,6 +27,9 @@ type UpgradeCommand struct {
 	image string
 	// imageVersion is the image version to upgrade to
 	imageVersion string
+	// noMigrate places the service on the named definition with its data left
+	// where it is
+	noMigrate bool
 	// restartApps is whether to stop and start linked apps around the upgrade
 	restartApps bool
 	// configOptions are extra arguments passed to the container create command
@@ -117,6 +120,7 @@ func (c *UpgradeCommand) FlagSet() *flag.FlagSet {
 	f.StringVar(&c.definition, "definition", "", "the definition to move the service onto, instead of the one its image and version resolve to")
 	f.StringVarP(&c.image, "image", "i", "", "the image to upgrade the service to")
 	f.StringVarP(&c.imageVersion, "image-version", "I", "", "the image version to upgrade the service to")
+	f.BoolVar(&c.noMigrate, "no-migrate", false, "place the service on the --definition named with its data left where it is, for a service whose data that definition already reads")
 	f.BoolVarP(&c.restartApps, "restart-apps", "R", false, "whether to stop and start the linked apps around the upgrade, required for one that migrates the data")
 	f.StringVarP(&c.configOptions, "config-options", "c", "", "extra arguments for the process the service container runs, not docker flags; use mount for mounts")
 	f.StringVarP(&c.customEnv, "custom-env", "C", "", "semi-colon delimited environment variables to start the service with")
@@ -248,6 +252,7 @@ func (c *UpgradeCommand) Run(args []string) int {
 		Image:        c.image,
 		ImageVersion: c.imageVersion,
 		Logger:       logger,
+		NoMigrate:    c.noMigrate,
 		RestartApps:  c.restartApps,
 		ServiceName:  serviceName,
 

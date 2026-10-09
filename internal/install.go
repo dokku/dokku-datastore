@@ -325,12 +325,27 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 		// the name it has. Overwriting it with the fallback would throw away the
 		// only record of what the service was created with, which is the one
 		// thing needed to put it right.
+		//
+		// A pin written for a major the plugin had no definition for yet is moved
+		// to the definition that major now has, unless the two mount the data in
+		// different places and the service's container does not say the data is
+		// where the new one looks. The container is left as it is, since it
+		// already mounts the data where the new pin does.
 		pinned, unresolved := input.Datastore.ForService(serviceName)
 		if unresolved != nil {
 			input.Logger.Warn(WarnInput{Warning: unresolved.Error()})
 			pinned = input.Datastore
-		} else if err := service.PinDefinition(pinned, serviceName); err != nil {
-			return err
+		} else {
+			if repinned, previous, ok := input.Datastore.MisplacedPin(ctx, serviceName); ok {
+				input.Logger.Warn(WarnInput{
+					Warning: fmt.Sprintf("Service %s was pinned to the %s definition, which does not match the image it runs or where its container mounts its data; pinning it to %s", serviceName, previous, repinned.DefinitionName()),
+				})
+				pinned = repinned
+			}
+
+			if err := service.PinDefinition(pinned, serviceName); err != nil {
+				return err
+			}
 		}
 
 		// the config options file used to be named after the plugin variable

@@ -407,7 +407,7 @@ func TestReadmeVolumeTargets(t *testing.T) {
 	}{
 		{name: "memcached", present: false},
 		{name: "redis", present: true, expected: []string{"| redis | data | `/data` |", "| redis | config | `/usr/local/etc/redis` |", "`REDIS_VOLUME_TARGETS`"}},
-		{name: "postgres", present: true, expected: []string{"| postgres-17 | data | `/var/lib/postgresql/data` |", "| postgres-18 | data | `/var/lib/postgresql` |"}},
+		{name: "postgres", present: true, expected: []string{"| postgres-14 | data | `/var/lib/postgresql/data` |", "| postgres-17 | data | `/var/lib/postgresql/data` |", "| postgres-18 | data | `/var/lib/postgresql` |"}},
 	}
 
 	for _, test := range tests {

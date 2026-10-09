@@ -9,11 +9,14 @@ setup_file() {
   datastore_setup_file
 
   # the definition one major up, where this one has one that migrates the data
-  # of a service moved onto it. postgres-17 moves to postgres-18 and each pg17
-  # flavor to its pg18 counterpart
+  # of a service moved onto it. Each postgres major moves to the next, and each
+  # pg17 flavor to its pg18 counterpart
   NEXT_DEFINITION=""
-  if [[ "$DEFINITION" == *17 ]]; then
-    NEXT_DEFINITION="${DEFINITION%17}18"
+  if [[ "$DEFINITION" =~ ^(.*[^0-9])([0-9]+)$ ]]; then
+    NEXT_DEFINITION="${BASH_REMATCH[1]}$((BASH_REMATCH[2] + 1))"
+  fi
+  if [[ -n "$NEXT_DEFINITION" ]] && [[ ! -d "$REPO_ROOT/internal/registry/definitions/$NEXT_DEFINITION" ]]; then
+    NEXT_DEFINITION=""
   fi
   if [[ -n "$NEXT_DEFINITION" ]] && ! grep -q '^    migrate: true' "$REPO_ROOT/internal/registry/definitions/$NEXT_DEFINITION/docker-compose.yml" 2>/dev/null; then
     NEXT_DEFINITION=""
@@ -36,6 +39,12 @@ setup() {
 # the directories an upgrade kept the old data in, one per line
 previous_data() {
   find "$(service_root)" -mindepth 1 -maxdepth 1 -type d -name 'data.*' -exec basename {} \;
+}
+
+# whether the next definition declares a step migrating this one's data in
+# place, rather than leaving it to an export and an import
+migrates_in_place() {
+  grep -q "^      $DEFINITION:$" "$REPO_ROOT/internal/registry/definitions/$NEXT_DEFINITION/docker-compose.yml"
 }
 
 # the extension a postgres flavor's image exists to ship, or nothing for the
@@ -135,7 +144,7 @@ flavor_extension() {
 
   # the official image migrates in place, and a step that fell back to an
   # export would say so
-  if [[ -z "$extension" ]]; then
+  if migrates_in_place; then
     assert_output --partial "in place"
     refute_output --partial "exporting and importing it instead"
     refute_stderr --partial "exporting and importing it instead"

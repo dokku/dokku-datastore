@@ -1,12 +1,16 @@
 package service
 
 import (
+	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/backend"
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
+	"github.com/dokku/dokku-datastore/internal/registry"
 
 	"github.com/dokku/dokku/plugins/common"
 )
@@ -53,6 +57,111 @@ func (s *Datastore) ForService(serviceName string) (*Datastore, error) {
 	// a service created before the pin existed is placed by the image it
 	// recorded, which is what the pin would have held
 	return s.ForImage(common.ReadFirstLine(serviceFiles.Image), common.ReadFirstLine(serviceFiles.ImageVersion)), nil
+}
+
+// MisplacedPin returns the datastore as a service pinned to the wrong major of
+// its own image belongs on, along with the definition it is pinned to, and
+// false for a service whose pin is to be kept.
+//
+// Before postgres had definitions for fourteen, fifteen and sixteen, a service
+// running postgres:15.7 resolved to the newest definition and was pinned to it
+// at the next install. That definition mounts its data where postgres 18 keeps
+// it, so the server came up on an empty directory with its cluster beside it.
+//
+// Only a pin that is wrong on its face is moved: the service records the image
+// the pinned definition ships, and its version names, outright, the major of
+// another definition shipping that image. A service placed with --definition on
+// an image of its own, on a flavor, or on a version naming no major keeps its
+// pin, since nothing it recorded says the pin is wrong. A pin to a definition
+// this plugin does not ship is left for ForService to report.
+//
+// Where the two definitions mount a volume in different places, the service's
+// container has to be the evidence as well, mounting each of those volumes
+// where the definition it is moved onto would. A service adopted from the bash
+// plugin still runs the container that plugin made, which mounts its data
+// where its own major keeps it. One created on this binary with postgres:15.7
+// was placed on the newest definition from the start, so its server made its
+// cluster under that definition's mount, and moving the pin would hide it. So
+// would moving the pin of a service whose container is gone, which says
+// nothing either way, and upgrade --no-migrate is left to settle those.
+func (s *Datastore) MisplacedPin(ctx context.Context, serviceName string) (*Datastore, string, bool) {
+	corrected, pinned, ok := s.misplacedPin(serviceName)
+	if !ok {
+		return s, pinned, false
+	}
+
+	current, _ := s.registry.Definition(pinned)
+	mounts := func() map[string]string {
+		containerID := LiveContainerID(ctx, LiveContainerIDInput{Datastore: s, ServiceName: serviceName})
+		return backend.Mounts(ctx, containerID)
+	}
+	if !mountsAgree(current, corrected.Definition, scopeVolumeTargets(s, serviceName), Folders(s, serviceName).HostRoot, mounts) {
+		return s, pinned, false
+	}
+
+	return corrected, pinned, true
+}
+
+// mountsAgree reports whether a container mounts every volume two definitions
+// mount differently where the second of them would, which is what says its
+// data is where that definition looks for it. Two definitions that mount every
+// volume in the same place need nothing from the container, since a service
+// moved between them keeps its data where it was, and the container is only
+// asked where they do not.
+func mountsAgree(pinned definition.Definition, corrected definition.Definition, overrides map[string]string, hostRoot string, mounts func() map[string]string) bool {
+	from := pinned.VolumeTargets(overrides)
+	var mounted map[string]string
+	for key, target := range corrected.VolumeTargets(overrides) {
+		if from[key] == target {
+			continue
+		}
+
+		if mounted == nil {
+			mounted = mounts()
+		}
+
+		if mounted[filepath.Join(hostRoot, key)] != target {
+			return false
+		}
+	}
+
+	return true
+}
+
+// misplacedPin is MisplacedPin without asking the container, which is all
+// that reads the service's own files.
+func (s *Datastore) misplacedPin(serviceName string) (*Datastore, string, bool) {
+	if s == nil || s.registry == nil || serviceName == "" {
+		return s, "", false
+	}
+
+	serviceFiles := Files(s, serviceName)
+	pinned := common.ReadFirstLine(serviceFiles.Definition)
+	if pinned == "" {
+		return s, "", false
+	}
+
+	current, ok := s.registry.Definition(pinned)
+	if !ok {
+		return s, pinned, false
+	}
+
+	// a service that never recorded its image runs the one its definition ships
+	image := common.ReadFirstLine(serviceFiles.Image)
+	if image == "" {
+		image = current.DefaultImage
+	}
+
+	if !registry.SameRepository(current.DefaultImage, image) {
+		return s, pinned, false
+	}
+
+	found, ok := s.registry.ForImageMajor(s.Definition.Dokku.Plugin, image, common.ReadFirstLine(serviceFiles.ImageVersion))
+	if !ok || found.Name == pinned {
+		return s, pinned, false
+	}
+
+	return s.withDefinition(found), pinned, true
 }
 
 // ForImage returns the datastore as a service on a given image and version runs

@@ -368,6 +368,39 @@ func (r *Registry) ForImage(plugin string, image string, imageVersion string) (d
 	return r.definitions[candidates[len(candidates)-1]], nil
 }
 
+// ForImageMajor returns the definition shipping an image whose major its
+// version names outright, and nothing for a version naming no major any of
+// them has.
+//
+// Unlike ForImage it never falls back: postgres:custom-3 names no major, so
+// nothing says it belongs anywhere but where it was placed, and an image no
+// definition ships has no definition of its own to belong on.
+func (r *Registry) ForImageMajor(plugin string, image string, imageVersion string) (definition.Definition, bool) {
+	for _, name := range r.byPlugin[plugin] {
+		found := r.definitions[name]
+		if image == "" || !sameRepository(found.DefaultImage, image) {
+			continue
+		}
+
+		named := parseVariant(name)
+		if named.major == 0 {
+			continue
+		}
+
+		if major, ok := tagMajor(imageVersion, named.prefix); ok && major == named.major {
+			return found, true
+		}
+	}
+
+	return definition.Definition{}, false
+}
+
+// SameRepository reports whether two image references name one repository,
+// whether or not either spells out the docker hub it defaults to.
+func SameRepository(left string, right string) bool {
+	return sameRepository(left, right)
+}
+
 // candidatesFor is the definitions of one datastore a given image can run on:
 // the ones shipping that image, and otherwise the ones that are not a flavor.
 func (r *Registry) candidatesFor(names []string, image string) []string {

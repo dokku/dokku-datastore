@@ -76,6 +76,11 @@ type UpgradeServiceInput struct {
 	// ImageVersion is the image version to upgrade to
 	ImageVersion string
 
+	// NoMigrate places the service on the named definition with its data left
+	// where it is, for a service whose data already is where that definition
+	// mounts it
+	NoMigrate bool
+
 	// RestartApps is whether to stop and start the linked apps around the upgrade
 	RestartApps bool
 
@@ -168,6 +173,12 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		}
 	}
 
+	// leaving the data where it is only means something for a service being
+	// placed on a definition, which has to be named
+	if input.NoMigrate && input.Definition == "" {
+		return fmt.Errorf("unable to upgrade %s: --no-migrate places the service on the definition named with --definition, and none was named", input.ServiceName)
+	}
+
 	// a definition named outright is refused before anything is touched, and
 	// otherwise supplies the image and version the flags are laid over, the
 	// way it does at create: the service's recorded image belongs to the
@@ -231,9 +242,11 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 
 	// an upgrade to the image a service already runs is nothing to do - unless it
 	// also asked to change a setting, or named a definition other than the one it
-	// runs, which is a recreate whatever the image says
+	// runs, which is a recreate whatever the image says. So is one leaving the
+	// data where it is: its container may mount the data where another
+	// definition would, which is what it was asked to put right
 	movesDefinition := named != nil && named.DefinitionName() != input.Datastore.DefinitionName()
-	if currentImage == taggedImage && !input.changesSettings() && !movesDefinition {
+	if currentImage == taggedImage && !input.changesSettings() && !movesDefinition && !input.NoMigrate {
 		input.Logger.Info(fmt.Sprintf("Service %s already running %s", input.ServiceName, taggedImage)) //nolint:errcheck
 		return nil
 	}
@@ -251,7 +264,7 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	// and for the same reason again: a migration that cannot be undone, or that
 	// would lose what the apps write while it runs, is refused while the old
 	// container is still there to keep running
-	plan := upgradeMigration(input.Datastore, target)
+	plan := upgradeMigration(input.Datastore, target, input.NoMigrate)
 	if err := checkMigration(input, target, plan, recorded); err != nil {
 		return err
 	}

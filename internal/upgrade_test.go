@@ -410,6 +410,29 @@ func TestUpgradeRefusesAnUnusableWaitTimeout(t *testing.T) {
 	}
 }
 
+// Leaving the data where it is only means something for a service being placed
+// on a definition, so asking for it without naming one is refused before
+// anything is touched rather than read as a bare upgrade.
+func TestUpgradeRefusesNoMigrateWithoutADefinition(t *testing.T) {
+	datastore := service.Datastores["postgres"]
+	withDataRoot(t)
+
+	err := UpgradeService(t.Context(), UpgradeServiceInput{
+		Datastore:   datastore,
+		ServiceName: "lollipop",
+		NoMigrate:   true,
+	})
+	if err == nil {
+		t.Fatal("expected --no-migrate without --definition to be refused, got no error")
+	}
+
+	for _, expected := range []string{"lollipop", "--no-migrate", "--definition"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Errorf("expected the error to mention %q, got %q", expected, err)
+		}
+	}
+}
+
 // An upgrade rewrites the custom environment and the config options of a service
 // that may have been made when both were readable by everyone, and the new
 // values must not land in a file that still is.

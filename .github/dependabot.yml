@@ -80,6 +80,32 @@ updates:
     schedule:
       interval: "daily"
 
+  # postgres-14, postgres-15 and postgres-16 are held inside their majors the
+  # way postgres-17 is
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/postgres-14"
+    schedule:
+      interval: "daily"
+    ignore:
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/postgres-15"
+    schedule:
+      interval: "daily"
+    ignore:
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/postgres-16"
+    schedule:
+      interval: "daily"
+    ignore:
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+
   - package-ecosystem: "docker"
     directory: "/internal/registry/definitions/postgres-17"
     schedule:

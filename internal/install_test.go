@@ -405,3 +405,58 @@ func TestMigrateLegacyCronFileWithNoCronFile(t *testing.T) {
 		t.Error("expected nothing to change")
 	}
 }
+
+// A service pinned to a definition for a major other than the one its image
+// names, where nothing about where the data is mounted tells the two apart, is
+// moved onto the definition for its own major when the plugin is installed. A
+// service already pinned where its image belongs is left as it is.
+func TestMigrateServicesMovesAMisplacedPin(t *testing.T) {
+	datastore := service.Datastores["postgres"]
+	withDataRoot(t)
+
+	for name, pin := range map[string]string{"misplaced": "postgres-17", "settled": "postgres-17"} {
+		root := service.Folders(datastore, name).Root
+		if err := os.MkdirAll(root, 0755); err != nil {
+			t.Fatalf("failed to create %s: %s", root, err)
+		}
+
+		version := "15.7"
+		if name == "settled" {
+			version = "17.11"
+		}
+
+		files := map[string]string{"DEFINITION": pin, "IMAGE": "postgres", "IMAGE_VERSION": version}
+		for filename, contents := range files {
+			if err := os.WriteFile(filepath.Join(root, filename), []byte(contents+"\n"), 0644); err != nil {
+				t.Fatalf("failed to write %s: %s", filename, err)
+			}
+		}
+	}
+
+	ui := cli.NewMockUi()
+	if err := migrateServices(t.Context(), InstallInput{Datastore: datastore, Logger: Ui{Ui: ui}}); err != nil {
+		t.Fatalf("failed to migrate the services: %s", err)
+	}
+
+	for name, expected := range map[string]string{"misplaced": "postgres-15", "settled": "postgres-17"} {
+		contents, err := os.ReadFile(service.Files(datastore, name).Definition)
+		if err != nil {
+			t.Fatalf("failed to read the pin of %s: %s", name, err)
+		}
+
+		if pinned := strings.TrimSpace(string(contents)); pinned != expected {
+			t.Errorf("expected %s to be pinned to %s, got %s", name, expected, pinned)
+		}
+	}
+
+	warnings := ui.ErrorWriter.String() + ui.OutputWriter.String()
+	for _, expected := range []string{"misplaced", "postgres-17", "postgres-15"} {
+		if !strings.Contains(warnings, expected) {
+			t.Errorf("expected the warning to mention %q, got %q", expected, warnings)
+		}
+	}
+
+	if strings.Contains(warnings, "settled") {
+		t.Errorf("expected nothing said about a service pinned where it belongs, got %q", warnings)
+	}
+}

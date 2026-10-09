@@ -170,7 +170,7 @@ func TestNewDocumentationDataDefinitions(t *testing.T) {
 		}
 	}
 
-	if postgres.Definitions[0] != "postgres-17" {
+	if postgres.Definitions[0] != "postgres-14" {
 		t.Errorf("expected the oldest plain definition first, got %s", postgres.Definitions[0])
 	}
 
@@ -333,6 +333,7 @@ func TestNewDocumentationDataVolumes(t *testing.T) {
 	}
 
 	for key, expected := range map[string]string{
+		"postgres-14 data":  "/var/lib/postgresql/data",
 		"postgres-17 data":  "/var/lib/postgresql/data",
 		"postgres-18 data":  "/var/lib/postgresql",
 		"postgres-18 certs": "/certs",

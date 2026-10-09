@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dokku/dokku-datastore/internal/definition"
 )
 
 // postgres is the datastore this exists for: it is split by major version, and
@@ -35,6 +37,9 @@ func TestForImageSelectsTheMajor(t *testing.T) {
 		imageVersion string
 		expected     string
 	}{
+		{imageVersion: "14.24", expected: "postgres-14"},
+		{imageVersion: "15.7", expected: "postgres-15"},
+		{imageVersion: "16.15", expected: "postgres-16"},
 		{imageVersion: "17.8", expected: "postgres-17"},
 		{imageVersion: "18.4", expected: "postgres-18"},
 		// a version no definition claims falls back to the newest rather than
@@ -186,7 +191,7 @@ func TestForServiceDerivesFromTheImageVersion(t *testing.T) {
 func TestForServiceRefusesAnUnknownPin(t *testing.T) {
 	postgres := postgresDatastore(t)
 	serviceRoot := withServiceRoot(t, postgres, "stale")
-	writeServiceFile(t, filepath.Join(serviceRoot, "DEFINITION"), "postgres-16")
+	writeServiceFile(t, filepath.Join(serviceRoot, "DEFINITION"), "postgres-9")
 	writeServiceFile(t, filepath.Join(serviceRoot, "IMAGE_VERSION"), "17.8")
 
 	resolved, err := postgres.ForService("stale")
@@ -194,7 +199,7 @@ func TestForServiceRefusesAnUnknownPin(t *testing.T) {
 		t.Fatal("expected an unknown pin to be reported")
 	}
 
-	for _, expected := range []string{"stale", "postgres-16", "does not ship"} {
+	for _, expected := range []string{"stale", "postgres-9", "does not ship"} {
 		if !strings.Contains(err.Error(), expected) {
 			t.Errorf("expected the error to mention %q, got %q", expected, err)
 		}
@@ -261,6 +266,9 @@ func TestDefinitionsSpansTheMajors(t *testing.T) {
 
 	// the datastore's own first, then each flavor, every one oldest first
 	expected := []string{
+		"postgres-14",
+		"postgres-15",
+		"postgres-16",
 		"postgres-17",
 		"postgres-18",
 		"postgres-pgvector-pg17",
@@ -409,5 +417,197 @@ func TestWithDefinitionNamedDoesNotChangeTheDatastore(t *testing.T) {
 
 	if postgres.DefinitionName() != "postgres-18" {
 		t.Errorf("expected the shared datastore to stay on postgres-18, got %s", postgres.DefinitionName())
+	}
+}
+
+// Before postgres had definitions for fourteen to sixteen, a service on one of
+// them was pinned to the newest definition. Only a pin wrong on its face is
+// moved: the image the pinned definition ships, at a version naming another
+// definition's major outright. These are the cases decided by the service's own
+// files, before the container is asked anything.
+func TestMisplacedPinIsReadFromTheServiceFiles(t *testing.T) {
+	postgres := postgresDatastore(t)
+
+	tests := []struct {
+		name         string
+		pinned       string
+		image        string
+		imageVersion string
+		expected     string
+	}{
+		{name: "pinned to the newest", pinned: "postgres-18", image: "postgres", imageVersion: "15.7", expected: "postgres-15"},
+		{name: "pinned to another plain major", pinned: "postgres-17", image: "postgres", imageVersion: "14.24", expected: "postgres-14"},
+		{name: "a hub image written out", pinned: "postgres-18", image: "docker.io/library/postgres", imageVersion: "16.15", expected: "postgres-16"},
+		{name: "no image recorded", pinned: "postgres-18", imageVersion: "15.7", expected: "postgres-15"},
+		{name: "pinned where it belongs", pinned: "postgres-18", image: "postgres", imageVersion: "18.6"},
+		{name: "unpinned", image: "postgres", imageVersion: "15.7"},
+		{name: "a pin the plugin does not ship", pinned: "postgres-9", image: "postgres", imageVersion: "15.7"},
+		// placed with --definition on a tag naming no major
+		{name: "a version naming no major", pinned: "postgres-17", image: "postgres", imageVersion: "custom-3"},
+		// a major no definition has, which stays where it was put
+		{name: "a major with no definition", pinned: "postgres-18", image: "postgres", imageVersion: "12.1"},
+		// placed with --definition on an image of its own
+		{name: "an image of its own", pinned: "postgres-17", image: "myorg/postgres", imageVersion: "18.1"},
+		// pinned before pgvector had definitions, with its data where that pin
+		// mounts it
+		{name: "a flavor pinned before it had definitions", pinned: "postgres-18", image: "pgvector/pgvector", imageVersion: "pg17"},
+		// a flavor's image on a plain definition, named outright
+		{name: "a flavor placed on a plain definition", pinned: "postgres-17", image: "postgis/postgis", imageVersion: "18-3.6"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serviceRoot := withServiceRoot(t, postgres, "misplaced")
+			if test.pinned != "" {
+				writeServiceFile(t, filepath.Join(serviceRoot, "DEFINITION"), test.pinned)
+			}
+			if test.image != "" {
+				writeServiceFile(t, filepath.Join(serviceRoot, "IMAGE"), test.image)
+			}
+			writeServiceFile(t, filepath.Join(serviceRoot, "IMAGE_VERSION"), test.imageVersion)
+
+			corrected, pinned, ok := postgres.misplacedPin("misplaced")
+			if ok != (test.expected != "") {
+				t.Fatalf("expected misplaced to be %t, got %t", test.expected != "", ok)
+			}
+
+			if pinned != test.pinned {
+				t.Errorf("expected the pin to be reported as %q, got %q", test.pinned, pinned)
+			}
+
+			if ok && corrected.DefinitionName() != test.expected {
+				t.Errorf("expected %s, got %s", test.expected, corrected.DefinitionName())
+			}
+		})
+	}
+}
+
+// A pin is only moved where the definitions agree on where the data is, or
+// where the service's container says it is where the corrected one looks.
+// postgres-17 and postgres-15 mount everything in the same place, so nothing
+// is needed of the container. postgres-18 does not, and a service with no
+// container to ask keeps its pin.
+func TestMisplacedPinAsksTheContainerWhereTheDefinitionsDiffer(t *testing.T) {
+	postgres := postgresDatastore(t)
+
+	tests := []struct {
+		pinned   string
+		expected string
+	}{
+		{pinned: "postgres-17", expected: "postgres-15"},
+		{pinned: "postgres-18", expected: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.pinned, func(t *testing.T) {
+			serviceRoot := withServiceRoot(t, postgres, "no-container-for-this-test")
+			writeServiceFile(t, filepath.Join(serviceRoot, "DEFINITION"), test.pinned)
+			writeServiceFile(t, filepath.Join(serviceRoot, "IMAGE"), "postgres")
+			writeServiceFile(t, filepath.Join(serviceRoot, "IMAGE_VERSION"), "15.7")
+
+			corrected, pinned, ok := postgres.MisplacedPin(t.Context(), "no-container-for-this-test")
+			if ok != (test.expected != "") {
+				t.Fatalf("expected misplaced to be %t, got %t", test.expected != "", ok)
+			}
+
+			if pinned != test.pinned {
+				t.Errorf("expected the pin to be reported as %q, got %q", test.pinned, pinned)
+			}
+
+			if ok && corrected.DefinitionName() != test.expected {
+				t.Errorf("expected %s, got %s", test.expected, corrected.DefinitionName())
+			}
+		})
+	}
+}
+
+// What the container says about where the data is, for a service pinned to
+// postgres-18 while it runs postgres 15.
+func TestMountsAgree(t *testing.T) {
+	postgres := postgresDatastore(t)
+	definitionNamed := func(name string) definition.Definition {
+		t.Helper()
+
+		found, ok := postgres.registry.Definition(name)
+		if !ok {
+			t.Fatalf("expected a %s definition", name)
+		}
+		return found
+	}
+
+	hostRoot := "/var/lib/dokku/services/postgres/db"
+	tests := []struct {
+		name      string
+		pinned    string
+		overrides map[string]string
+		mounts    map[string]string
+		expected  bool
+	}{
+		{
+			// the container the bash plugin made, which never mounted the certs
+			name:     "a container mounting the data where fifteen keeps it",
+			pinned:   "postgres-18",
+			mounts:   map[string]string{hostRoot + "/data": "/var/lib/postgresql/data"},
+			expected: true,
+		},
+		{
+			// a container this binary made on the pin, whose server made its
+			// cluster where eighteen mounts the data
+			name:   "a container mounting the data where eighteen does",
+			pinned: "postgres-18",
+			mounts: map[string]string{
+				hostRoot + "/data":  "/var/lib/postgresql",
+				hostRoot + "/certs": "/certs",
+			},
+			expected: false,
+		},
+		{
+			name:     "no container",
+			pinned:   "postgres-18",
+			expected: false,
+		},
+		{
+			name:     "definitions mounting everything in the same place",
+			pinned:   "postgres-17",
+			expected: true,
+		},
+		{
+			// a service that moved its data volume moved it under either
+			name:      "a data volume moved with volume-targets",
+			pinned:    "postgres-18",
+			overrides: map[string]string{"data": "/srv/postgresql"},
+			expected:  true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual := mountsAgree(definitionNamed(test.pinned), definitionNamed("postgres-15"), test.overrides, hostRoot, func() map[string]string { return test.mounts })
+			if actual != test.expected {
+				t.Errorf("expected %t, got %t", test.expected, actual)
+			}
+		})
+	}
+}
+
+// Two definitions that mount every volume in the same place say nothing the
+// container could contradict, so it is not asked at all.
+func TestMountsAgreeAsksNothingOfAContainerItDoesNotNeed(t *testing.T) {
+	postgres := postgresDatastore(t)
+	seventeen, _ := postgres.registry.Definition("postgres-17")
+	fifteen, _ := postgres.registry.Definition("postgres-15")
+
+	asked := false
+	agree := mountsAgree(seventeen, fifteen, nil, "/var/lib/dokku/services/postgres/db", func() map[string]string {
+		asked = true
+		return nil
+	})
+
+	if !agree {
+		t.Error("expected two definitions mounting everything in the same place to agree")
+	}
+
+	if asked {
+		t.Error("expected the container not to be asked")
 	}
 }

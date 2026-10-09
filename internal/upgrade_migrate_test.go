@@ -25,10 +25,11 @@ func TestUpgradeMigration(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		current  *service.Datastore
-		target   *service.Datastore
-		expected migration
+		name      string
+		current   *service.Datastore
+		target    *service.Datastore
+		noMigrate bool
+		expected  migration
 	}{
 		{
 			name:     "inside a definition",
@@ -74,11 +75,34 @@ func TestUpgradeMigration(t *testing.T) {
 			target:   named("elasticsearch", "elasticsearch-8"),
 			expected: migrationNone,
 		},
+		{
+			name:     "up from a major that was added later",
+			current:  named("postgres", "postgres-15"),
+			target:   named("postgres", "postgres-17"),
+			expected: migrationStep,
+		},
+		{
+			// a service pinned to the newest definition while its container kept
+			// its data where postgres 15 does is put back without a migration,
+			// which would export the empty cluster the newest one looks at
+			name:      "down a major without migrating",
+			current:   named("postgres", "postgres-18"),
+			target:    named("postgres", "postgres-15"),
+			noMigrate: true,
+			expected:  migrationNone,
+		},
+		{
+			name:      "across a major with a step without migrating",
+			current:   named("postgres", "postgres-17"),
+			target:    named("postgres", "postgres-18"),
+			noMigrate: true,
+			expected:  migrationNone,
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if actual := upgradeMigration(test.current, test.target); actual != test.expected {
+			if actual := upgradeMigration(test.current, test.target, test.noMigrate); actual != test.expected {
 				t.Errorf("expected %d, got %d", test.expected, actual)
 			}
 		})

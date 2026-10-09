@@ -148,6 +148,42 @@ func Image(ctx context.Context, containerID string) string {
 	return image
 }
 
+// Mounts returns where a container mounts each host path it was given, keyed
+// by the host path, or nothing when there is no such container.
+func Mounts(ctx context.Context, containerID string) map[string]string {
+	if containerID == "" {
+		return nil
+	}
+
+	mounts, _ := common.DockerInspect(containerID, "{{ json .Mounts }}")
+	return MountDestinations(mounts)
+}
+
+// MountDestinations reads the json docker reports for a container's mounts
+// into where each host path is mounted, leaving out the volumes docker manages
+// itself, which have no host path a service names.
+func MountDestinations(mountsJSON string) map[string]string {
+	var mounts []struct {
+		Type        string
+		Source      string
+		Destination string
+	}
+	if err := json.Unmarshal([]byte(mountsJSON), &mounts); err != nil {
+		return nil
+	}
+
+	destinations := map[string]string{}
+	for _, mount := range mounts {
+		if mount.Type != "bind" {
+			continue
+		}
+
+		destinations[mount.Source] = mount.Destination
+	}
+
+	return destinations
+}
+
 // Remove deletes a container, running or not.
 func Remove(ctx context.Context, containerID string) error {
 	if _, err := execx.Run(ctx, common.ExecCommandInput{
