@@ -906,6 +906,43 @@ type BackupInput struct {
 	UseIAM      bool
 }
 
+// the status a backup ended with, as the post-backup trigger is handed it
+const (
+	BackupStatusSuccess = "success"
+	BackupStatusFailure = "failure"
+)
+
+// PostBackupInput is the input for the CallPostBackup function
+type PostBackupInput struct {
+	// BucketName is the bucket the backup was made to, empty when none was named
+	BucketName string
+
+	// Datastore is the datastore the service belongs to
+	Datastore *service.Datastore
+
+	// ServiceName is the service that was backed up
+	ServiceName string
+
+	// Status is whether the backup succeeded or failed
+	Status string
+}
+
+// CallPostBackup fires the service-action post-backup trigger once a backup has
+// ended, so that a plugin can tell something outside dokku whether it succeeded
+func CallPostBackup(ctx context.Context, input PostBackupInput) error {
+	_, err := execx.PlugnTrigger(ctx, common.PlugnTriggerInput{
+		Trigger:      "service-action",
+		Args:         []string{"post-backup", input.Datastore.ServiceType(), input.ServiceName, input.BucketName, input.Status},
+		StreamStderr: true,
+		StreamStdout: true,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to call service-action post-backup trigger: %w", err)
+	}
+
+	return nil
+}
+
 // Backup exports a service and ships the result to an s3 bucket
 func Backup(ctx context.Context, input BackupInput) error {
 	serviceFolders := service.Folders(input.Datastore, input.ServiceName)

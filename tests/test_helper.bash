@@ -126,15 +126,29 @@ EOS
   chmod +x "$BATS_FILE_TMPDIR/bin/dokku"
 
   # checking an app name asks for a plugin path, and with one set the link
-  # triggers are fired through plugn. No plugin is enabled, so the stand-in only
-  # records what it was asked to do, one call per line
+  # triggers are fired through plugn
+  fake_plugn_setup
+}
+
+# stands in for plugn with no plugin enabled, so a trigger is only recorded, one
+# call per line, in PLUGN_LOG. It is called as `plugn trigger <name> ...`, and a
+# trigger named by PLUGN_FAIL_TRIGGER fails, as a plugin implementing it would
+fake_plugn_setup() {
+  mkdir -p "$BATS_FILE_TMPDIR/bin"
   export PLUGIN_PATH="$BATS_FILE_TMPDIR/plugins"
   export PLUGN_LOG="$BATS_FILE_TMPDIR/plugn.log"
   mkdir -p "$PLUGIN_PATH/enabled"
-  printf '#!/usr/bin/env bash\necho "$*" >>%q\n' "$PLUGN_LOG" >"$BATS_FILE_TMPDIR/bin/plugn"
+  cat >"$BATS_FILE_TMPDIR/bin/plugn" <<EOS
+#!/usr/bin/env bash
+echo "\$*" >>$(printf '%q' "$PLUGN_LOG")
+if [[ -n "\$PLUGN_FAIL_TRIGGER" ]] && [[ "\$2" == "\$PLUGN_FAIL_TRIGGER" ]]; then
+  echo "the \$2 trigger failed" >&2
+  exit 1
+fi
+EOS
   chmod +x "$BATS_FILE_TMPDIR/bin/plugn"
 
-  export PATH="$BATS_FILE_TMPDIR/bin:$PATH"
+  [[ ":$PATH:" == *":$BATS_FILE_TMPDIR/bin:"* ]] || export PATH="$BATS_FILE_TMPDIR/bin:$PATH"
 }
 
 # the first name this definition reserves for a database of its own, or nothing

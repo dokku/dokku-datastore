@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -1229,5 +1230,127 @@ func TestBackupExportCoversEveryDatabase(t *testing.T) {
 				t.Errorf("expected the backup to leave the arguments to the export-args property, got %q", input.ExtraArgs)
 			}
 		})
+	}
+}
+
+// withServiceActionPlugin points the plugin path at a temporary directory
+// holding a service-action trigger that records its arguments and exits with
+// the given code, and puts a plugn on PATH that runs it the way plugn does. It
+// returns the file the arguments are recorded in.
+func withServiceActionPlugin(t *testing.T, exitCode int) string {
+	t.Helper()
+
+	root := t.TempDir()
+	recorded := filepath.Join(root, "arguments")
+	directory := filepath.Join(root, "enabled", "notify")
+	if err := os.MkdirAll(directory, 0755); err != nil {
+		t.Fatalf("unable to create %s: %s", directory, err)
+	}
+
+	script := fmt.Sprintf("#!/usr/bin/env bash\necho \"$*\" >>%q\nexit %d\n", recorded, exitCode)
+	if err := os.WriteFile(filepath.Join(directory, "service-action"), []byte(script), 0755); err != nil {
+		t.Fatalf("unable to write the service-action trigger: %s", err)
+	}
+
+	bin := t.TempDir()
+	plugn := "#!/usr/bin/env bash\nshift\ntrigger=\"$1\"\nshift\nfor script in \"$PLUGIN_PATH\"/enabled/*/\"$trigger\"; do\n  \"$script\" \"$@\" || exit $?\ndone\n"
+	if err := os.WriteFile(filepath.Join(bin, "plugn"), []byte(plugn), 0755); err != nil {
+		t.Fatalf("unable to write plugn: %s", err)
+	}
+
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("PLUGIN_PATH", root)
+
+	return recorded
+}
+
+// A plugin is told how each backup ended, so that it can tell something outside
+// dokku, whether the backup was scheduled or run by hand
+func TestCallPostBackup(t *testing.T) {
+	tests := []struct {
+		name     string
+		bucket   string
+		status   string
+		expected string
+	}{
+		{
+			name:     "a backup that finished",
+			bucket:   "my-bucket",
+			status:   BackupStatusSuccess,
+			expected: "post-backup redis lollipop my-bucket success\n",
+		},
+		{
+			name:     "a backup that failed",
+			bucket:   "my-bucket/redis-backups",
+			status:   BackupStatusFailure,
+			expected: "post-backup redis lollipop my-bucket/redis-backups failure\n",
+		},
+		{
+			name:     "a backup refused before a bucket was named",
+			bucket:   "",
+			status:   BackupStatusFailure,
+			expected: "post-backup redis lollipop  failure\n",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorded := withServiceActionPlugin(t, 0)
+
+			err := CallPostBackup(t.Context(), PostBackupInput{
+				BucketName:  test.bucket,
+				Datastore:   service.Datastores["redis"],
+				ServiceName: "lollipop",
+				Status:      test.status,
+			})
+			if err != nil {
+				t.Fatalf("CallPostBackup() returned an error: %s", err)
+			}
+
+			contents, err := os.ReadFile(recorded)
+			if err != nil {
+				t.Fatalf("the trigger was not called: %s", err)
+			}
+			if string(contents) != test.expected {
+				t.Errorf("the trigger was handed %q, expected %q", contents, test.expected)
+			}
+		})
+	}
+}
+
+// A plugin that fails is reported, so the caller can warn about it
+func TestCallPostBackupReportsAFailingTrigger(t *testing.T) {
+	withServiceActionPlugin(t, 3)
+
+	err := CallPostBackup(t.Context(), PostBackupInput{
+		BucketName:  "my-bucket",
+		Datastore:   service.Datastores["redis"],
+		ServiceName: "lollipop",
+		Status:      BackupStatusSuccess,
+	})
+	if err == nil {
+		t.Fatal("CallPostBackup() returned no error for a failing trigger")
+	}
+	if !strings.Contains(err.Error(), "service-action post-backup") {
+		t.Errorf("the error does not name the trigger: %s", err)
+	}
+}
+
+// Outside a dokku install there is no plugin to tell
+func TestCallPostBackupWithoutAPluginPath(t *testing.T) {
+	recorded := withServiceActionPlugin(t, 0)
+	t.Setenv("PLUGIN_PATH", "")
+
+	err := CallPostBackup(t.Context(), PostBackupInput{
+		BucketName:  "my-bucket",
+		Datastore:   service.Datastores["redis"],
+		ServiceName: "lollipop",
+		Status:      BackupStatusSuccess,
+	})
+	if err != nil {
+		t.Fatalf("CallPostBackup() returned an error: %s", err)
+	}
+	if _, err := os.Stat(recorded); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the trigger was called without a plugin path")
 	}
 }

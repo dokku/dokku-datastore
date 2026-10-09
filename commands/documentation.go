@@ -44,6 +44,7 @@ func (c *BackupCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *BackupCommand) Documentation() string {
 	return `backup the 'lollipop' service to the 'my-s3-bucket' bucket on AWS
+> once a backup ends, scheduled or not, the service-action plugin trigger is fired with "post-backup {{.CommandPrefix}} <service> <bucket-name> <success|failure>", and a trigger that fails is only warned about
 dokku {{.CommandPrefix}}:backup lollipop my-s3-bucket --use-iam
 backup the 'lollipop' service under a path in the bucket
 dokku {{.CommandPrefix}}:backup lollipop my-s3-bucket/{{.CommandPrefix}}-backups
@@ -132,6 +133,7 @@ func (c *BackupScheduleCommand) Documentation() string {
 	return `schedule a backup
 > 'schedule' is a crontab expression, eg. "0 3 * * *" for each day at 3am, or a descriptor such as "@daily". A schedule cron cannot run is refused.
 > the backup is added to the dokku crontab through the cron-entries plugin trigger, so it is listed by "dokku cron:list --global" and its output is appended to /var/log/dokku/{{.CommandPrefix}}.<service>.backup.log, which "dokku {{.CommandPrefix}}:backup-logs <service>" prints
+> each scheduled backup fires the same service-action post-backup trigger as "dokku {{.CommandPrefix}}:backup", so a plugin can report whether it succeeded
 > NOTE: dokku only writes a crontab when the global scheduler or at least one app uses the docker-local scheduler, so a scheduled backup does not run on a host that only uses k3s or null
 dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket
 schedule a backup and authenticate via iam

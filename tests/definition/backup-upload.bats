@@ -142,6 +142,30 @@ setup() {
   fi
 }
 
+# issue 313: nothing outside dokku could be told whether a backup worked, short
+# of mailing its whole output
+@test "($DEFINITION) backup fires the post-backup trigger" {
+  fake_plugn_setup
+  : >"$PLUGN_LOG"
+
+  run "$BIN" backup "$PLUGIN" "$SERVICE" "$S3_BUCKET"
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup"
+  fi
+  assert_success
+
+  run grep "service-action post-backup" "$PLUGN_LOG"
+  assert_success
+  assert_output "trigger service-action post-backup $PLUGIN $SERVICE $S3_BUCKET success"
+
+  # a plugin that fails to hear about it does not turn the backup into a
+  # failed one
+  PLUGN_FAIL_TRIGGER=service-action run "$BIN" backup "$PLUGIN" "$SERVICE" "$S3_BUCKET"
+  assert_success
+  assert_output --regexp "Backup of $SERVICE finished at"
+  assert_output --partial "failed to call service-action post-backup trigger"
+}
+
 # issue 271: backups were always uploaded with the bucket's default storage
 # class, with nothing to say they should land on a cheaper one
 @test "($DEFINITION) backup uploads with the storage class the service sets" {

@@ -105,6 +105,50 @@ teardown_file() {
   refute_output --partial "Backing up"
 }
 
+@test "($DEFINITION) a refused backup fires the post-backup trigger" {
+  fake_plugn_setup
+  : >"$PLUGN_LOG"
+
+  run "$BIN" backup "$PLUGIN" "$SERVICE" My_Bucket
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup"
+  fi
+  assert_failure
+  assert_output --partial "invalid bucket name"
+
+  run grep "service-action post-backup" "$PLUGN_LOG"
+  assert_success
+  assert_output "trigger service-action post-backup $PLUGIN $SERVICE My_Bucket failure"
+}
+
+@test "($DEFINITION) a backup of a missing service fires no post-backup trigger" {
+  fake_plugn_setup
+  : >"$PLUGN_LOG"
+
+  run "$BIN" backup "$PLUGIN" missing-service my-bucket
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup"
+  fi
+  assert_failure
+  assert_output --partial "does not exist"
+
+  run grep "service-action post-backup" "$PLUGN_LOG"
+  assert_failure
+}
+
+@test "($DEFINITION) a failing post-backup trigger is only warned about" {
+  fake_plugn_setup
+  : >"$PLUGN_LOG"
+
+  PLUGN_FAIL_TRIGGER=service-action run "$BIN" backup "$PLUGIN" "$SERVICE" My_Bucket
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup"
+  fi
+  assert_failure 1
+  assert_output --partial "invalid bucket name"
+  assert_output --partial "failed to call service-action post-backup trigger"
+}
+
 @test "($DEFINITION) the backup passphrase is reported as a fingerprint" {
   run "$BIN" backup-set-encryption "$PLUGIN" "$SERVICE" "correct horse battery staple"
   if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
