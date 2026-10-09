@@ -748,6 +748,25 @@ The log is kept under `DOKKU_LOGS_DIR` when dokku keeps its logs somewhere other
 
 The dokku crontab is written again when the plugin is installed on a host with a scheduled backup, which moves every scheduled backup onto its own log. The shared `/var/log/dokku/<prefix>.log` is left where it was, since it holds the only record of the backups that ran before, and can be removed by hand once it is no longer needed.
 
+## Backup notifications
+
+Nothing outside dokku could be told whether a backup worked, short of having cron mail its whole output. Every `backup` now fires the `service-action` trigger once it ends, whether cron or a person ran it, the way `create`, `destroy`, `link` and `unlink` already do. It is handed `post-backup`, the datastore's command prefix, the service, the bucket and `success` or `failure`.
+
+```shell
+#!/usr/bin/env bash
+# posts every failed backup to a webhook
+main() {
+  declare ACTION="$1" SERVICE_TYPE="$2" SERVICE="$3" BUCKET="$4" STATUS="$5"
+  [[ "$ACTION" == "post-backup" ]] || return 0
+  [[ "$STATUS" == "failure" ]] || return 0
+  curl -fsS -X POST -d "the $SERVICE_TYPE service $SERVICE failed to back up to $BUCKET" https://example.com/hooks/backups
+}
+
+main "$@"
+```
+
+A backup that is refused before it starts, because the bucket is missing or invalid or the service is pinned to a definition the plugin does not ship, fires `failure` too, with the bucket empty when none was named. A backup of a service that does not exist fires nothing. A trigger that fails is warned about, and the backup exits as it would have without it, so a broken notification never turns a backup that worked into one that failed. What the trigger prints is part of the backup's output, so for a scheduled backup it is appended to the service's backup log.
+
 ## Backups when dokku runs in a container
 
 `backup` exported a service into a temporary directory and mounted it into the container that ships it to s3. The mount is resolved by dockerd, and when dokku is installed in docker that directory is inside the dokku container, where dockerd cannot see it. Docker mounted an empty directory in its place, and an archive holding nothing but an empty `backup` directory was uploaded and reported as a success.

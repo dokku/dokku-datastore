@@ -180,7 +180,7 @@ func (c *BackupCommand) Run(args []string) int {
 	datastore, unresolved := datastore.ForService(serviceName)
 	if unresolved != nil {
 		logger.Error(internal.ErrorInput{Error: unresolved})
-		return 1
+		return c.finish(ctx, &logger, datastore, serviceName, "", 1)
 	}
 
 	if !service.Exists(ctx, datastore, serviceName) {
@@ -196,12 +196,12 @@ func (c *BackupCommand) Run(args []string) int {
 			Message: command.CommandErrorText(c),
 			Error:   errors.New("Please specify an aws bucket for the backup"), //nolint:staticcheck // matches the bash datastore plugins
 		})
-		return 1
+		return c.finish(ctx, &logger, datastore, serviceName, bucketName, 1)
 	}
 
 	if err := internal.ValidateBucketName(bucketName); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
-		return 1
+		return c.finish(ctx, &logger, datastore, serviceName, bucketName, 1)
 	}
 
 	// the start and end of each run are marked with the time, since a scheduled
@@ -216,9 +216,31 @@ func (c *BackupCommand) Run(args []string) int {
 	}); err != nil {
 		logger.Info(fmt.Sprintf("Backup of %s failed at %s", serviceName, internal.BackupTimestamp(time.Now())))
 		logger.Error(internal.ErrorInput{Error: err})
-		return 1
+		return c.finish(ctx, &logger, datastore, serviceName, bucketName, 1)
 	}
 
 	logger.Info(fmt.Sprintf("Backup of %s finished at %s", serviceName, internal.BackupTimestamp(time.Now())))
-	return 0
+	return c.finish(ctx, &logger, datastore, serviceName, bucketName, 0)
+}
+
+// finish fires the post-backup trigger for a backup of an existing service that
+// ended with the given exit code, and returns that code. The trigger is fired
+// even when the backup was interrupted, and a plugin that fails to hear about
+// the backup is warned about rather than changing whether the backup worked.
+func (c *BackupCommand) finish(ctx context.Context, logger *internal.Ui, datastore *service.Datastore, serviceName string, bucketName string, code int) int {
+	status := internal.BackupStatusSuccess
+	if code != 0 {
+		status = internal.BackupStatusFailure
+	}
+
+	if err := internal.CallPostBackup(context.WithoutCancel(ctx), internal.PostBackupInput{
+		BucketName:  bucketName,
+		Datastore:   datastore,
+		ServiceName: serviceName,
+		Status:      status,
+	}); err != nil {
+		logger.Warn(internal.WarnInput{Warning: err.Error()})
+	}
+
+	return code
 }
