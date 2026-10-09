@@ -1243,6 +1243,8 @@ dokku {{.CommandPrefix}}:upgrade lollipop --definition {{index .Definitions 0}}
 {{- if .Migrates}}
 An upgrade that moves a service onto another of its definitions carries the data across rather than leaving it where the new one would not read it, which needs --restart-apps so that the linked apps write nothing while it is copied. The old data is kept beside the new, and a move that fails puts the service back on what it ran.
 dokku {{.CommandPrefix}}:upgrade lollipop --definition {{index .Definitions 0}} --restart-apps
+A service whose data is already where another definition mounts it, such as one pinned to a definition that never matched where its container kept the data, is placed on that definition with --no-migrate, which makes its container again with the data left where it is. It does not check where the data is, so pointing it at the wrong definition starts the service on an empty directory with its data still beside it.
+dokku {{.CommandPrefix}}:upgrade lollipop --definition {{index .Definitions 0}} --no-migrate
 {{- end}}
 A service keeps the mounts it has unless --volume is passed, which replaces them, and each one is checked against the new container before the old one is taken away.
 dokku {{.CommandPrefix}}:upgrade lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro

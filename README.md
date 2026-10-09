@@ -121,6 +121,15 @@ dokku-datastore create postgres db --image-version 17.8
 dokku-datastore create postgres db --image-version 18.4
 ```
 
+A release that adds a definition for an older major can move a service onto it, once: before `postgres-14`, `postgres-15` and `postgres-16` existed, a service running one of those majors resolved to the newest definition, and was pinned to it the next time the plugin was installed. When the plugin is installed, a service whose recorded image is the one its pinned definition ships, at a version naming the major of another of its definitions outright, is pinned to that definition instead, with a warning naming both. Where the two definitions mount the data in different places, the service's container has to mount it where the definition it is moved onto would, which is the case for a service still running the container the bash plugin made. A service with no container, or whose container mounts the data where its pin does, keeps its pin, since its server may have made its cluster there. Nothing about the container or the data is changed.
+
+A service pinned to the wrong definition that install leaves alone, such as one on an image of its own, is moved with `upgrade --definition <definition> --no-migrate`. That makes the container again on the named definition and leaves the data where it is, rather than carrying it across the way an upgrade onto another definition otherwise does. Nothing checks that the data is where the named definition looks for it, so naming the wrong one starts the service on an empty directory with its data still beside it. A postgres server started on a directory it did not find its cluster in makes a new one, so a service that ran under the wrong pin can have a second cluster in a `data` directory inside its own; it is left there for the operator to remove once they are satisfied nothing written to it is needed.
+
+```shell
+# put a postgres 15 service pinned to postgres-18 back on postgres-15
+dokku-datastore upgrade postgres db --definition postgres-15 --no-migrate
+```
+
 The definition can also be named outright with `--definition`, or with `<VARIABLE>_DEFINITION` - `POSTGRES_DEFINITION` for postgres - when the flag is not given. It is for an image whose tags do not carry the major version: `--image myorg/postgres --image-version custom-3` resolves to nothing in particular and so lands on the newest definition, which for a build of postgres 17 is the wrong data directory. The named definition supplies the image and version it ships, and `--image` and `--image-version` are laid over them. A definition that belongs to another datastore is refused.
 
 ```shell

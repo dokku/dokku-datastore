@@ -824,6 +824,44 @@ func TestForImagePicksTheFlavor(t *testing.T) {
 	}
 }
 
+// ForImageMajor only answers for a version naming the major of a definition
+// shipping the image, which is what says a pin elsewhere is wrong. Where
+// ForImage would fall back to the newest, it says nothing.
+func TestForImageMajorNeverFallsBack(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	tests := []struct {
+		image    string
+		version  string
+		expected string
+	}{
+		{image: "postgres", version: "15.7", expected: "postgres-15"},
+		{image: "library/postgres", version: "14.24", expected: "postgres-14"},
+		{image: "pgvector/pgvector", version: "0.8.1-pg17", expected: "postgres-pgvector-pg17"},
+		{image: "postgis/postgis", version: "18-3.6", expected: "postgres-postgis-pg18"},
+		// a major no definition has, which ForImage would place on the newest
+		{image: "postgres", version: "12.1", expected: ""},
+		// a version naming no major at all
+		{image: "postgres", version: "custom-3", expected: ""},
+		{image: "postgres", version: "", expected: ""},
+		// an image no definition ships, which ForImage places on the plain ones
+		{image: "myorg/postgres", version: "15.7", expected: ""},
+		{image: "", version: "15.7", expected: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.image+":"+test.version, func(t *testing.T) {
+			found, ok := loaded.ForImageMajor("postgres", test.image, test.version)
+			if ok != (test.expected != "") || found.Name != test.expected {
+				t.Errorf("expected %q, got %q (%t)", test.expected, found.Name, ok)
+			}
+		})
+	}
+}
+
 // A service created with no image, version or definition runs the datastore's
 // own image on its newest major. A flavor is postgres with an extension the
 // operator did not ask for, so it is never what a bare create lands on, however

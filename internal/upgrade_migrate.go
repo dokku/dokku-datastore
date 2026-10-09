@@ -41,10 +41,15 @@ const (
 // definitions the service comes from, and the step it declares for that one is
 // tried first.
 //
+// An upgrade told not to migrate leaves the data where it is whatever the
+// definition says, for a service whose data is already where the definition
+// it lands on mounts it: one pinned to a definition that never matched where
+// its container kept its data.
+//
 // Pure, so which upgrades migrate is pinned by a test rather than by a docker
 // daemon.
-func upgradeMigration(current *service.Datastore, target *service.Datastore) migration {
-	if current.DefinitionName() == target.DefinitionName() {
+func upgradeMigration(current *service.Datastore, target *service.Datastore, noMigrate bool) migration {
+	if noMigrate || current.DefinitionName() == target.DefinitionName() {
 		return migrationNone
 	}
 

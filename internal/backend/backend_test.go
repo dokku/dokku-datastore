@@ -85,3 +85,41 @@ func TestIPWithoutAContainer(t *testing.T) {
 		t.Errorf("expected no address, got %q", actual)
 	}
 }
+
+// A container's bind mounts are read by the host path they were given, which
+// is how a service's data volume is found among them. The volumes docker
+// manages itself have no host path a service names, and are left out.
+func TestMountDestinations(t *testing.T) {
+	mounts := `[
+		{"Type":"bind","Source":"/var/lib/dokku/services/postgres/db/data","Destination":"/var/lib/postgresql/data"},
+		{"Type":"bind","Source":"/var/lib/dokku/services/postgres/db/certs","Destination":"/certs"},
+		{"Type":"volume","Name":"0f1e","Source":"/var/lib/docker/volumes/0f1e/_data","Destination":"/scratch"}
+	]`
+
+	found := MountDestinations(mounts)
+	expected := map[string]string{
+		"/var/lib/dokku/services/postgres/db/data":  "/var/lib/postgresql/data",
+		"/var/lib/dokku/services/postgres/db/certs": "/certs",
+	}
+	if len(found) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, found)
+	}
+
+	for source, destination := range expected {
+		if found[source] != destination {
+			t.Errorf("expected %s mounted at %s, got %q", source, destination, found[source])
+		}
+	}
+
+	// nothing to read is no mounts rather than an error
+	if found := MountDestinations(""); len(found) != 0 {
+		t.Errorf("expected no mounts, got %v", found)
+	}
+}
+
+// A service with no container has nothing to inspect
+func TestMountsWithoutAContainer(t *testing.T) {
+	if found := Mounts(context.Background(), ""); len(found) != 0 {
+		t.Errorf("expected no mounts, got %v", found)
+	}
+}
