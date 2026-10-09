@@ -86,6 +86,9 @@ func TestGenerateWritesEveryVariant(t *testing.T) {
 // registry keeps them: the datastore's own majors, then each flavor's.
 func postgresDefinitionNames() []string {
 	return []string{
+		"postgres-14",
+		"postgres-15",
+		"postgres-16",
 		"postgres-17",
 		"postgres-18",
 		"postgres-pgvector-pg17",

@@ -35,6 +35,9 @@ func TestForImageSelectsTheMajor(t *testing.T) {
 		imageVersion string
 		expected     string
 	}{
+		{imageVersion: "14.24", expected: "postgres-14"},
+		{imageVersion: "15.7", expected: "postgres-15"},
+		{imageVersion: "16.15", expected: "postgres-16"},
 		{imageVersion: "17.8", expected: "postgres-17"},
 		{imageVersion: "18.4", expected: "postgres-18"},
 		// a version no definition claims falls back to the newest rather than
@@ -186,7 +189,7 @@ func TestForServiceDerivesFromTheImageVersion(t *testing.T) {
 func TestForServiceRefusesAnUnknownPin(t *testing.T) {
 	postgres := postgresDatastore(t)
 	serviceRoot := withServiceRoot(t, postgres, "stale")
-	writeServiceFile(t, filepath.Join(serviceRoot, "DEFINITION"), "postgres-16")
+	writeServiceFile(t, filepath.Join(serviceRoot, "DEFINITION"), "postgres-9")
 	writeServiceFile(t, filepath.Join(serviceRoot, "IMAGE_VERSION"), "17.8")
 
 	resolved, err := postgres.ForService("stale")
@@ -194,7 +197,7 @@ func TestForServiceRefusesAnUnknownPin(t *testing.T) {
 		t.Fatal("expected an unknown pin to be reported")
 	}
 
-	for _, expected := range []string{"stale", "postgres-16", "does not ship"} {
+	for _, expected := range []string{"stale", "postgres-9", "does not ship"} {
 		if !strings.Contains(err.Error(), expected) {
 			t.Errorf("expected the error to mention %q, got %q", expected, err)
 		}
@@ -261,6 +264,9 @@ func TestDefinitionsSpansTheMajors(t *testing.T) {
 
 	// the datastore's own first, then each flavor, every one oldest first
 	expected := []string{
+		"postgres-14",
+		"postgres-15",
+		"postgres-16",
 		"postgres-17",
 		"postgres-18",
 		"postgres-pgvector-pg17",

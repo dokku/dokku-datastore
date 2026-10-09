@@ -230,7 +230,7 @@ x-dokku:
     # same script, which a test holds them to.
     from:
       postgres-14:
-        image: tianon/postgres-upgrade:14-to-17
+        image: tianon/postgres-upgrade:14-to-16
         user: "0"
         volumes:
           - type: bind
@@ -253,30 +253,7 @@ x-dokku:
             cp "$PGDATAOLD/pg_hba.conf" "$PGDATANEW/pg_hba.conf"
             chown postgres:postgres "$PGDATANEW/pg_hba.conf"
       postgres-15:
-        image: tianon/postgres-upgrade:15-to-17
-        user: "0"
-        volumes:
-          - type: bind
-            source: "{{ .HostRoot }}"
-            target: /service
-        env:
-          PGDATAOLD: "/service/{{ .PreviousData }}"
-          PGDATANEW: /service/data
-        exec:
-          - bash
-          - -c
-          - |
-            set -e
-            if ! "$PGBINOLD/pg_controldata" "$PGDATAOLD" | grep -q '^Data page checksum version: *0$'; then
-              export POSTGRES_INITDB_ARGS=--data-checksums
-            elif "$PGBINNEW/initdb" --help | grep -q -- --no-data-checksums; then
-              export POSTGRES_INITDB_ARGS=--no-data-checksums
-            fi
-            docker-upgrade pg_upgrade
-            cp "$PGDATAOLD/pg_hba.conf" "$PGDATANEW/pg_hba.conf"
-            chown postgres:postgres "$PGDATANEW/pg_hba.conf"
-      postgres-16:
-        image: tianon/postgres-upgrade:16-to-17
+        image: tianon/postgres-upgrade:15-to-16
         user: "0"
         volumes:
           - type: bind
