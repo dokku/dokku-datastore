@@ -18,7 +18,7 @@ func TestSetPropertyRejectsUnknownKeys(t *testing.T) {
 		t.Fatal("expected an error for an unknown key, got none")
 	}
 
-	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, backup-object-name, backup-timestamp, backup-mailto, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, port-source-range, expose-host, expose-mode, export-args, import-args, volume-targets"
+	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, backup-object-name, backup-timestamp, backup-mailto, backup-access-key-id, backup-secret-access-key, backup-default-region, backup-signature-version, backup-endpoint-url, backup-encryption-passphrase, backup-public-key-id, backup-bucket, backup-use-iam, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, port-source-range, expose-host, expose-mode, export-args, import-args, volume-targets, config-options, custom-env, memory, shm-size"
 	if err.Error() != expected {
 		t.Errorf("expected %q, got %q", expected, err)
 	}
@@ -33,18 +33,20 @@ func TestSettableProperties(t *testing.T) {
 	// long it is waited on to become ready, where and to whom an exposed service
 	// is published, the host its exposed dsn names, whether it is published
 	// through an ambassador or directly, and the arguments its exports
-	// and imports are run with, and where the definition's volumes are mounted
-	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "backup-object-name", "backup-timestamp", "backup-mailto", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "port-source-range", "expose-host", "expose-mode", "export-args", "import-args", "volume-targets"}
-	if strings.Join(SettableProperties, ",") != strings.Join(expected, ",") {
-		t.Errorf("expected %v, got %v", expected, SettableProperties)
+	// and imports are run with, where the definition's volumes are mounted,
+	// every setting create writes into a file of its own, and every backup
+	// setting the backup commands store
+	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "backup-object-name", "backup-timestamp", "backup-mailto", "backup-access-key-id", "backup-secret-access-key", "backup-default-region", "backup-signature-version", "backup-endpoint-url", "backup-encryption-passphrase", "backup-public-key-id", "backup-bucket", "backup-use-iam", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "port-source-range", "expose-host", "expose-mode", "export-args", "import-args", "volume-targets", "config-options", "custom-env", "memory", "shm-size"}
+	if strings.Join(SettablePropertyNames(), ",") != strings.Join(expected, ",") {
+		t.Errorf("expected %v, got %v", expected, SettablePropertyNames())
 	}
 }
 
 // The property name is written in two places that have to agree: the list that
 // makes it settable, and the read in the backup path.
 func TestKeyserverPropertyIsSettable(t *testing.T) {
-	if !slices.Contains(SettableProperties, service.KeyserverProperty) {
-		t.Errorf("expected %s to be settable, got %v", service.KeyserverProperty, SettableProperties)
+	if !slices.Contains(SettablePropertyNames(), service.KeyserverProperty) {
+		t.Errorf("expected %s to be settable, got %v", service.KeyserverProperty, SettablePropertyNames())
 	}
 
 	// the message listing valid keys is built from the slice, so it says so
@@ -243,6 +245,49 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 			expected: `invalid import-args value`,
 		},
 		{
+			name:     "a memory limit that is not a number",
+			key:      service.MemoryProperty,
+			value:    "512m",
+			expected: `invalid memory value "512m"`,
+		},
+		{
+			name:     "a negative memory limit",
+			key:      service.MemoryProperty,
+			value:    "-1",
+			expected: `invalid memory value "-1"`,
+		},
+		{
+			name:     "a shared memory size docker cannot read",
+			key:      service.ShmSizeProperty,
+			value:    "lots",
+			expected: `invalid shm-size value "lots"`,
+		},
+		{
+			// read back by its first line alone
+			name:     "a custom environment over two lines",
+			key:      service.CustomEnvProperty,
+			value:    "TZ=UTC\nLANG=C",
+			expected: `invalid custom-env value, must not contain a newline`,
+		},
+		{
+			name:     "an endpoint url without a scheme",
+			key:      "backup-endpoint-url",
+			value:    "nyc3.digitaloceanspaces.com",
+			expected: `invalid endpoint url "nyc3.digitaloceanspaces.com"`,
+		},
+		{
+			name:     "a bucket named with a scheme",
+			key:      BackupBucketProperty,
+			value:    "s3://bucket",
+			expected: `invalid bucket name "s3://bucket"`,
+		},
+		{
+			name:     "an iam setting that is not true or false",
+			key:      BackupUseIAMProperty,
+			value:    "yes",
+			expected: `invalid backup-use-iam value "yes"`,
+		},
+		{
 			name:     "a volume target that is not a pair",
 			key:      service.VolumeTargetsProperty,
 			value:    "/redis-data",
@@ -298,7 +343,7 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 // Unsetting is how every other property is cleared, so an empty value has to
 // reach the delete rather than being refused as an unusable one.
 func TestSetPropertyAcceptsAnEmptyValue(t *testing.T) {
-	for _, key := range []string{service.BackupStorageClassProperty, service.BackupObjectNameProperty, service.BackupTimestampProperty, service.BackupMailtoProperty, service.LogDriverProperty, service.LogOptProperty, service.RestartPolicyProperty, service.PortBindAddressProperty, service.PortSourceRangeProperty, service.ExposeHostProperty, service.ExposeModeProperty, service.ExportArgsProperty, service.ImportArgsProperty, service.VolumeTargetsProperty} {
+	for _, key := range SettablePropertyNames() {
 		if err := ValidatePropertyValue(key, ""); err != nil {
 			t.Errorf("expected an empty %s to be accepted, got %q", key, err)
 		}

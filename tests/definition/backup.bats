@@ -174,6 +174,74 @@ teardown_file() {
   assert_output ""
 }
 
+@test "($DEFINITION) the backup settings are changed one at a time with set" {
+  # deauth changes nothing a later test relies on, and says whether there are
+  # backups at all
+  run "$BIN" backup-deauth "$PLUGIN" "$SERVICE"
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" backup-secret-access-key wJalrXUtnFEMI
+    assert_failure
+    assert_stderr --partial "does not support backups"
+    return
+  fi
+  assert_success
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-access-key-id AKIAEXAMPLE
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-secret-access-key wJalrXUtnFEMI
+  assert_success
+  # the credential is never printed back, not even by the command that set it
+  refute_output --partial "wJalrXUtnFEMI"
+  assert_output --partial "Setting backup-secret-access-key"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-endpoint-url http://127.0.0.1:9000
+  assert_success
+
+  assert_mode 750 "$(service_root)/backup"
+  local name
+  for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY ENDPOINT_URL; do
+    assert_mode 640 "$(service_root)/backup/$name"
+  done
+
+  # the same pair backup-auth would have stored
+  local fingerprint
+  fingerprint="$(printf '%s\n%s' AKIAEXAMPLE wJalrXUtnFEMI | sha256sum | cut -d' ' -f1)"
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-auth-fingerprint
+  assert_success
+  assert_output "$fingerprint"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-endpoint-url
+  assert_success
+  assert_output "http://127.0.0.1:9000"
+
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" backup-endpoint-url nyc3.digitaloceanspaces.com
+  assert_failure
+  assert_stderr --partial "invalid endpoint url"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-encryption-passphrase "correct horse battery staple"
+  assert_success
+  refute_output --partial "correct horse battery staple"
+  assert_mode 640 "$(service_root)/backup-encryption/ENCRYPTION_KEY"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-encrypted
+  assert_success
+  assert_output "true"
+
+  # cleared one at a time, and clearing again is not an error
+  for name in backup-encryption-passphrase backup-encryption-passphrase backup-endpoint-url backup-access-key-id backup-secret-access-key; do
+    run "$BIN" set "$PLUGIN" "$SERVICE" "$name"
+    assert_success
+  done
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-authenticated
+  assert_success
+  assert_output "false"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-encrypted
+  assert_success
+  assert_output "false"
+}
+
 @test "($DEFINITION) export and import round trip" {
   # a probe writes and reads back a known record, so the round trip proves the
   # data survived rather than only that the service came back up. A definition

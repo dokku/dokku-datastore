@@ -242,6 +242,53 @@ assert_crontab_regenerated() {
   assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE my-bucket;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
 }
 
+@test "($DEFINITION) a scheduled backup's bucket and iam setting are changed with set" {
+  schedule_backup "$SERVICE" "0 3 * * *" my-bucket
+  assert_success
+
+  : >"$PLUGN_LOG"
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-bucket other-bucket
+  assert_success
+  assert_crontab_regenerated
+
+  : >"$PLUGN_LOG"
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-use-iam true
+  assert_success
+  assert_crontab_regenerated
+
+  run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local
+  assert_success
+  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE other-bucket --use-iam;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+
+  # the crontab entry cannot be written without a bucket
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" backup-bucket
+  assert_failure
+  assert_stderr --partial "backup-unschedule"
+
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" backup-bucket My_Bucket
+  assert_failure
+  assert_stderr --partial "invalid bucket name"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-use-iam false
+  assert_success
+
+  run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local
+  assert_success
+  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE other-bucket;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+
+  # with nothing scheduled there is nothing for either to apply to
+  run "$BIN" backup-unschedule "$PLUGIN" "$SERVICE"
+  assert_success
+
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" backup-bucket other-bucket
+  assert_failure
+  assert_stderr --partial "There is no scheduled backup for $SERVICE"
+
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" backup-use-iam true
+  assert_failure
+  assert_stderr --partial "There is no scheduled backup for $SERVICE"
+}
+
 @test "($DEFINITION) an unscheduled backup is taken back from dokku" {
   schedule_backup "$SERVICE" "0 3 * * *" my-bucket
   assert_success

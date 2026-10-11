@@ -996,6 +996,28 @@ set multiple networks
 dokku {{.CommandPrefix}}:set lollipop post-create-network custom-network,other-network
 unset the post-create-network value
 dokku {{.CommandPrefix}}:set lollipop post-create-network
+limit the container to 512 megabytes of memory, or go back to no limit with 0
+dokku {{.CommandPrefix}}:set lollipop memory 512
+give the container a shared memory size of its own
+dokku {{.CommandPrefix}}:set lollipop shm-size 256m
+start the container with semi-colon delimited environment variables of your own
+dokku {{.CommandPrefix}}:set lollipop custom-env "TZ=UTC;LANG=C.UTF-8"
+pass extra arguments to the process the service container runs. these are not docker flags, so use mount for mounts. the value follows -- so that its leading dash is not read as a flag
+dokku {{.CommandPrefix}}:set lollipop config-options -- "<config-options...>"
+go back to running the process with the datastore's own arguments alone
+dokku {{.CommandPrefix}}:set lollipop config-options
+{{- if .Backups}}
+change one of the settings backup-auth stores, such as the endpoint of an s3 compatible service, without passing the rest again
+dokku {{.CommandPrefix}}:set lollipop backup-endpoint-url https://nyc3.digitaloceanspaces.com
+rotate the credentials backups are shipped with one at a time. the value is never printed back, and info reports a fingerprint of the pair
+dokku {{.CommandPrefix}}:set lollipop backup-access-key-id AKIAIOSFODNN7EXAMPLE
+dokku {{.CommandPrefix}}:set lollipop backup-secret-access-key "<secret-access-key>"
+encrypt backups with a passphrase, or with a gpg public key
+dokku {{.CommandPrefix}}:set lollipop backup-encryption-passphrase "<passphrase>"
+dokku {{.CommandPrefix}}:set lollipop backup-public-key-id "<public-key-id>"
+ship a scheduled backup to another bucket, or have it authenticate with an instance role. both rewrite the crontab entry, and need a schedule made with backup-schedule
+dokku {{.CommandPrefix}}:set lollipop backup-bucket other-bucket
+dokku {{.CommandPrefix}}:set lollipop backup-use-iam true
 set the keyserver a public key for backup encryption is fetched from
 dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com
 set the s3 storage class backups are uploaded with, one of STANDARD, REDUCED_REDUNDANCY, STANDARD_IA, ONEZONE_IA, INTELLIGENT_TIERING, GLACIER, DEEP_ARCHIVE or GLACIER_IR
@@ -1012,6 +1034,7 @@ mail the output of scheduled backups to a comma-separated list of email addresse
 dokku {{.CommandPrefix}}:set lollipop backup-mailto ops@example.com,dba@example.com
 go back to mailing scheduled backup output to the global cron MAILTO
 dokku {{.CommandPrefix}}:set lollipop backup-mailto
+{{- end}}
 cap the container log at a size of your own rather than the one it inherits
 dokku {{.CommandPrefix}}:set lollipop log-opt max-size=20m,max-file=3
 keep the log unbounded, which is what a service had before there was anything to say here
@@ -1058,7 +1081,7 @@ dokku {{.CommandPrefix}}:set lollipop volume-targets {{.VolumeKey}}=/srv/{{.Comm
 go back to mounting every volume where the definition does
 dokku {{.CommandPrefix}}:set lollipop volume-targets
 {{- end}}
-> NOTE: a log setting, a restart policy or a volume target reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.
+> NOTE: a network, a log setting, a restart policy, a volume target, the config options, the custom environment, the memory limit or the shared memory size reaches the container the next time one is built, and set warns that it does. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.
 > NOTE: a port-bind-address or port-source-range reaches an exposed service with {{.CommandPrefix}}:reexpose, which replaces the container publishing its ports and leaves the service container running.
 > NOTE: an expose-mode, or a port-bind-address for a service exposed directly, reaches an exposed service with {{.CommandPrefix}}:reexpose, which stops and starts a running service after asking. It also reaches the service the next time it is restarted, or stopped and started.`
 }

@@ -4,6 +4,7 @@ go 1.26.2
 
 require (
 	github.com/creack/pty v1.1.24
+	github.com/docker/go-units v0.5.0
 	github.com/dokku/docker-port-forward v0.0.0-20260927082313-8cbfc680c944
 	github.com/dokku/dokku/plugins/common v0.0.0-20260914154134-61ff696e0012
 	github.com/josegonzalez/cli-skeleton v0.25.0
@@ -32,7 +33,6 @@ require (
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.8.1 // indirect
-	github.com/docker/go-units v0.5.0 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
