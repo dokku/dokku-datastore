@@ -172,6 +172,11 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 			return err
 		}
 	}
+	if input.ShmSize != nil {
+		if err := service.ValidateShmSize(*input.ShmSize); err != nil {
+			return err
+		}
+	}
 
 	// leaving the data where it is only means something for a service being
 	// placed on a definition, which has to be named

@@ -26,8 +26,10 @@ skip_unless_log_is_capped() {
 @test "($DEFINITION) a property set on the service is read back by info" {
   # the keyserver is the property to set here: it needs no network to exist and
   # is only ever read when a backup runs, so setting it changes nothing else
-  run "$BIN" set "$PLUGIN" "$SERVICE" backup-keyserver keys.example.com
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" backup-keyserver keys.example.com
   assert_success
+  # read each time a backup runs, so there is nothing to warn about
+  refute_stderr --partial "takes effect"
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-keyserver
   assert_success
@@ -294,6 +296,115 @@ skip_unless_log_is_capped() {
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --wait-timeout
   assert_success
   assert_output ""
+}
+
+@test "($DEFINITION) the container settings create writes reach the container it is rebuilt with" {
+  # generous, since an image that sizes itself by its limit still has to start
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" memory 4096
+  assert_success
+  # read when a container is made, so set says what it takes
+  assert_stderr --partial "memory takes effect the next time the container is built"
+  assert_stderr --partial "$PLUGIN:stop $SERVICE"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" shm-size 256m
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" custom-env "DOKKU_DATASTORE_TEST=set;DOKKU_DATASTORE_OTHER=too"
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --memory
+  assert_success
+  assert_output "4096"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --custom-env
+  assert_success
+  assert_output "DOKKU_DATASTORE_TEST=set;DOKKU_DATASTORE_OTHER=too"
+
+  # nothing reaches the running container
+  run container_inspect "$(service_container)" '{{ .HostConfig.Memory }}'
+  assert_success
+  assert_output "0"
+
+  run rebuild_service
+  assert_success
+
+  run container_inspect "$(service_container)" '{{ .HostConfig.Memory }}'
+  assert_success
+  assert_output "4294967296"
+
+  run container_inspect "$(service_container)" '{{ .HostConfig.ShmSize }}'
+  assert_success
+  assert_output "268435456"
+
+  run container_inspect "$(service_container)" '{{ range .Config.Env }}{{ println . }}{{ end }}'
+  assert_success
+  assert_line "DOKKU_DATASTORE_TEST=set"
+  assert_line "DOKKU_DATASTORE_OTHER=too"
+
+  # and back to what every other check expects of this service
+  run "$BIN" set "$PLUGIN" "$SERVICE" memory
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" shm-size
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" custom-env
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --memory
+  assert_success
+  assert_output "0"
+
+  run rebuild_service
+  assert_success
+
+  run container_inspect "$(service_container)" '{{ .HostConfig.Memory }}'
+  assert_success
+  assert_output "0"
+}
+
+@test "($DEFINITION) the config options are set, read back and unset" {
+  # not rebuilt with, since what the process accepts is the datastore's own. The
+  # value follows -- so that set does not read it as a flag of its own
+  run "$BIN" set "$PLUGIN" "$SERVICE" config-options -- "--some-option value"
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --config-options
+  assert_success
+  assert_output "--some-option value"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" config-options
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --config-options
+  assert_success
+  assert_output ""
+}
+
+@test "($DEFINITION) a container setting docker would refuse is refused first" {
+  local value
+  for value in 512m -1; do
+    run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" memory -- "$value"
+    assert_failure
+    assert_stderr --partial "invalid memory value"
+  done
+
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" shm-size lots
+  assert_failure
+  assert_stderr --partial "invalid shm-size value"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --shm-size
+  assert_success
+  assert_output ""
+}
+
+@test "($DEFINITION) a setting another command owns is refused with its name" {
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" image-version 1.0
+  assert_failure
+  assert_stderr --partial "image-version cannot be changed with set"
+  assert_stderr --partial "upgrade"
+
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" password hunter2
+  assert_failure
+  assert_stderr --partial "password cannot be changed with set"
+  refute_stderr --partial "hunter2"
 }
 
 @test "($DEFINITION) the expose settings are set, read back and unset" {

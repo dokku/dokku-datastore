@@ -271,6 +271,70 @@ func TestReadmeExtraArgs(t *testing.T) {
 	}
 }
 
+// Every property set takes is listed with when it takes effect, leaving out the
+// ones the datastore has no use for.
+func TestReadmeSettableProperties(t *testing.T) {
+	t.Setenv("DOKKU_NO_COLOR", "1")
+	clearImageEnv(t)
+
+	tests := map[string]struct {
+		present []string
+		absent  []string
+	}{
+		"mysql": {
+			present: []string{
+				"| `memory` | the container memory limit in megabytes, `0` for no limit | after `mysql:stop` and `mysql:start` |",
+				"| `port-bind-address` |",
+				"after `mysql:reexpose` |",
+				"| `backup-secret-access-key` | the secret access key backups authenticate with | immediately |",
+				"| `export-args` |",
+				"| `import-args` |",
+			},
+		},
+		"redis": {
+			present: []string{"| `backup-bucket` |", "| `volume-targets` |"},
+			absent:  []string{"| `export-args` |", "| `import-args` |"},
+		},
+		"memcached": {
+			present: []string{"| `shm-size` |"},
+			absent:  []string{"| `backup-secret-access-key` |", "| `backup-keyserver` |"},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			readme, err := Readme(ReadmeInput{
+				Commands: helpTestCommands(),
+				Data:     NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores[name]}),
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			if !strings.Contains(readme, "### Service properties\n\n") {
+				t.Fatal("expected the readme to have a service properties section")
+			}
+
+			for _, row := range test.present {
+				if !strings.Contains(readme, row) {
+					t.Errorf("expected the readme to list %q", row)
+				}
+			}
+
+			for _, row := range test.absent {
+				if strings.Contains(readme, row) {
+					t.Errorf("expected the readme to leave out %q", row)
+				}
+			}
+
+			// a table broken by a blank line is two tables
+			if strings.Contains(readme, "| Takes effect |\n\n") {
+				t.Error("expected the table to be a single block")
+			}
+		})
+	}
+}
+
 // The section is only written for a datastore that reserves names, and lists
 // every one of them.
 func TestReadmeReservedNames(t *testing.T) {

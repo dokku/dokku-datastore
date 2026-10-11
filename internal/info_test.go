@@ -47,8 +47,8 @@ func writeInfoFile(t *testing.T, filename string, contents string) {
 func TestInfoCoversEverySettableProperty(t *testing.T) {
 	names := InfoKeyNames()
 	for _, property := range SettableProperties {
-		if !slices.Contains(names, property) {
-			t.Errorf("the %s property is settable but info does not report it", property)
+		if !slices.Contains(names, property.ReportedBy()) {
+			t.Errorf("the %s property is settable but info does not report it", property.Name)
 		}
 	}
 }

@@ -75,6 +75,10 @@ type DocumentationData struct {
 	// database in a service, which is also what its backups then hold
 	AllDatabases bool
 
+	// Backups is whether the datastore can be backed up, so that one that
+	// cannot is never documented as having backup settings
+	Backups bool
+
 	// ReservedNames are the service names create and clone refuse, because the
 	// database a service is named after would be one the datastore keeps
 	ReservedNames []string
@@ -167,6 +171,7 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		ExportArgs:     input.Datastore.AcceptsExtraArgs("export"),
 		ImportArgs:     input.Datastore.AcceptsExtraArgs("import"),
 		AllDatabases:   input.Datastore.ExportsAllDatabases(),
+		Backups:        service.Implements(input.Datastore, "backup"),
 		ReservedNames:  input.Datastore.Definition.Dokku.ReservedNames,
 		Sections:       input.Datastore.Documentation(),
 		Flavors:        documentedFlavors(input.Datastore),

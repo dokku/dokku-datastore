@@ -376,11 +376,40 @@ The service's own setting is used first, then the environment variable, then the
 
 ## Container memory limit
 
-A service's memory limit, in megabytes, is settable at `create`, `clone` and `upgrade` with `--memory`, and `0` means no limit. An `upgrade` not passed it keeps the limit the service has, and a `clone` not passed it takes the source's. `info --memory` reports it.
+A service's memory limit, in megabytes, is settable at `create`, `clone` and `upgrade` with `--memory`, and `0` means no limit. An `upgrade` not passed it keeps the limit the service has, and a `clone` not passed it takes the source's. It can also be changed on its own with the `memory` property, which clearing sets back to `0`. `info --memory` reports it.
 
 ```shell
 dokku-datastore upgrade redis lollipop --memory 512
+
+# the same, without an upgrade, reaching the container once it is built again
+dokku redis:set lollipop memory 512
 ```
+
+## Changing a service's settings
+
+Every setting a service is created with can be changed with `set` afterwards, other than the ones another command owns: the image, its version and the definition belong to `upgrade`, the mounts to `mount` and `unmount`, and the passwords stay as they were made, since the datastore keeps its own copy of them. `set` refuses those keys and names the command to use instead. The container settings `create` writes into files of their own are set the same way as every other property.
+
+```shell
+dokku redis:set lollipop config-options -- "--maxmemory-policy allkeys-lru"
+dokku redis:set lollipop custom-env "TZ=UTC;LANG=C.UTF-8"
+dokku redis:set lollipop shm-size 256m
+```
+
+A value that starts with a dash, as config options usually do, follows `--` so that `set` does not read it as a flag of its own. `custom-env` is semicolon delimited, the way `--custom-env` takes it, and `shm-size` is checked with the parser docker reads `--shm-size` with, at `create`, `clone` and `upgrade` as well as at `set`. Each of these reaches the container the next time it is built, and `set` warns when a setting it wrote is one of those: `restart` keeps the container a service has, so a service already running takes a `stop` and then a `start`.
+
+The backup settings are set the same way, one at a time, without passing everything `backup-auth` takes again. A credential is never printed back: `set` names the key it wrote, and `info` reports a fingerprint.
+
+```shell
+dokku redis:set lollipop backup-endpoint-url https://nyc3.digitaloceanspaces.com
+dokku redis:set lollipop backup-secret-access-key "<secret-access-key>"
+dokku redis:set lollipop backup-encryption-passphrase "<passphrase>"
+
+# a scheduled backup's bucket and credentials, which rewrite its crontab entry
+dokku redis:set lollipop backup-bucket other-bucket
+dokku redis:set lollipop backup-use-iam true
+```
+
+The generated readme of each plugin lists every key under Service properties, with when a change to it takes effect.
 
 ## Mounted host paths and volumes
 

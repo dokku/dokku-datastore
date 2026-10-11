@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
+	"github.com/dokku/dokku-datastore/internal/service"
 )
 
 // DokkuVersion is the dokku version the generated readme tells people to install
@@ -66,6 +67,7 @@ var readmeSections = []struct {
 			"The endpoint of an S3 compatible service is passed as the `endpoint-url` argument of `backup-auth`, such as `https://nyc3.digitaloceanspaces.com`, and must not include the bucket. The bucket is passed to `backup` and `backup-schedule` by its name alone, such as `my-s3-bucket` rather than `s3://my-s3-bucket`, and must follow the [S3 bucket naming rules](https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html).",
 			"You may skip the `backup-auth` step if your dokku install is running within EC2 and has access to the bucket via an IAM profile. In that case, use the `--use-iam` option with the `backup` command.",
 			"If both passphrase and public key forms of encryption are set, the public key encryption will take precedence.",
+			"Each setting `backup-auth`, `backup-set-encryption` and `backup-set-public-key-encryption` store can also be changed on its own with the `set` command, as can the bucket and IAM setting of a scheduled backup. The keys are listed under Service properties.",
 			"Backups are uploaded with the bucket's default storage class unless the service sets the `backup-storage-class` property with the `set` command.",
 			"Backups are uploaded to `<prefix>-<service>-<timestamp>.tgz`. The service may name the key with the `backup-object-name` property and drop the timestamp by setting the `backup-timestamp` property to `false`, so that every backup is uploaded to the same key and bucket versioning and lifecycle rules can keep and rotate them. The bucket name may end in a path to upload under, such as `my-s3-bucket/backups`.",
 			"The underlying core backup script is present [here](https://github.com/dokku/docker-s3backup/blob/main/backup.sh).",
@@ -289,6 +291,7 @@ func readmeUsage(input ReadmeInput) ([]string, error) {
 		}
 	}
 
+	sections = append(sections, readmeSettableProperties(input.Data)...)
 	sections = append(sections, readmeExposeLimits(input.Data)...)
 	sections = append(sections, readmeExposeMode(input.Data)...)
 	sections = append(sections, readmeExposedDsn(input.Data)...)
@@ -404,6 +407,56 @@ func readmeDockerPull(data DocumentationData) []string {
 			"`stderr` output.", strings.ToUpper(data.CommandPrefix)),
 		"Please ensure the proper images are in place when `docker image pull` is disabled.",
 	}
+}
+
+// readmeSettableProperties lists every property the set command takes for the
+// datastore, and when a change to each reaches the service
+func readmeSettableProperties(data DocumentationData) []string {
+	effects := map[PropertyEffect]string{
+		EffectImmediately: "immediately",
+		EffectRebuild:     fmt.Sprintf("after `%s:stop` and `%s:start`", data.CommandPrefix, data.CommandPrefix),
+		EffectReexpose:    fmt.Sprintf("after `%s:reexpose`", data.CommandPrefix),
+	}
+
+	// one block, since the sections are joined by blank lines and a table
+	// broken by one is not a table
+	table := []string{
+		"| Property | Description | Takes effect |",
+		"| --- | --- | --- |",
+	}
+	for _, property := range SettableProperties {
+		if !documentsProperty(property, data) {
+			continue
+		}
+
+		table = append(table, fmt.Sprintf("| `%s` | %s | %s |", property.Name, property.Description, effects[property.TakesEffect]))
+	}
+
+	return []string{
+		"### Service properties",
+		fmt.Sprintf("Every setting a service has after it is created, other than its image, its passwords, its mounts and its backup schedule, each of which has a command of its own, is changed with `dokku %s:set lollipop <key> <value>`, and cleared by giving no value. "+
+			"`dokku %s:info lollipop` reports each of them, with a credential reported as a fingerprint rather than its value. "+
+			"A setting the container is made with only reaches it once the container is built again, and `set` warns when that is the case: "+
+			"`dokku %s:restart` keeps the container the service has, so use `dokku %s:stop` and then `dokku %s:start`.", data.CommandPrefix, data.CommandPrefix, data.CommandPrefix, data.CommandPrefix, data.CommandPrefix),
+		strings.Join(table, "\n"),
+	}
+}
+
+// documentsProperty is whether the readme lists a property for the datastore,
+// which it does not for one the datastore has no use for
+func documentsProperty(property SettableProperty, data DocumentationData) bool {
+	switch {
+	case property.Backup:
+		return data.Backups
+	case property.Name == service.ExportArgsProperty:
+		return data.ExportArgs
+	case property.Name == service.ImportArgsProperty:
+		return data.ImportArgs
+	case property.Name == service.VolumeTargetsProperty:
+		return data.VolumeKey != ""
+	}
+
+	return true
 }
 
 // readmeExposeLimits explains how to limit where an exposed service is

@@ -182,6 +182,10 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return err
 	}
 
+	if err := service.ValidateShmSize(input.ShmSize); err != nil {
+		return err
+	}
+
 	// against the definition the version settled on, which is the one whose
 	// volumes are moved and whose volumes a mount must not land on
 	if err := service.CheckVolumeTargets(input.Datastore.Definition, input.VolumeTargets); err != nil {

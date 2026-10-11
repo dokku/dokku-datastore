@@ -224,9 +224,8 @@ func BackupAuth(ctx context.Context, input BackupAuthInput) error {
 			continue
 		}
 
-		filename := filepath.Join(folder, entry.name)
-		if err := os.Remove(filename); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("unable to remove %s: %w", filename, err)
+		if err := removeBackupFile(folder, entry.name); err != nil {
+			return err
 		}
 	}
 
@@ -267,6 +266,18 @@ func UnsetBackupPublicKeyEncryption(ctx context.Context, s *service.Datastore, s
 func removeBackupSetting(s *service.Datastore, serviceName string, name string) error {
 	filename := filepath.Join(service.Folders(s, serviceName).BackupEncryption, name)
 	if err := os.Remove(filename); err != nil {
+		return fmt.Errorf("unable to remove %s: %w", filename, err)
+	}
+
+	return nil
+}
+
+// removeBackupFile deletes one of the backup settings files for a service. A
+// file that is already gone is left that way, so that clearing a setting with
+// the set command can be repeated the way clearing a property can.
+func removeBackupFile(folder string, name string) error {
+	filename := filepath.Join(folder, name)
+	if err := os.Remove(filename); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("unable to remove %s: %w", filename, err)
 	}
 

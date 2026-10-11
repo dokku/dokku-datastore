@@ -210,9 +210,14 @@ func (c *SetCommand) Run(args []string) int {
 		return 1
 	}
 
-	if value == "" {
+	// a credential is never printed, not even to the terminal that typed it
+	property, _ := internal.LookupSettableProperty(key)
+	switch {
+	case value == "":
 		logger.Info(fmt.Sprintf("Unsetting %s", key))
-	} else {
+	case property.Sensitive:
+		logger.Info(fmt.Sprintf("Setting %s", key))
+	default:
 		logger.Info(fmt.Sprintf("Setting %s to %s", key, value))
 	}
 
@@ -224,6 +229,10 @@ func (c *SetCommand) Run(args []string) int {
 	if err := internal.ApplyProperty(ctx, datastore, serviceName, key); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
+	}
+
+	if warning := property.Warning(datastore.Properties().CommandPrefix, serviceName); warning != "" {
+		logger.Warn(internal.WarnInput{Warning: warning})
 	}
 
 	return 0
