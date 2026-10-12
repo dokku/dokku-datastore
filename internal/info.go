@@ -32,6 +32,7 @@ type InfoKey struct {
 // anything that can be set can be read back.
 var InfoKeys = []InfoKey{
 	{Name: "backend", Description: "show the execution backend the service was created with"},
+	{Name: "backup-access-key-id-fingerprint", Description: "show a sha256 fingerprint of the stored backup access key id"},
 	{Name: "backup-auth-fingerprint", Description: "show a sha256 fingerprint of the stored backup access key id and secret"},
 	{Name: "backup-authenticated", Description: "show whether backup credentials are stored for the service"},
 	{Name: "backup-bucket", Description: "show the bucket scheduled backups are shipped to"},
@@ -44,6 +45,7 @@ var InfoKeys = []InfoKey{
 	{Name: "backup-object-name", Description: "show the name backups are uploaded under in place of the default"},
 	{Name: "backup-public-key-id", Description: "show the gpg public key id backups are encrypted with"},
 	{Name: "backup-schedule", Description: "show the cron schedule backups run on"},
+	{Name: "backup-secret-access-key-fingerprint", Description: "show a sha256 fingerprint of the stored backup secret access key"},
 	{Name: "backup-signature-version", Description: "show the signature version backups authenticate with"},
 	{Name: "backup-storage-class", Description: "show the s3 storage class backups are uploaded with"},
 	{Name: "backup-timestamp", Description: "show whether backups are uploaded under a key ending in the time they started"},
@@ -170,11 +172,15 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info[service.VolumeTargetsProperty] = strings.TrimSpace(common.PropertyGet(commandPrefix, input.ServiceName, service.VolumeTargetsProperty))
 
 	// authenticated only when a backup would find both halves of the pair, since
-	// it refuses to run with either one missing. The secrets are fingerprinted
-	// as a backup reads them, so tooling holding the values it stored can tell
-	// whether they are still the ones in place
+	// it refuses to run with either one missing. Each secret is fingerprinted
+	// on its own, as a backup reads it, so tooling that holds one candidate can
+	// tell whether setting that value would change anything. The digest is not
+	// reversible, so the stored value is not in the report. The pair is also
+	// fingerprinted together, which is what backup-auth stores in one call.
 	accessKeyID := filepath.Join(serviceFolders.Backup, accessKeyIDFile)
 	secretAccessKey := filepath.Join(serviceFolders.Backup, secretAccessKeyFile)
+	info["backup-access-key-id-fingerprint"] = storedBackupFingerprint(accessKeyID)
+	info["backup-secret-access-key-fingerprint"] = storedBackupFingerprint(secretAccessKey)
 	authenticated := common.FileExists(accessKeyID) && common.FileExists(secretAccessKey)
 	info["backup-authenticated"] = strconv.FormatBool(authenticated)
 	info["backup-auth-fingerprint"] = ""
@@ -186,12 +192,8 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info["backup-endpoint-url"] = common.ReadFirstLine(filepath.Join(serviceFolders.Backup, endpointURLFile))
 
 	encryptionKey := filepath.Join(serviceFolders.BackupEncryption, encryptionKeyFile)
-	encrypted := common.FileExists(encryptionKey)
-	info["backup-encrypted"] = strconv.FormatBool(encrypted)
-	info["backup-encryption-fingerprint"] = ""
-	if encrypted {
-		info["backup-encryption-fingerprint"] = backupFingerprint(common.ReadFirstLine(encryptionKey))
-	}
+	info["backup-encrypted"] = strconv.FormatBool(common.FileExists(encryptionKey))
+	info["backup-encryption-fingerprint"] = storedBackupFingerprint(encryptionKey)
 	info["backup-public-key-id"] = common.ReadFirstLine(filepath.Join(serviceFolders.BackupEncryption, publicKeyIDFile))
 
 	schedule, _ := ReadBackupSchedule(input.Datastore, input.ServiceName)
@@ -203,9 +205,21 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	return info
 }
 
+// storedBackupFingerprint is the fingerprint of the first line of a stored
+// secret, and empty when the file is absent. A missing file is left empty, so
+// an unset credential stays distinct from one that was stored.
+func storedBackupFingerprint(filename string) string {
+	if !common.FileExists(filename) {
+		return ""
+	}
+
+	return backupFingerprint(common.ReadFirstLine(filename))
+}
+
 // backupFingerprint is the lowercase hex sha256 of the values joined by
-// newlines. A stored value is a single line, so the join is unambiguous, and
-// the digest is what `printf '%s\n%s' "$a" "$b" | sha256sum` prints for it
+// newlines, with no trailing newline. A stored value is a single line, so the
+// join is unambiguous. One value is what `printf '%s' "$a" | sha256sum` prints,
+// and two are what `printf '%s\n%s' "$a" "$b" | sha256sum` prints.
 func backupFingerprint(values ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(values, "\n")))
 	return hex.EncodeToString(sum[:])

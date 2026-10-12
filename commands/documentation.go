@@ -645,11 +645,16 @@ the exposed dsn is the one a client off the host connects with. it names the exp
 dokku {{.CommandPrefix}}:info lollipop --exposed-dsn
 the properties {{.CommandPrefix}}:set writes are reported under the names it takes, so a value read here can be written back:
 dokku {{.CommandPrefix}}:set lollipop initial-network my-network
-the stored backup credentials and passphrase are never printed. each is reported as a lowercase hex sha256 fingerprint of the stored value, with surrounding whitespace trimmed, so a copy of the values can be compared against it:
-dokku {{.CommandPrefix}}:info lollipop --backup-auth-fingerprint
+the stored backup credentials and passphrase are never printed. each is reported as a lowercase hex sha256 fingerprint of that stored value, with surrounding whitespace trimmed, so a copy of one value can be compared against it:
+dokku {{.CommandPrefix}}:info lollipop --backup-access-key-id-fingerprint
+dokku {{.CommandPrefix}}:info lollipop --backup-secret-access-key-fingerprint
 dokku {{.CommandPrefix}}:info lollipop --backup-encryption-fingerprint
-the same fingerprints can be computed from the values that were passed to backup-auth and backup-set-encryption:
+a fingerprint is empty when that value is not stored. the access key id and the secret are also reported as one fingerprint of the pair, which is empty until both are stored and is what backup-auth writes in one call:
+dokku {{.CommandPrefix}}:info lollipop --backup-auth-fingerprint
+the same fingerprints can be computed from the values that were passed to set, backup-auth and backup-set-encryption:
 
+    printf '%s' "$AWS_ACCESS_KEY_ID" | sha256sum
+    printf '%s' "$AWS_SECRET_ACCESS_KEY" | sha256sum
     printf '%s\n%s' "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" | sha256sum
     printf '%s' "$PASSPHRASE" | sha256sum`
 }
@@ -1009,7 +1014,7 @@ dokku {{.CommandPrefix}}:set lollipop config-options
 {{- if .Backups}}
 change one of the settings backup-auth stores, such as the endpoint of an s3 compatible service, without passing the rest again
 dokku {{.CommandPrefix}}:set lollipop backup-endpoint-url https://nyc3.digitaloceanspaces.com
-rotate the credentials backups are shipped with one at a time. the value is never printed back, and info reports a fingerprint of the pair
+rotate the credentials backups are shipped with one at a time. the value is never printed back, and info reports a fingerprint of that value
 dokku {{.CommandPrefix}}:set lollipop backup-access-key-id AKIAIOSFODNN7EXAMPLE
 dokku {{.CommandPrefix}}:set lollipop backup-secret-access-key "<secret-access-key>"
 encrypt backups with a passphrase, or with a gpg public key

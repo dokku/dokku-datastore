@@ -25,16 +25,31 @@ teardown_file() {
     assert_mode 640 "$(service_root)/backup/$name"
   done
 
-  # the pair is reported only as a fingerprint tooling can compute for itself
-  local fingerprint
+  # the pair is reported as a fingerprint tooling can compute for itself, and each
+  # credential is reported on its own so one candidate can be compared
+  local fingerprint access_key_fingerprint secret_fingerprint
   fingerprint="$(printf '%s\n%s' AKIAEXAMPLE wJalrXUtnFEMI | sha256sum | cut -d' ' -f1)"
+  access_key_fingerprint="$(printf '%s' AKIAEXAMPLE | sha256sum | cut -d' ' -f1)"
+  secret_fingerprint="$(printf '%s' wJalrXUtnFEMI | sha256sum | cut -d' ' -f1)"
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-auth-fingerprint
   assert_success
   assert_output "$fingerprint"
 
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-access-key-id-fingerprint
+  assert_success
+  assert_output "$access_key_fingerprint"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-secret-access-key-fingerprint
+  assert_success
+  assert_output "$secret_fingerprint"
+
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --format json
   assert_success
+  refute_output --partial "AKIAEXAMPLE"
   refute_output --partial "wJalrXUtnFEMI"
+  assert_output --partial "\"backup-access-key-id-fingerprint\":\"$access_key_fingerprint\""
+  assert_output --partial "\"backup-secret-access-key-fingerprint\":\"$secret_fingerprint\""
+  assert_output --partial "\"backup-auth-fingerprint\":\"$fingerprint\""
   assert_output --partial '"backup-authenticated":"true"'
   assert_output --partial '"backup-default-region":"us-east-1"'
   assert_output --partial '"backup-signature-version":"s3v4"'
@@ -45,6 +60,14 @@ teardown_file() {
   [[ ! -d "$(service_root)/backup" ]] || fail "backup-deauth left the credentials behind"
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-auth-fingerprint
+  assert_success
+  assert_output ""
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-access-key-id-fingerprint
+  assert_success
+  assert_output ""
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-secret-access-key-fingerprint
   assert_success
   assert_output ""
 }
@@ -188,6 +211,35 @@ teardown_file() {
 
   run "$BIN" set "$PLUGIN" "$SERVICE" backup-access-key-id AKIAEXAMPLE
   assert_success
+
+  # one half of the pair is comparable on its own, and is not a pair a backup
+  # can authenticate with
+  local access_key_fingerprint
+  access_key_fingerprint="$(printf '%s' AKIAEXAMPLE | sha256sum | cut -d' ' -f1)"
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-access-key-id-fingerprint
+  assert_success
+  assert_output "$access_key_fingerprint"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-secret-access-key-fingerprint
+  assert_success
+  assert_output ""
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-auth-fingerprint
+  assert_success
+  assert_output ""
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-authenticated
+  assert_success
+  assert_output "false"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --format json
+  assert_success
+  refute_output --partial "AKIAEXAMPLE"
+  assert_output --partial "\"backup-access-key-id-fingerprint\":\"$access_key_fingerprint\""
+  assert_output --partial '"backup-secret-access-key-fingerprint":""'
+  assert_output --partial '"backup-auth-fingerprint":""'
+  assert_output --partial '"backup-authenticated":"false"'
+
   run "$BIN" set "$PLUGIN" "$SERVICE" backup-secret-access-key wJalrXUtnFEMI
   assert_success
   # the credential is never printed back, not even by the command that set it
@@ -203,12 +255,17 @@ teardown_file() {
     assert_mode 640 "$(service_root)/backup/$name"
   done
 
-  # the same pair backup-auth would have stored
-  local fingerprint
+  # the same pair backup-auth would have stored, and each half of it
+  local fingerprint secret_fingerprint
   fingerprint="$(printf '%s\n%s' AKIAEXAMPLE wJalrXUtnFEMI | sha256sum | cut -d' ' -f1)"
+  secret_fingerprint="$(printf '%s' wJalrXUtnFEMI | sha256sum | cut -d' ' -f1)"
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-auth-fingerprint
   assert_success
   assert_output "$fingerprint"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-secret-access-key-fingerprint
+  assert_success
+  assert_output "$secret_fingerprint"
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-endpoint-url
   assert_success

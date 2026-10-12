@@ -660,12 +660,16 @@ echo 'SHOW TABLES;' | ssh dokku@dokku.me mysql:connect lollipop
 
 ## Backup credentials in info
 
-`info` reports every setting `backup-auth` and `backup-set-encryption` store, so tooling can tell whether what it would apply is already in place. The region, signature version and endpoint are reported as they are, under `--backup-default-region`, `--backup-signature-version` and `--backup-endpoint-url`. The access key id and secret, and the backup passphrase, are secrets and are never printed. Each is reported as a lowercase hex sha256 fingerprint of the stored value with surrounding whitespace trimmed, under `--backup-auth-fingerprint` and `--backup-encryption-fingerprint`, and is empty when nothing is stored. `--backup-authenticated` is only `true` when both the access key id and the secret are stored, since a backup refuses to run with either one missing. Each `backup-auth` call replaces every stored setting, so a region, signature version or endpoint omitted from the call is removed and reported as empty.
+`info` reports every setting `backup-auth` and `backup-set-encryption` store, so tooling can tell whether what it would apply is already in place. The region, signature version and endpoint are reported as they are, under `--backup-default-region`, `--backup-signature-version` and `--backup-endpoint-url`. The access key id and secret, and the backup passphrase, are secrets and are never printed. Each is reported on its own as a lowercase hex sha256 fingerprint of the stored value with surrounding whitespace trimmed, under `--backup-access-key-id-fingerprint`, `--backup-secret-access-key-fingerprint` and `--backup-encryption-fingerprint`. A fingerprint is empty when that value is not stored, so one credential can be compared with a candidate for it alone and a set of that credential skipped when the candidate is already in place. The access key id and the secret are also reported together under `--backup-auth-fingerprint`, which is empty until both are stored and is what `backup-auth` writes in one call. `--backup-authenticated` is only `true` when both the access key id and the secret are stored, since a backup refuses to run with either one missing. Each `backup-auth` call replaces every stored setting, so a region, signature version or endpoint omitted from the call is removed and reported as empty.
 
-A fingerprint is compared against one computed from a copy of the values:
+A fingerprint is compared against one computed from a copy of the value:
 
 ```shell
-# the access key id and the secret, joined by a newline
+# one credential
+printf '%s' "$AWS_ACCESS_KEY_ID" | sha256sum
+printf '%s' "$AWS_SECRET_ACCESS_KEY" | sha256sum
+
+# the pair, which is what --backup-auth-fingerprint reports
 printf '%s\n%s' "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" | sha256sum
 
 # the passphrase
