@@ -318,21 +318,23 @@ func TestInfoReportsBackupStateWithoutItsSecrets(t *testing.T) {
 
 	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
 	for key, expected := range map[string]string{
-		"backup-auth-fingerprint":       "",
-		"backup-authenticated":          "false",
-		"backup-bucket":                 "",
-		"backup-default-region":         "",
-		"backup-encrypted":              "false",
-		"backup-encryption-fingerprint": "",
-		"backup-endpoint-url":           "",
-		"backup-mailto":                 "",
-		"backup-object-name":            "",
-		"backup-public-key-id":          "",
-		"backup-schedule":               "",
-		"backup-signature-version":      "",
-		"backup-storage-class":          "",
-		"backup-timestamp":              "true",
-		"backup-use-iam":                "false",
+		"backup-access-key-id-fingerprint":     "",
+		"backup-auth-fingerprint":              "",
+		"backup-authenticated":                 "false",
+		"backup-bucket":                        "",
+		"backup-default-region":                "",
+		"backup-encrypted":                     "false",
+		"backup-encryption-fingerprint":        "",
+		"backup-endpoint-url":                  "",
+		"backup-mailto":                        "",
+		"backup-object-name":                   "",
+		"backup-public-key-id":                 "",
+		"backup-schedule":                      "",
+		"backup-secret-access-key-fingerprint": "",
+		"backup-signature-version":             "",
+		"backup-storage-class":                 "",
+		"backup-timestamp":                     "true",
+		"backup-use-iam":                       "false",
 	} {
 		if info[key] != expected {
 			t.Errorf("with nothing configured, expected %s to be %q, got %q", key, expected, info[key])
@@ -344,9 +346,12 @@ func TestInfoReportsBackupStateWithoutItsSecrets(t *testing.T) {
 	writeInfoFile(t, filepath.Join(folders.Backup, accessKeyIDFile), "AKIAEXAMPLE")
 
 	info = Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	// printf '%s' AKIAEXAMPLE | sha256sum
 	for key, expected := range map[string]string{
-		"backup-auth-fingerprint": "",
-		"backup-authenticated":    "false",
+		"backup-access-key-id-fingerprint":     "caae15ff5d193ec5ecb4957747fe3708fe3f6fbcf607b63dae2a7b813cc0d513",
+		"backup-auth-fingerprint":              "",
+		"backup-authenticated":                 "false",
+		"backup-secret-access-key-fingerprint": "",
 	} {
 		if info[key] != expected {
 			t.Errorf("with only an access key id stored, expected %s to be %q, got %q", key, expected, info[key])
@@ -363,18 +368,22 @@ func TestInfoReportsBackupStateWithoutItsSecrets(t *testing.T) {
 
 	// the digests are what sha256sum prints, rather than recomputed here, so
 	// the format tooling compares against cannot drift unnoticed:
+	//   printf '%s' AKIAEXAMPLE | sha256sum
+	//   printf '%s' wJalrXUtnFEMI | sha256sum
 	//   printf '%s\n%s' AKIAEXAMPLE wJalrXUtnFEMI | sha256sum
 	//   printf '%s' 'a passphrase' | sha256sum
 	info = Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
 	for key, expected := range map[string]string{
-		"backup-auth-fingerprint":       "405216607097c7a8e61ea3d1c6df1c8352cbf9c956da9d3a0e64657f7aa9dcd7",
-		"backup-authenticated":          "true",
-		"backup-default-region":         "us-east-1",
-		"backup-encrypted":              "true",
-		"backup-encryption-fingerprint": "33edb1c3746c802e8e12876b4a0ab6d2dbeaf56af9e4d90e51fa649e67230256",
-		"backup-endpoint-url":           "http://127.0.0.1:9000",
-		"backup-public-key-id":          "DEADBEEF",
-		"backup-signature-version":      "s3v4",
+		"backup-access-key-id-fingerprint":     "caae15ff5d193ec5ecb4957747fe3708fe3f6fbcf607b63dae2a7b813cc0d513",
+		"backup-auth-fingerprint":              "405216607097c7a8e61ea3d1c6df1c8352cbf9c956da9d3a0e64657f7aa9dcd7",
+		"backup-authenticated":                 "true",
+		"backup-default-region":                "us-east-1",
+		"backup-encrypted":                     "true",
+		"backup-encryption-fingerprint":        "33edb1c3746c802e8e12876b4a0ab6d2dbeaf56af9e4d90e51fa649e67230256",
+		"backup-endpoint-url":                  "http://127.0.0.1:9000",
+		"backup-public-key-id":                 "DEADBEEF",
+		"backup-secret-access-key-fingerprint": "354f86b2e7346e78f44a495e91b32c34c8bb229af4cf74ef0b7652632e7389cd",
+		"backup-signature-version":             "s3v4",
 	} {
 		if info[key] != expected {
 			t.Errorf("expected %s to be %q, got %q", key, expected, info[key])

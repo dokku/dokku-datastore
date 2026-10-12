@@ -173,8 +173,14 @@ func TestSetPropertyWritesTheBackupSettings(t *testing.T) {
 	if info["backup-authenticated"] != "true" {
 		t.Errorf("expected the service to be authenticated, got %q", info["backup-authenticated"])
 	}
-	if expected := backupFingerprint("AKIAEXAMPLE", "wJalrXUtnFEMI"); info["backup-auth-fingerprint"] != expected {
-		t.Errorf("expected the fingerprint %q, got %q", expected, info["backup-auth-fingerprint"])
+	for key, expected := range map[string]string{
+		"backup-access-key-id-fingerprint":     backupFingerprint("AKIAEXAMPLE"),
+		"backup-secret-access-key-fingerprint": backupFingerprint("wJalrXUtnFEMI"),
+		"backup-auth-fingerprint":              backupFingerprint("AKIAEXAMPLE", "wJalrXUtnFEMI"),
+	} {
+		if info[key] != expected {
+			t.Errorf("expected %s to be %q, got %q", key, expected, info[key])
+		}
 	}
 	if info["backup-encrypted"] != "true" {
 		t.Errorf("expected the backups to be encrypted, got %q", info["backup-encrypted"])
