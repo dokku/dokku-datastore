@@ -315,6 +315,10 @@ func TestReadmeSettableProperties(t *testing.T) {
 				t.Fatal("expected the readme to have a service properties section")
 			}
 
+			if !strings.Contains(readme, "Passing `--allow-restart` to `set`") {
+				t.Error("expected the service properties section to name --allow-restart")
+			}
+
 			for _, row := range test.present {
 				if !strings.Contains(readme, row) {
 					t.Errorf("expected the readme to list %q", row)

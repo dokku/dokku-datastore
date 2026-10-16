@@ -68,16 +68,24 @@ type RecreateServiceContainerInput struct {
 
 	// Logger reports what is being waited on once the container exists
 	Logger Ui
+
+	// Reason is why the service is stopped and started, as it is announced.
+	// Empty is to change the ports it publishes
+	Reason string
 }
 
 // RecreateServiceContainer stops and starts a service, the way its stop and
 // start commands do, so that its container is made again with the ports it
-// should publish.
+// should publish, or with whatever else is only read when it is made.
 //
 // Removing the container removes its ambassador with it, and the start makes
 // one again only when the service is to be published through one.
 func RecreateServiceContainer(ctx context.Context, input RecreateServiceContainerInput) error {
-	input.Logger.Info(fmt.Sprintf("Stopping and starting %s to change the ports it publishes", input.ServiceName))
+	reason := input.Reason
+	if reason == "" {
+		reason = "to change the ports it publishes"
+	}
+	input.Logger.Info(fmt.Sprintf("Stopping and starting %s %s", input.ServiceName, reason))
 
 	if err := service.RemoveServiceContainer(ctx, service.RemoveServiceContainerInput{
 		Datastore:   input.Datastore,

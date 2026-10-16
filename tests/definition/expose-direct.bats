@@ -38,10 +38,6 @@ published_label() {
   container_inspect "$(service_container)" '{{ index .Config.Labels "dokku.service.published-ports" }}'
 }
 
-service_id() {
-  container_inspect "$(service_container)" '{{ .Id }}'
-}
-
 assert_no_ambassador() {
   if docker container inspect "$AMBASSADOR" >/dev/null 2>/dev/null; then
     fail "$1: expected no ambassador, found one"
