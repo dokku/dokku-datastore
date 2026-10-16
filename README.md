@@ -390,7 +390,7 @@ dokku redis:set --allow-restart lollipop memory 512
 
 ## Changing a service's settings
 
-Every setting a service is created with can be changed with `set` afterwards, other than the ones another command owns: the image, its version and the definition belong to `upgrade`, the mounts to `mount` and `unmount`, and the passwords stay as they were made, since the datastore keeps its own copy of them. `set` refuses those keys and names the command to use instead. The container settings `create` writes into files of their own are set the same way as every other property.
+Every setting a service is created with can be changed with `set` afterwards, other than the ones another command owns: the image, its version and the definition belong to `upgrade`, and the mounts to `mount` and `unmount`. `set` refuses those keys and names the command to use instead. The passwords are set too, and are changed in the datastore as well as on disk, as [Changing a service's password](#changing-a-services-password) describes. The container settings `create` writes into files of their own are set the same way as every other property.
 
 ```shell
 dokku redis:set lollipop config-options -- "--maxmemory-policy allkeys-lru"
@@ -671,6 +671,8 @@ echo 'SHOW TABLES;' | ssh dokku@dokku.me mysql:connect lollipop
 
 `info` reports every setting `backup-auth` and `backup-set-encryption` store, so tooling can tell whether what it would apply is already in place. The region, signature version and endpoint are reported as they are, under `--backup-default-region`, `--backup-signature-version` and `--backup-endpoint-url`. The access key id and secret, and the backup passphrase, are secrets and are never printed. Each is reported on its own as a lowercase hex sha256 fingerprint of the stored value with surrounding whitespace trimmed, under `--backup-access-key-id-fingerprint`, `--backup-secret-access-key-fingerprint` and `--backup-encryption-fingerprint`. A fingerprint is empty when that value is not stored, so one credential can be compared with a candidate for it alone and a set of that credential skipped when the candidate is already in place. The access key id and the secret are also reported together under `--backup-auth-fingerprint`, which is empty until both are stored and is what `backup-auth` writes in one call. `--backup-authenticated` is only `true` when both the access key id and the secret are stored, since a backup refuses to run with either one missing. Each `backup-auth` call replaces every stored setting, so a region, signature version or endpoint omitted from the call is removed and reported as empty.
 
+The service's passwords are reported the same way, under `--password-fingerprint` and `--root-password-fingerprint`.
+
 A fingerprint is compared against one computed from a copy of the value:
 
 ```shell
@@ -838,6 +840,40 @@ dokku-datastore create mysql lollipop --password <password> --root-password <roo
 ```
 
 A datastore with no secret for a flag refuses it before anything is created, rather than starting on a generated password nobody was told about. Postgres and redis, for instance, have no root password, and memcached has no password at all.
+
+### Changing a service's password
+
+A password is kept by the datastore as well as in the service's `PASSWORD` or `ROOTPASSWORD` file, so writing the file alone changed nothing the datastore checks. `set` changes either one with the `password` and `root-password` keys, in the datastore first and then on disk, and points every linked app at the new url.
+
+```shell
+dokku postgres:set lollipop password <new-password>
+dokku mysql:set lollipop root-password <new-root-password>
+
+# the linked apps are given the new url without being restarted
+dokku postgres:set --no-restart lollipop password <new-password>
+```
+
+Each datastore takes a new password its own way, which its definition declares. Most are told it while they run: postgres, mysql, mariadb, mongo, rabbitmq, couchdb and omnisci change the account in the datastore itself, and redis is told the new password and has the `requirepass` line of its config file written over to match. The rest only read it as they start, so changing it stops and starts the service, and `set` refuses to unless it is given `--allow-restart`: nats, meilisearch, clickhouse and graphite are made again on the new password, and typesense has the `api-key` line of its config file written over with the service down. A password told to the datastore is only changed while the service is running, and one read as it starts starts a stopped service, the way `--allow-restart` does for every other setting.
+
+A linked app holding the service's url under any of the keys its link set has the password in those values replaced, keeping the scheme and anything after the url, and is restarted unless `--no-restart` is given. `--allow-restart` is about the service and `--no-restart` about its apps, and `--no-restart` is refused for any other key, since no other key reaches an app. A password set to the one the service already has touches nothing.
+
+A password cannot be cleared, and may only hold letters, digits, `.`, `_`, `~` and `-`, since it is written into the url, config files and statements as it is. It is never printed back: `info` reports a fingerprint of each under `--password-fingerprint` and `--root-password-fingerprint`, which is empty for a password the datastore does not have.
+
+A definition says how one of its `secrets` is changed with `change`, a command run like any other and given the value in use as `{{ .Secret.<name> }}` and the new one as `{{ .NewSecret }}`, which nothing else may name. It is best passed through `env`, so that it stays out of the container's process table. A secret the datastore reads as its container is made declares `rebuild: true` instead. A change in `offline` mode, or a rebuild, stops the service and so needs `--allow-restart`. A secret declaring neither cannot be changed.
+
+```yaml
+x-dokku:
+  secrets:
+    password:
+      file: PASSWORD
+      length: 16
+      env: SERVICE_PASSWORD
+      change:
+        exec: ["thing-passwd"]
+        env:
+          OLD_PASSWORD: "{{ .Secret.password }}"
+          NEW_PASSWORD: "{{ .NewSecret }}"
+```
 
 ## Cloned services
 

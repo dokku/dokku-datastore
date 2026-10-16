@@ -429,18 +429,47 @@ func readmeSettableProperties(data DocumentationData) []string {
 			continue
 		}
 
-		table = append(table, fmt.Sprintf("| `%s` | %s | %s |", property.Name, property.Description, effects[property.TakesEffect]))
+		effect := effects[property.TakesEffect]
+		if property.IsSecret() && data.PasswordRestarts {
+			effect = "once `set` restarts the service, with `--allow-restart`"
+		}
+
+		table = append(table, fmt.Sprintf("| `%s` | %s | %s |", property.Name, property.Description, effect))
 	}
 
-	return []string{
+	sections := []string{
 		"### Service properties",
-		fmt.Sprintf("Every setting a service has after it is created, other than its image, its passwords, its mounts and its backup schedule, each of which has a command of its own, is changed with `dokku %s:set lollipop <key> <value>`, and cleared by giving no value. "+
+		fmt.Sprintf("Every setting a service has after it is created, other than its image, its mounts and its backup schedule, each of which has a command of its own, is changed with `dokku %s:set lollipop <key> <value>`, and cleared by giving no value. "+
 			"`dokku %s:info lollipop` reports each of them, with a credential reported as a fingerprint rather than its value. "+
 			"A setting the container is made with only reaches it once the container is built again, and `set` warns when that is the case: "+
 			"`dokku %s:restart` keeps the container the service has, so use `dokku %s:stop` and then `dokku %s:start`. "+
 			"Passing `--allow-restart` to `set` does that, or the `reexpose` an expose setting takes, whenever the value changed, and leaves the service alone when it did not.", data.CommandPrefix, data.CommandPrefix, data.CommandPrefix, data.CommandPrefix, data.CommandPrefix),
 		strings.Join(table, "\n"),
 	}
+
+	if data.Password {
+		sections = append(sections, readmePasswords(data))
+	}
+
+	return sections
+}
+
+// readmePasswords says how a password is changed, which unlike every other
+// setting reaches the datastore and the linked apps rather than only the file it
+// is kept in
+func readmePasswords(data DocumentationData) string {
+	keys := "The `password` key is"
+	if data.RootPassword {
+		keys = "The `password` and `root-password` keys are"
+	}
+
+	restart := "The datastore is told the new password while it runs, so the service has to be running."
+	if data.PasswordRestarts {
+		restart = "The datastore only reads the password as it starts, so changing it stops and starts the service, and `set` refuses to unless it is given `--allow-restart`."
+	}
+
+	return fmt.Sprintf("%s changed in the datastore as well as on disk, and every linked app is given the new url and restarted, unless `--no-restart` is passed. "+
+		"%s A password cannot be cleared, may only hold letters, digits, `.`, `_`, `~` and `-`, and is never printed back: `info` reports a fingerprint of it.", keys, restart)
 }
 
 // documentsProperty is whether the readme lists a property for the datastore,
@@ -455,6 +484,10 @@ func documentsProperty(property SettableProperty, data DocumentationData) bool {
 		return data.ImportArgs
 	case property.Name == service.VolumeTargetsProperty:
 		return data.VolumeKey != ""
+	case property.Name == "password":
+		return data.Password
+	case property.Name == "root-password":
+		return data.RootPassword
 	}
 
 	return true

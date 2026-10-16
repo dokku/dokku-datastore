@@ -27,6 +27,10 @@ type SetCommand struct {
 	// service is restarted or reexposed has that done for it, when its value
 	// changed
 	allowRestart bool
+
+	// noRestart leaves the apps linked to a service running on the config they
+	// had when a password changes the url they hold
+	noRestart bool
 }
 
 // Name returns the name of the command
@@ -50,6 +54,7 @@ func (c *SetCommand) Examples() map[string]string {
 	return map[string]string{
 		"Sets the initial network for a redis service named test":              fmt.Sprintf("%s %s redis test initial-network my-network", appName, c.Name()),
 		"Sets the memory limit for a redis service named test and restarts it": fmt.Sprintf("%s %s --allow-restart redis test memory 512", appName, c.Name()),
+		"Changes the password of a postgres service named test":                fmt.Sprintf("%s %s postgres test password a-new-password", appName, c.Name()),
 	}
 }
 
@@ -98,6 +103,7 @@ func (c *SetCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
 	f.BoolVar(&c.allowRestart, "allow-restart", false, "restart or reexpose the service when the property only takes effect that way and its value changed")
+	f.BoolVar(&c.noRestart, "no-restart", false, "do not restart the linked apps when a password change updates the url they hold")
 	return f
 }
 
@@ -108,6 +114,7 @@ func (c *SetCommand) AutocompleteFlags() complete.Flags {
 		c.AutocompleteGlobalFlags(),
 		complete.Flags{
 			"--allow-restart": complete.PredictNothing,
+			"--no-restart":    complete.PredictNothing,
 		},
 	)
 }
@@ -219,9 +226,39 @@ func (c *SetCommand) Run(args []string) int {
 		return 1
 	}
 
+	property, _ := internal.LookupSettableProperty(key)
+
+	// only a password reaches the linked apps, so the flag would do nothing
+	// for anything else
+	if c.noRestart && !property.IsSecret() {
+		logger.Error(internal.ErrorInput{
+			Error: fmt.Errorf("--no-restart only applies to a password, which is the only property the linked apps hold"),
+		})
+		return 1
+	}
+
+	// a password is changed in the datastore and in the linked apps, rather
+	// than written and left for the service to read
+	if property.IsSecret() {
+		logger.Info(fmt.Sprintf("Setting %s", key))
+		if err := internal.ChangeServiceSecret(ctx, internal.ChangeServiceSecretInput{
+			Datastore:    datastore,
+			ServiceName:  serviceName,
+			Property:     property,
+			Value:        value,
+			AllowRestart: c.allowRestart,
+			NoRestart:    c.noRestart,
+			Logger:       logger,
+		}); err != nil {
+			logger.Error(internal.ErrorInput{Error: err})
+			return 1
+		}
+
+		return 0
+	}
+
 	// read before anything is written, so that a value set again is told from
 	// a change, and a read that fails leaves the property as it was
-	property, _ := internal.LookupSettableProperty(key)
 	restart := c.allowRestart && property.RequiresRestart()
 	var before string
 	if restart {

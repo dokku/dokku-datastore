@@ -18,7 +18,7 @@ func TestSetPropertyRejectsUnknownKeys(t *testing.T) {
 		t.Fatal("expected an error for an unknown key, got none")
 	}
 
-	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, backup-object-name, backup-timestamp, backup-mailto, backup-access-key-id, backup-secret-access-key, backup-default-region, backup-signature-version, backup-endpoint-url, backup-encryption-passphrase, backup-public-key-id, backup-bucket, backup-use-iam, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, port-source-range, expose-host, expose-mode, export-args, import-args, volume-targets, config-options, custom-env, memory, shm-size"
+	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, backup-object-name, backup-timestamp, backup-mailto, backup-access-key-id, backup-secret-access-key, backup-default-region, backup-signature-version, backup-endpoint-url, backup-encryption-passphrase, backup-public-key-id, backup-bucket, backup-use-iam, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, port-source-range, expose-host, expose-mode, export-args, import-args, volume-targets, config-options, custom-env, memory, shm-size, password, root-password"
 	if err.Error() != expected {
 		t.Errorf("expected %q, got %q", expected, err)
 	}
@@ -34,9 +34,9 @@ func TestSettableProperties(t *testing.T) {
 	// is published, the host its exposed dsn names, whether it is published
 	// through an ambassador or directly, and the arguments its exports
 	// and imports are run with, where the definition's volumes are mounted,
-	// every setting create writes into a file of its own, and every backup
-	// setting the backup commands store
-	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "backup-object-name", "backup-timestamp", "backup-mailto", "backup-access-key-id", "backup-secret-access-key", "backup-default-region", "backup-signature-version", "backup-endpoint-url", "backup-encryption-passphrase", "backup-public-key-id", "backup-bucket", "backup-use-iam", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "port-source-range", "expose-host", "expose-mode", "export-args", "import-args", "volume-targets", "config-options", "custom-env", "memory", "shm-size"}
+	// every setting create writes into a file of its own, every backup
+	// setting the backup commands store, and the passwords
+	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "backup-object-name", "backup-timestamp", "backup-mailto", "backup-access-key-id", "backup-secret-access-key", "backup-default-region", "backup-signature-version", "backup-endpoint-url", "backup-encryption-passphrase", "backup-public-key-id", "backup-bucket", "backup-use-iam", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "port-source-range", "expose-host", "expose-mode", "export-args", "import-args", "volume-targets", "config-options", "custom-env", "memory", "shm-size", "password", "root-password"}
 	if strings.Join(SettablePropertyNames(), ",") != strings.Join(expected, ",") {
 		t.Errorf("expected %v, got %v", expected, SettablePropertyNames())
 	}
@@ -341,9 +341,19 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 }
 
 // Unsetting is how every other property is cleared, so an empty value has to
-// reach the delete rather than being refused as an unusable one.
+// reach the delete rather than being refused as an unusable one. A password is
+// the exception: a service without one would hand its apps a dsn the datastore
+// refuses.
 func TestSetPropertyAcceptsAnEmptyValue(t *testing.T) {
-	for _, key := range SettablePropertyNames() {
+	for _, property := range SettableProperties {
+		key := property.Name
+		if property.IsSecret() {
+			if err := ValidatePropertyValue(key, ""); err == nil || !strings.Contains(err.Error(), "cannot be cleared") {
+				t.Errorf("expected an empty %s to be refused, got %v", key, err)
+			}
+			continue
+		}
+
 		if err := ValidatePropertyValue(key, ""); err != nil {
 			t.Errorf("expected an empty %s to be accepted, got %q", key, err)
 		}

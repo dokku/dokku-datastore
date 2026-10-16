@@ -76,6 +76,16 @@ type SettableProperty struct {
 
 	// apply has a change take effect where it is not read again on its own
 	apply func(ctx context.Context, s *service.Datastore, serviceName string) error
+
+	// secret is the definition secret the property sets. A secret is changed
+	// in the datastore and in every linked app rather than written and
+	// applied, which ChangeServiceSecret does.
+	secret string
+}
+
+// IsSecret reports whether the property is one of the service's passwords
+func (p SettableProperty) IsSecret() bool {
+	return p.secret != ""
 }
 
 // ReportedBy is the info key that reports the property
@@ -370,6 +380,26 @@ var SettableProperties = []SettableProperty{
 			return value
 		}),
 	},
+	{
+		Name:            "password",
+		Description:     "the password the service and its linked apps use, changed in the datastore and in the url every linked app holds",
+		Sensitive:       true,
+		InfoKey:         "password-fingerprint",
+		secret:          "password",
+		validate:        validateSecretValue("password"),
+		validateService: secretChangeable("password", "password"),
+		read:            secretReader("password"),
+	},
+	{
+		Name:            "root-password",
+		Description:     "the password of the datastore's own administrator, changed in the datastore",
+		Sensitive:       true,
+		InfoKey:         "root-password-fingerprint",
+		secret:          "root_password",
+		validate:        validateSecretValue("root-password"),
+		validateService: secretChangeable("root-password", "root_password"),
+		read:            secretReader("root_password"),
+	},
 }
 
 // the set keys for backup settings that have no property of their own to be
@@ -386,8 +416,6 @@ var ownedElsewhere = map[string]string{
 	"image":                "the image a service runs is changed with upgrade",
 	"image-version":        "the image version a service runs is changed with upgrade",
 	"definition":           "the definition a service runs on is changed with upgrade",
-	"password":             "the password is kept by the datastore itself, and changing the file holding it would not change it",
-	"root-password":        "the root password is kept by the datastore itself, and changing the file holding it would not change it",
 	"mounts":               "mounts are changed with mount and unmount",
 	BackupScheduleProperty: "a scheduled backup is changed with backup-schedule and backup-unschedule",
 }
@@ -487,6 +515,10 @@ func SetProperty(s *service.Datastore, serviceName string, key string, value str
 	}
 
 	property, _ := LookupSettableProperty(key)
+	if property.IsSecret() {
+		return fmt.Errorf("%s is changed in the datastore as well as on disk, which ChangeServiceSecret does", key)
+	}
+
 	if property.write != nil {
 		return property.write(s, serviceName, value)
 	}

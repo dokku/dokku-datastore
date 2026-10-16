@@ -651,12 +651,20 @@ dokku {{.CommandPrefix}}:info lollipop --backup-secret-access-key-fingerprint
 dokku {{.CommandPrefix}}:info lollipop --backup-encryption-fingerprint
 a fingerprint is empty when that value is not stored. the access key id and the secret are also reported as one fingerprint of the pair, which is empty until both are stored and is what backup-auth writes in one call:
 dokku {{.CommandPrefix}}:info lollipop --backup-auth-fingerprint
+{{- if .Password}}
+the service's passwords are reported the same way, and are empty for a password the datastore does not have:
+dokku {{.CommandPrefix}}:info lollipop --password-fingerprint
+{{- if .RootPassword}}
+dokku {{.CommandPrefix}}:info lollipop --root-password-fingerprint
+{{- end}}
+{{- end}}
 the same fingerprints can be computed from the values that were passed to set, backup-auth and backup-set-encryption:
 
     printf '%s' "$AWS_ACCESS_KEY_ID" | sha256sum
     printf '%s' "$AWS_SECRET_ACCESS_KEY" | sha256sum
     printf '%s\n%s' "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" | sha256sum
-    printf '%s' "$PASSPHRASE" | sha256sum`
+    printf '%s' "$PASSPHRASE" | sha256sum
+    printf '%s' "$PASSWORD" | sha256sum`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1011,6 +1019,16 @@ pass extra arguments to the process the service container runs. these are not do
 dokku {{.CommandPrefix}}:set lollipop config-options -- "<config-options...>"
 go back to running the process with the datastore's own arguments alone
 dokku {{.CommandPrefix}}:set lollipop config-options
+{{- if .Password}}
+change the password in the datastore and in the url every linked app holds, restarting the apps. the value is never printed back, and info reports a fingerprint of it
+dokku {{.CommandPrefix}}:set{{if .PasswordRestarts}} --allow-restart{{end}} lollipop password "<new-password>"
+give the linked apps the new url without restarting them
+dokku {{.CommandPrefix}}:set{{if .PasswordRestarts}} --allow-restart{{end}} --no-restart lollipop password "<new-password>"
+{{- end}}
+{{- if .RootPassword}}
+change the root password in the datastore
+dokku {{.CommandPrefix}}:set lollipop root-password "<new-root-password>"
+{{- end}}
 {{- if .Backups}}
 change one of the settings backup-auth stores, such as the endpoint of an s3 compatible service, without passing the rest again
 dokku {{.CommandPrefix}}:set lollipop backup-endpoint-url https://nyc3.digitaloceanspaces.com
