@@ -105,11 +105,6 @@ ambassador_id() {
   container_inspect "$AMBASSADOR" '{{ .Id }}'
 }
 
-# the service container's id, which a reexpose leaves alone
-service_id() {
-  container_inspect "$(service_container)" '{{ .Id }}'
-}
-
 # the ambassador's range of client addresses, both as it records the property
 # and as the socat command it runs enforces it; empty when it has none
 assert_source_range() {
@@ -410,6 +405,46 @@ expected_exposed_dsn() {
   run "$BIN" start "$PLUGIN" "$SERVICE"
   assert_success
   assert_source_range "start with the source range unset" ""
+}
+
+@test "($DEFINITION) set --allow-restart reexposes a running service with a changed expose setting" {
+  local service_before ambassador_before
+  service_before="$(service_id)"
+
+  run --separate-stderr "$BIN" set --allow-restart "$PLUGIN" "$SERVICE" port-source-range 192.0.2.0/24
+  assert_success
+  refute_stderr --partial "takes effect"
+  assert_ambassador "set --allow-restart with a source range"
+  assert_source_range "set --allow-restart with a source range" "192.0.2.0/24"
+  [[ "$(service_id)" == "$service_before" ]] || fail "expected the reexpose to leave the service container alone"
+
+  # the same range again is no change, so the ambassador is kept
+  ambassador_before="$(ambassador_id)"
+  run --separate-stderr "$BIN" set --allow-restart "$PLUGIN" "$SERVICE" port-source-range 192.0.2.0/24
+  assert_success
+  assert_output --partial "port-source-range is unchanged"
+  [[ "$(ambassador_id)" == "$ambassador_before" ]] || fail "expected a range set again to keep the ambassador"
+
+  run "$BIN" set --allow-restart "$PLUGIN" "$SERVICE" port-source-range
+  assert_success
+  assert_ambassador "set --allow-restart with the source range unset"
+  assert_source_range "set --allow-restart with the source range unset" ""
+}
+
+@test "($DEFINITION) set --allow-restart starts a stopped service with a changed expose setting" {
+  run "$BIN" stop "$PLUGIN" "$SERVICE"
+  assert_success
+
+  # reexpose refuses a stopped service, so it is started, which reconciles
+  # the ports
+  run "$BIN" set --allow-restart "$PLUGIN" "$SERVICE" port-source-range 192.0.2.0/24
+  assert_success
+  assert_ambassador "set --allow-restart on a stopped service"
+  assert_source_range "set --allow-restart on a stopped service" "192.0.2.0/24"
+
+  run "$BIN" set --allow-restart "$PLUGIN" "$SERVICE" port-source-range
+  assert_success
+  assert_source_range "set --allow-restart with the source range unset" ""
 }
 
 @test "($DEFINITION) reexpose refuses a stopped service" {

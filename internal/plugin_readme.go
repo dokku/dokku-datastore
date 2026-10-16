@@ -437,7 +437,8 @@ func readmeSettableProperties(data DocumentationData) []string {
 		fmt.Sprintf("Every setting a service has after it is created, other than its image, its passwords, its mounts and its backup schedule, each of which has a command of its own, is changed with `dokku %s:set lollipop <key> <value>`, and cleared by giving no value. "+
 			"`dokku %s:info lollipop` reports each of them, with a credential reported as a fingerprint rather than its value. "+
 			"A setting the container is made with only reaches it once the container is built again, and `set` warns when that is the case: "+
-			"`dokku %s:restart` keeps the container the service has, so use `dokku %s:stop` and then `dokku %s:start`.", data.CommandPrefix, data.CommandPrefix, data.CommandPrefix, data.CommandPrefix, data.CommandPrefix),
+			"`dokku %s:restart` keeps the container the service has, so use `dokku %s:stop` and then `dokku %s:start`. "+
+			"Passing `--allow-restart` to `set` does that, or the `reexpose` an expose setting takes, whenever the value changed, and leaves the service alone when it did not.", data.CommandPrefix, data.CommandPrefix, data.CommandPrefix, data.CommandPrefix, data.CommandPrefix),
 		strings.Join(table, "\n"),
 	}
 }

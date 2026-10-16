@@ -2,8 +2,11 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/service"
@@ -67,6 +70,10 @@ type SettableProperty struct {
 	// property without one is a dokku property.
 	write func(s *service.Datastore, serviceName string, value string) error
 
+	// read returns the value as write stored it, empty when nothing is. A
+	// property without one is a dokku property.
+	read func(s *service.Datastore, serviceName string) (string, error)
+
 	// apply has a change take effect where it is not read again on its own
 	apply func(ctx context.Context, s *service.Datastore, serviceName string) error
 }
@@ -91,6 +98,12 @@ func (p SettableProperty) Warning(commandPrefix string, serviceName string) stri
 	}
 
 	return ""
+}
+
+// RequiresRestart is whether a change to the property only reaches the service
+// once it is restarted or reexposed
+func (p SettableProperty) RequiresRestart() bool {
+	return p.TakesEffect != EffectImmediately
 }
 
 // SettableProperties are the properties a service exposes through the set
@@ -150,6 +163,7 @@ var SettableProperties = []SettableProperty{
 		requiresBackups: true,
 		validate:        singleLine(backupAccessKeyIDProperty),
 		write:           backupAuthWriter(accessKeyIDFile),
+		read:            backupAuthReader(accessKeyIDFile),
 	},
 	{
 		Name:            backupSecretAccessKeyProperty,
@@ -160,6 +174,7 @@ var SettableProperties = []SettableProperty{
 		requiresBackups: true,
 		validate:        singleLine(backupSecretAccessKeyProperty),
 		write:           backupAuthWriter(secretAccessKeyFile),
+		read:            backupAuthReader(secretAccessKeyFile),
 	},
 	{
 		Name:            "backup-default-region",
@@ -168,6 +183,7 @@ var SettableProperties = []SettableProperty{
 		requiresBackups: true,
 		validate:        singleLine("backup-default-region"),
 		write:           backupAuthWriter(defaultRegionFile),
+		read:            backupAuthReader(defaultRegionFile),
 	},
 	{
 		Name:            "backup-signature-version",
@@ -176,6 +192,7 @@ var SettableProperties = []SettableProperty{
 		requiresBackups: true,
 		validate:        singleLine("backup-signature-version"),
 		write:           backupAuthWriter(signatureVersionFile),
+		read:            backupAuthReader(signatureVersionFile),
 	},
 	{
 		Name:            "backup-endpoint-url",
@@ -184,6 +201,7 @@ var SettableProperties = []SettableProperty{
 		requiresBackups: true,
 		validate:        ValidateEndpointURL,
 		write:           backupAuthWriter(endpointURLFile),
+		read:            backupAuthReader(endpointURLFile),
 	},
 	{
 		Name:            backupEncryptionPassphraseProperty,
@@ -194,6 +212,7 @@ var SettableProperties = []SettableProperty{
 		requiresBackups: true,
 		validate:        singleLine(backupEncryptionPassphraseProperty),
 		write:           backupEncryptionWriter(encryptionKeyFile),
+		read:            backupEncryptionReader(encryptionKeyFile),
 	},
 	{
 		Name:            "backup-public-key-id",
@@ -202,6 +221,7 @@ var SettableProperties = []SettableProperty{
 		requiresBackups: true,
 		validate:        singleLine("backup-public-key-id"),
 		write:           backupEncryptionWriter(publicKeyIDFile),
+		read:            backupEncryptionReader(publicKeyIDFile),
 	},
 	{
 		Name:            BackupBucketProperty,
@@ -225,6 +245,7 @@ var SettableProperties = []SettableProperty{
 		validate:        validateBackupUseIAM,
 		validateService: requireBackupSchedule(BackupUseIAMProperty),
 		write:           writeBackupUseIAM,
+		read:            propertyReader(BackupUseIAMProperty),
 		apply:           regenerateCrontabIfScheduled,
 	},
 	{
@@ -301,12 +322,14 @@ var SettableProperties = []SettableProperty{
 		},
 		validateService: validateVolumeTargets,
 		write:           writeVolumeTargets,
+		read:            propertyReader(service.VolumeTargetsProperty),
 	},
 	{
 		Name:        service.ConfigOptionsProperty,
 		Description: "extra arguments for the process the service container runs",
 		TakesEffect: EffectRebuild,
 		validate:    singleLine(service.ConfigOptionsProperty),
+		read:        serviceFileReader(func(files service.ServiceFiles) string { return files.ConfigOptions }),
 		write: serviceFileWriter(func(files service.ServiceFiles) string { return files.ConfigOptions }, service.PrivateFileMode, func(value string) string {
 			return value
 		}),
@@ -318,6 +341,7 @@ var SettableProperties = []SettableProperty{
 		validate:    singleLine(service.CustomEnvProperty),
 		// stored one per line, and given semicolon delimited, the way create
 		// takes it
+		read: serviceFileReader(func(files service.ServiceFiles) string { return files.Env }),
 		write: serviceFileWriter(func(files service.ServiceFiles) string { return files.Env }, service.PrivateFileMode, func(value string) string {
 			return strings.Join(strings.Split(value, ";"), "\n")
 		}),
@@ -328,6 +352,7 @@ var SettableProperties = []SettableProperty{
 		TakesEffect: EffectRebuild,
 		validate:    service.ValidateMemory,
 		// cleared to what create writes for no limit
+		read: serviceFileReader(func(files service.ServiceFiles) string { return files.Memory }),
 		write: serviceFileWriter(func(files service.ServiceFiles) string { return files.Memory }, 0644, func(value string) string {
 			if value == "" {
 				return "0"
@@ -340,6 +365,7 @@ var SettableProperties = []SettableProperty{
 		Description: "the shared memory size of the container, such as `64m`",
 		TakesEffect: EffectRebuild,
 		validate:    service.ValidateShmSize,
+		read:        serviceFileReader(func(files service.ServiceFiles) string { return files.ShmSize }),
 		write: serviceFileWriter(func(files service.ServiceFiles) string { return files.ShmSize }, 0644, func(value string) string {
 			return value
 		}),
@@ -479,6 +505,94 @@ func ApplyProperty(ctx context.Context, s *service.Datastore, serviceName string
 	return property.apply(ctx, s, serviceName)
 }
 
+// ReadProperty returns a property as it is stored for a service, which is
+// what tells a change from a value set again: a value is stored the way
+// SetProperty normalizes it, so two spellings of the same value read the same
+func ReadProperty(s *service.Datastore, serviceName string, key string) (string, error) {
+	if err := ValidateProperty(key); err != nil {
+		return "", err
+	}
+
+	property, _ := LookupSettableProperty(key)
+	if property.read != nil {
+		return property.read(s, serviceName)
+	}
+
+	return propertyReader(key)(s, serviceName)
+}
+
+// RestartForPropertyInput is the input for the RestartForProperty function
+type RestartForPropertyInput struct {
+	// Datastore is the service's datastore
+	Datastore *service.Datastore
+
+	// ServiceName is the service the property was set on
+	ServiceName string
+
+	// Property is the property that changed
+	Property SettableProperty
+
+	// Logger reports what is restarted and what is being waited on
+	Logger Ui
+}
+
+// RestartForProperty has a property that changed reach the service, doing
+// what its warning would otherwise ask for.
+//
+// A property read when the container is made has the service stopped and
+// started, whether or not it was running, since the caller asked for the value
+// to be in effect. A property read when the exposed ports are published has an
+// exposed service reexposed, or started when it is stopped, since start
+// reconciles the ports and reexpose refuses a stopped service. A service that
+// is not exposed takes it up on its next expose.
+func RestartForProperty(ctx context.Context, input RestartForPropertyInput) error {
+	switch input.Property.TakesEffect {
+	case EffectRebuild:
+		return RecreateServiceContainer(ctx, RecreateServiceContainerInput{
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+			Logger:      input.Logger,
+			Reason:      fmt.Sprintf("for %s to take effect", input.Property.Name),
+		})
+
+	case EffectReexpose:
+		if !IsExposed(input.Datastore, input.ServiceName) {
+			input.Logger.Info(fmt.Sprintf("Service %s is not exposed, so %s takes effect the next time it is exposed", input.ServiceName, input.Property.Name))
+			return nil
+		}
+
+		switch service.Status(ctx, service.StatusInput{Datastore: input.Datastore, ServiceName: input.ServiceName}) {
+		case "running", "restarting":
+			input.Logger.Info(fmt.Sprintf("Reexposing %s for %s to take effect", input.ServiceName, input.Property.Name))
+
+			// the flag is the consent a directly exposed service would otherwise
+			// be asked for before it is stopped and started
+			return ReexposeService(ctx, ReexposeServiceInput{
+				Datastore:   input.Datastore,
+				ServiceName: input.ServiceName,
+				Logger:      input.Logger,
+				Force:       true,
+			})
+		}
+
+		input.Logger.Info(fmt.Sprintf("Starting %s for %s to take effect", input.ServiceName, input.Property.Name))
+		if err := service.Start(ctx, service.StartInput{
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+		}); err != nil {
+			return fmt.Errorf("failed to start service: %w", err)
+		}
+
+		return WaitForService(ctx, WaitForServiceInput{
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+			Logger:      input.Logger,
+		})
+	}
+
+	return nil
+}
+
 // writeProperty writes a dokku property, or deletes it when the value is empty
 func writeProperty(s *service.Datastore, serviceName string, key string, value string) error {
 	commandPrefix := s.Properties().CommandPrefix
@@ -511,6 +625,50 @@ func serviceFileWriter(file func(service.ServiceFiles) string, mode os.FileMode,
 	return func(s *service.Datastore, serviceName string, value string) error {
 		return writeServiceFile(file(service.Files(s, serviceName)), format(value), mode)
 	}
+}
+
+// propertyReader reads a dokku property, as writeProperty wrote it
+func propertyReader(key string) func(s *service.Datastore, serviceName string) (string, error) {
+	return func(s *service.Datastore, serviceName string) (string, error) {
+		return common.PropertyGet(s.Properties().CommandPrefix, serviceName, key), nil
+	}
+}
+
+// serviceFileReader reads one of the files create keeps a container setting in,
+// as serviceFileWriter wrote it
+func serviceFileReader(file func(service.ServiceFiles) string) func(s *service.Datastore, serviceName string) (string, error) {
+	return func(s *service.Datastore, serviceName string) (string, error) {
+		return readStoredFile(file(service.Files(s, serviceName)))
+	}
+}
+
+// backupAuthReader reads one of the files backup-auth stores the credentials
+// backups are shipped with in
+func backupAuthReader(name string) func(s *service.Datastore, serviceName string) (string, error) {
+	return func(s *service.Datastore, serviceName string) (string, error) {
+		return readStoredFile(filepath.Join(service.Folders(s, serviceName).Backup, name))
+	}
+}
+
+// backupEncryptionReader reads one of the files the backup encryption commands
+// store how backups are encrypted in
+func backupEncryptionReader(name string) func(s *service.Datastore, serviceName string) (string, error) {
+	return func(s *service.Datastore, serviceName string) (string, error) {
+		return readStoredFile(filepath.Join(service.Folders(s, serviceName).BackupEncryption, name))
+	}
+}
+
+// readStoredFile reads a file a setting is stored in, empty when there is none
+func readStoredFile(filename string) (string, error) {
+	contents, err := os.ReadFile(filename)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("unable to read %s: %w", filename, err)
+	}
+
+	return string(contents), nil
 }
 
 // backupAuthWriter writes one of the files backup-auth stores the credentials

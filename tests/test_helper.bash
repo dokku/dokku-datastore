@@ -300,6 +300,11 @@ service_container() {
   echo "dokku.$PLUGIN.${1:-$SERVICE}"
 }
 
+# the service container's id, which changes only when it is made again
+service_id() {
+  container_inspect "$(service_container)" '{{ .Id }}'
+}
+
 container_inspect() {
   docker container inspect "$1" --format "$2"
 }

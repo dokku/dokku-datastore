@@ -383,6 +383,9 @@ dokku-datastore upgrade redis lollipop --memory 512
 
 # the same, without an upgrade, reaching the container once it is built again
 dokku redis:set lollipop memory 512
+
+# the same, building the container again if the limit changed
+dokku redis:set --allow-restart lollipop memory 512
 ```
 
 ## Changing a service's settings
@@ -396,6 +399,12 @@ dokku redis:set lollipop shm-size 256m
 ```
 
 A value that starts with a dash, as config options usually do, follows `--` so that `set` does not read it as a flag of its own. `custom-env` is semicolon delimited, the way `--custom-env` takes it, and `shm-size` is checked with the parser docker reads `--shm-size` with, at `create`, `clone` and `upgrade` as well as at `set`. Each of these reaches the container the next time it is built, and `set` warns when a setting it wrote is one of those: `restart` keeps the container a service has, so a service already running takes a `stop` and then a `start`.
+
+`--allow-restart` has `set` do that itself. When the value it wrote differs from the one the service had, a setting read when the container is built has the service stopped and started, whether or not it was running, and an expose setting has an exposed service reexposed, or started if it is stopped. A value set again to what it already was restarts nothing, and the warning is still printed, since a value set earlier without the flag may not have reached the container yet. A setting read each time it is used takes no restart, so the flag changes nothing for it.
+
+```shell
+dokku redis:set --allow-restart lollipop shm-size 256m
+```
 
 The backup settings are set the same way, one at a time, without passing everything `backup-auth` takes again. A credential is never printed back: `set` names the key it wrote, and `info` reports a fingerprint.
 
@@ -920,6 +929,9 @@ dokku redis:info lollipop --exposed-ports
 # every client again
 dokku redis:set lollipop port-source-range
 dokku redis:reexpose lollipop
+
+# the same, reexposing in the same step when the range changed
+dokku redis:set --allow-restart lollipop port-source-range
 ```
 
 The range is enforced by socat in the ambassador, which brings its limits with it:

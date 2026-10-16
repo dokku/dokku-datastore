@@ -22,6 +22,11 @@ type SetCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+
+	// allowRestart is whether a property that only takes effect once the
+	// service is restarted or reexposed has that done for it, when its value
+	// changed
+	allowRestart bool
 }
 
 // Name returns the name of the command
@@ -43,7 +48,8 @@ func (c *SetCommand) Help() string {
 func (c *SetCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Sets the initial network for a redis service named test": fmt.Sprintf("%s %s redis test initial-network my-network", appName, c.Name()),
+		"Sets the initial network for a redis service named test":              fmt.Sprintf("%s %s redis test initial-network my-network", appName, c.Name()),
+		"Sets the memory limit for a redis service named test and restarts it": fmt.Sprintf("%s %s --allow-restart redis test memory 512", appName, c.Name()),
 	}
 }
 
@@ -91,6 +97,7 @@ func (c *SetCommand) ParsedArguments(args []string) (map[string]command.Argument
 func (c *SetCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.BoolVar(&c.allowRestart, "allow-restart", false, "restart or reexpose the service when the property only takes effect that way and its value changed")
 	return f
 }
 
@@ -99,7 +106,9 @@ func (c *SetCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--allow-restart": complete.PredictNothing,
+		},
 	)
 }
 
@@ -210,8 +219,19 @@ func (c *SetCommand) Run(args []string) int {
 		return 1
 	}
 
-	// a credential is never printed, not even to the terminal that typed it
+	// read before anything is written, so that a value set again is told from
+	// a change, and a read that fails leaves the property as it was
 	property, _ := internal.LookupSettableProperty(key)
+	restart := c.allowRestart && property.RequiresRestart()
+	var before string
+	if restart {
+		if before, err = internal.ReadProperty(datastore, serviceName, key); err != nil {
+			logger.Error(internal.ErrorInput{Error: err})
+			return 1
+		}
+	}
+
+	// a credential is never printed, not even to the terminal that typed it
 	switch {
 	case value == "":
 		logger.Info(fmt.Sprintf("Unsetting %s", key))
@@ -229,6 +249,34 @@ func (c *SetCommand) Run(args []string) int {
 	if err := internal.ApplyProperty(ctx, datastore, serviceName, key); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
+	}
+
+	if restart {
+		after, err := internal.ReadProperty(datastore, serviceName, key)
+		if err != nil {
+			logger.Error(internal.ErrorInput{Error: err})
+			return 1
+		}
+
+		if after != before {
+			if err := internal.RestartForProperty(ctx, internal.RestartForPropertyInput{
+				Datastore:   datastore,
+				ServiceName: serviceName,
+				Property:    property,
+				Logger:      logger,
+			}); err != nil {
+				logger.Error(internal.ErrorInput{
+					Error: fmt.Errorf("%s was set, but %s could not be restarted: %w", key, serviceName, err),
+				})
+				return 1
+			}
+
+			return 0
+		}
+
+		// still warned about below, since a value set earlier without the flag
+		// may not have reached the container yet
+		logger.Info(fmt.Sprintf("%s is unchanged, so %s was not restarted", key, serviceName))
 	}
 
 	if warning := property.Warning(datastore.Properties().CommandPrefix, serviceName); warning != "" {

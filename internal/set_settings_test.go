@@ -332,3 +332,150 @@ func TestCreateRefusesAnUnusableShmSize(t *testing.T) {
 		t.Errorf("expected the shared memory size to be refused, got %v", err)
 	}
 }
+
+// A property with a store of its own is read back from that store, rather than
+// from a dokku property nothing writes, which would read every change as none.
+func TestEveryCustomWriterHasAReader(t *testing.T) {
+	for _, property := range SettableProperties {
+		if property.write != nil && property.read == nil {
+			t.Errorf("expected %s to have a reader for the store its writer uses", property.Name)
+		}
+	}
+}
+
+// What set writes is what is read back, so a change reads as one and the same
+// value set again reads the same.
+func TestReadPropertyReadsWhatSetPropertyWrote(t *testing.T) {
+	redis := service.Datastores["redis"]
+	withInfoService(t, redis, "lollipop")
+
+	tests := map[string]string{
+		service.ConfigOptionsProperty:   "--maxmemory-policy allkeys-lru",
+		service.CustomEnvProperty:       "TZ=UTC;LANG=C.UTF-8",
+		service.MemoryProperty:          "512",
+		service.ShmSizeProperty:         "256m",
+		service.RestartPolicyProperty:   "unless-stopped",
+		service.LogOptProperty:          "max-size=15m",
+		service.VolumeTargetsProperty:   "data=/redis-data",
+		service.PortBindAddressProperty: "10.0.0.5",
+		service.ExposeModeProperty:      service.ExposeModeDirect,
+		backupSecretAccessKeyProperty:   "wJalrXUtnFEMI",
+	}
+
+	for key, value := range tests {
+		t.Run(key, func(t *testing.T) {
+			before, err := ReadProperty(redis, "lollipop", key)
+			if err != nil {
+				t.Fatalf("expected %s to be read, got %q", key, err)
+			}
+
+			if err := SetProperty(redis, "lollipop", key, value); err != nil {
+				t.Fatalf("expected %s to be set, got %q", key, err)
+			}
+
+			set, err := ReadProperty(redis, "lollipop", key)
+			if err != nil {
+				t.Fatalf("expected %s to be read, got %q", key, err)
+			}
+			if set == before {
+				t.Errorf("expected setting %s to read as a change from %q", key, before)
+			}
+
+			if err := SetProperty(redis, "lollipop", key, value); err != nil {
+				t.Fatalf("expected %s to be set again, got %q", key, err)
+			}
+
+			again, err := ReadProperty(redis, "lollipop", key)
+			if err != nil {
+				t.Fatalf("expected %s to be read, got %q", key, err)
+			}
+			if again != set {
+				t.Errorf("expected setting %s again to read the same, got %q then %q", key, set, again)
+			}
+
+			if err := SetProperty(redis, "lollipop", key, ""); err != nil {
+				t.Fatalf("expected %s to be cleared, got %q", key, err)
+			}
+		})
+	}
+}
+
+// Two spellings of the same stored value are no change, since it is the stored
+// value the container is made from.
+func TestReadPropertyComparesTheStoredValue(t *testing.T) {
+	redis := service.Datastores["redis"]
+	withInfoService(t, redis, "lollipop")
+
+	tests := []struct {
+		key    string
+		first  string
+		second string
+	}{
+		// cleared is written as no limit
+		{key: service.MemoryProperty, first: "0", second: ""},
+		// stored sorted and cleaned
+		{key: service.VolumeTargetsProperty, first: "data=/redis-data config=/etc/redis", second: "  config=/etc/redis   data=/redis-data// "},
+	}
+
+	for _, test := range tests {
+		t.Run(test.key, func(t *testing.T) {
+			if err := SetProperty(redis, "lollipop", test.key, test.first); err != nil {
+				t.Fatalf("expected %s to be set, got %q", test.key, err)
+			}
+			first, err := ReadProperty(redis, "lollipop", test.key)
+			if err != nil {
+				t.Fatalf("expected %s to be read, got %q", test.key, err)
+			}
+
+			if err := SetProperty(redis, "lollipop", test.key, test.second); err != nil {
+				t.Fatalf("expected %s to be set, got %q", test.key, err)
+			}
+			second, err := ReadProperty(redis, "lollipop", test.key)
+			if err != nil {
+				t.Fatalf("expected %s to be read, got %q", test.key, err)
+			}
+
+			if first != second {
+				t.Errorf("expected %q and %q to read the same, got %q and %q", test.first, test.second, first, second)
+			}
+
+			if err := SetProperty(redis, "lollipop", test.key, ""); err != nil {
+				t.Fatalf("expected %s to be cleared, got %q", test.key, err)
+			}
+		})
+	}
+}
+
+// A key set refuses is refused by the read as well, rather than read from a
+// dokku property of that name.
+func TestReadPropertyRefusesAnUnknownKey(t *testing.T) {
+	redis := service.Datastores["redis"]
+	withInfoService(t, redis, "lollipop")
+
+	for _, key := range []string{"not-a-property", "password"} {
+		if _, err := ReadProperty(redis, "lollipop", key); err == nil {
+			t.Errorf("expected reading %s to be refused", key)
+		}
+	}
+}
+
+// Only a property that takes effect on its own needs no restart.
+func TestSettablePropertyRequiresRestart(t *testing.T) {
+	tests := map[string]bool{
+		service.MemoryProperty:          true,
+		service.PortBindAddressProperty: true,
+		service.WaitTimeoutProperty:     false,
+		service.KeyserverProperty:       false,
+	}
+
+	for key, expected := range tests {
+		property, ok := LookupSettableProperty(key)
+		if !ok {
+			t.Fatalf("expected %s to be settable", key)
+		}
+
+		if actual := property.RequiresRestart(); actual != expected {
+			t.Errorf("expected %s to require a restart to be %t, got %t", key, expected, actual)
+		}
+	}
+}

@@ -262,6 +262,73 @@ skip_unless_log_is_capped() {
   assert_output ""
 }
 
+@test "($DEFINITION) --allow-restart rebuilds the container when a container setting changes" {
+  local service_before
+
+  run --separate-stderr "$BIN" set --allow-restart "$PLUGIN" "$SERVICE" restart-policy unless-stopped
+  assert_success
+  # done rather than asked for
+  refute_stderr --partial "takes effect"
+
+  # the container it was rebuilt with, without a stop and a start of its own
+  run container_inspect "$(service_container)" '{{ .HostConfig.RestartPolicy.Name }}'
+  assert_success
+  assert_output "unless-stopped"
+
+  # the same value again is no change, so nothing is restarted
+  service_before="$(service_id)"
+  run --separate-stderr "$BIN" set --allow-restart "$PLUGIN" "$SERVICE" restart-policy unless-stopped
+  assert_success
+  assert_output --partial "restart-policy is unchanged"
+  # still pointed at, since a value set without the flag may not have reached
+  # the container
+  assert_stderr --partial "restart-policy takes effect"
+  [[ "$(service_id)" == "$service_before" ]] || fail "expected a value set again to leave the container alone"
+
+  # and back to what every other check expects of this service
+  run "$BIN" set --allow-restart "$PLUGIN" "$SERVICE" restart-policy
+  assert_success
+
+  run container_inspect "$(service_container)" '{{ .HostConfig.RestartPolicy.Name }}'
+  assert_success
+  assert_output "always"
+}
+
+@test "($DEFINITION) --allow-restart starts a stopped service with a changed container setting" {
+  run "$BIN" stop "$PLUGIN" "$SERVICE"
+  assert_success
+
+  run "$BIN" set --allow-restart "$PLUGIN" "$SERVICE" restart-policy unless-stopped
+  assert_success
+
+  run container_inspect "$(service_container)" '{{ .State.Status }}:{{ .HostConfig.RestartPolicy.Name }}'
+  assert_success
+  assert_output "running:unless-stopped"
+
+  # and back to what every other check expects of this service
+  run "$BIN" set --allow-restart "$PLUGIN" "$SERVICE" restart-policy
+  assert_success
+
+  run container_inspect "$(service_container)" '{{ .HostConfig.RestartPolicy.Name }}'
+  assert_success
+  assert_output "always"
+}
+
+@test "($DEFINITION) --allow-restart leaves the service alone for a setting read each time it is used" {
+  local service_before
+  service_before="$(service_id)"
+
+  run --separate-stderr "$BIN" set --allow-restart "$PLUGIN" "$SERVICE" wait-timeout 90
+  assert_success
+  refute_output --partial "Stopping and starting"
+  [[ "$(service_id)" == "$service_before" ]] || fail "expected a wait timeout to leave the container alone"
+
+  # and back to what every other check expects of this service
+  run "$BIN" set --allow-restart "$PLUGIN" "$SERVICE" wait-timeout
+  assert_success
+  [[ "$(service_id)" == "$service_before" ]] || fail "expected a cleared wait timeout to leave the container alone"
+}
+
 @test "($DEFINITION) a wait timeout reaches the readiness probe" {
   run "$BIN" set "$PLUGIN" "$SERVICE" wait-timeout 90
   assert_success
@@ -451,6 +518,20 @@ skip_unless_log_is_capped() {
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --expose-host
   assert_success
   assert_output ""
+}
+
+@test "($DEFINITION) --allow-restart leaves a service that is not exposed alone for an expose setting" {
+  local service_before
+  service_before="$(service_id)"
+
+  run --separate-stderr "$BIN" set --allow-restart "$PLUGIN" "$SERVICE" port-bind-address 10.0.0.5
+  assert_success
+  assert_output --partial "is not exposed, so port-bind-address takes effect the next time it is exposed"
+  [[ "$(service_id)" == "$service_before" ]] || fail "expected a service that is not exposed to be left alone"
+
+  # and back to what every other check expects of this service
+  run "$BIN" set --allow-restart "$PLUGIN" "$SERVICE" port-bind-address
+  assert_success
 }
 
 @test "($DEFINITION) the expose mode is set, read back and unset" {
