@@ -105,7 +105,15 @@ logs_in() {
   meilisearch:password)
     [[ "$(http_status_with -H "Authorization: Bearer $password" http://127.0.0.1:7700/keys)" == 200 ]]
     ;;
+  # the port answers before the server is ready, and a request made then is
+  # refused whatever key it carries, so it waits for the server first
   typesense:password)
+    local _
+    for _ in $(seq 1 60); do
+      docker container run --rm --network "container:$container" curlimages/curl:8.16.0 \
+        -s http://127.0.0.1:8108/health | grep -q '"ok":true' && break
+      sleep 1
+    done
     [[ "$(http_status_with -H "X-TYPESENSE-API-KEY: $password" http://127.0.0.1:8108/collections)" == 200 ]]
     ;;
   clickhouse:password)
