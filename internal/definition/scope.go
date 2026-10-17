@@ -81,6 +81,11 @@ type Scope struct {
 	// moved the service's old data to. Only an upgrade's own steps are given
 	// it, and nothing else may name it.
 	PreviousData string
+
+	// NewSecret is the value a secret is being changed to, while .Secret still
+	// holds the one in use. Only a secret's change command is given it, and
+	// nothing else may name it.
+	NewSecret string
 }
 
 // templateFuncs are the functions a definition may call. Deliberately tiny:

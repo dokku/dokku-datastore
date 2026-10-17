@@ -115,6 +115,16 @@ type DocumentationData struct {
 	// from another carries the data across, which is what the upgrade has to
 	// be told to stop the linked apps for
 	Migrates bool
+
+	// Password and RootPassword are whether a service of the datastore has a
+	// password and a root password set can change, so that one without is
+	// never documented as having one
+	Password     bool
+	RootPassword bool
+
+	// PasswordRestarts is whether changing the password stops and starts the
+	// service, which set is only allowed to do with --allow-restart
+	PasswordRestarts bool
 }
 
 // DocumentedImage is an image and the version a definition pins for it.
@@ -180,7 +190,17 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		VolumeKey:      documentedVolumeKey(input.Datastore),
 		VolumeKeys:     documentedVolumeKeys(volumes),
 		Migrates:       documentedMigrates(input.Datastore),
+
+		Password:         documentedSecret(input.Datastore, "password").Changeable(),
+		RootPassword:     documentedSecret(input.Datastore, "root_password").Changeable(),
+		PasswordRestarts: documentedSecret(input.Datastore, "password").RestartsService(),
 	}
+}
+
+// documentedSecret is one of the secrets a datastore's services keep, as its
+// newest definition declares it, and empty for one it does not have
+func documentedSecret(datastore *service.Datastore, name string) definition.Secret {
+	return datastore.Definition.Dokku.Secrets[name]
 }
 
 // documentedMigrates is whether any of a datastore's definitions migrates the

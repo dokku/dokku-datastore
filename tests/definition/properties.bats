@@ -467,11 +467,6 @@ skip_unless_log_is_capped() {
   assert_failure
   assert_stderr --partial "image-version cannot be changed with set"
   assert_stderr --partial "upgrade"
-
-  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" password hunter2
-  assert_failure
-  assert_stderr --partial "password cannot be changed with set"
-  refute_stderr --partial "hunter2"
 }
 
 @test "($DEFINITION) the expose settings are set, read back and unset" {

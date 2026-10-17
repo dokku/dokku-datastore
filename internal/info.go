@@ -73,11 +73,13 @@ var InfoKeys = []InfoKey{
 	{Name: "log-opt", Description: "show the docker log options the service container is run with"},
 	{Name: "memory", Description: "show the memory limit the service container is run with"},
 	{Name: "mounts", Description: "show the host paths and docker volumes mounted into the service container"},
+	{Name: "password-fingerprint", Description: "show a sha256 fingerprint of the service password"},
 	{Name: "port-bind-address", Description: "show the address exposed ports without one of their own are bound on"},
 	{Name: "port-source-range", Description: "show the only range of client addresses the exposed ports accept"},
 	{Name: "post-create-network", Description: "show the networks to attach to after service container creation"},
 	{Name: "post-start-network", Description: "show the networks to attach to after service container start"},
 	{Name: "restart-policy", Description: "show the restart policy the service container is run with"},
+	{Name: "root-password-fingerprint", Description: "show a sha256 fingerprint of the service root password"},
 	{Name: "service", Description: "show the name of the service"},
 	{Name: "service-root", Description: "show the service root directory"},
 	{Name: "shm-size", Description: "show the shared memory size the service container is run with"},
@@ -179,13 +181,13 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	// fingerprinted together, which is what backup-auth stores in one call.
 	accessKeyID := filepath.Join(serviceFolders.Backup, accessKeyIDFile)
 	secretAccessKey := filepath.Join(serviceFolders.Backup, secretAccessKeyFile)
-	info["backup-access-key-id-fingerprint"] = storedBackupFingerprint(accessKeyID)
-	info["backup-secret-access-key-fingerprint"] = storedBackupFingerprint(secretAccessKey)
+	info["backup-access-key-id-fingerprint"] = storedFingerprint(accessKeyID)
+	info["backup-secret-access-key-fingerprint"] = storedFingerprint(secretAccessKey)
 	authenticated := common.FileExists(accessKeyID) && common.FileExists(secretAccessKey)
 	info["backup-authenticated"] = strconv.FormatBool(authenticated)
 	info["backup-auth-fingerprint"] = ""
 	if authenticated {
-		info["backup-auth-fingerprint"] = backupFingerprint(common.ReadFirstLine(accessKeyID), common.ReadFirstLine(secretAccessKey))
+		info["backup-auth-fingerprint"] = fingerprint(common.ReadFirstLine(accessKeyID), common.ReadFirstLine(secretAccessKey))
 	}
 	info["backup-default-region"] = common.ReadFirstLine(filepath.Join(serviceFolders.Backup, defaultRegionFile))
 	info["backup-signature-version"] = common.ReadFirstLine(filepath.Join(serviceFolders.Backup, signatureVersionFile))
@@ -193,8 +195,14 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 
 	encryptionKey := filepath.Join(serviceFolders.BackupEncryption, encryptionKeyFile)
 	info["backup-encrypted"] = strconv.FormatBool(common.FileExists(encryptionKey))
-	info["backup-encryption-fingerprint"] = storedBackupFingerprint(encryptionKey)
+	info["backup-encryption-fingerprint"] = storedFingerprint(encryptionKey)
 	info["backup-public-key-id"] = common.ReadFirstLine(filepath.Join(serviceFolders.BackupEncryption, publicKeyIDFile))
+
+	// the passwords as the backup credentials are, so tooling can tell whether
+	// setting one would change it without the report carrying it. The dsn
+	// still carries the password, since it is what a client connects with
+	info["password-fingerprint"] = secretFingerprint(input.Datastore, input.ServiceName, "password")
+	info["root-password-fingerprint"] = secretFingerprint(input.Datastore, input.ServiceName, "root_password")
 
 	schedule, _ := ReadBackupSchedule(input.Datastore, input.ServiceName)
 	info["backup-schedule"] = schedule.Schedule
@@ -205,22 +213,33 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	return info
 }
 
-// storedBackupFingerprint is the fingerprint of the first line of a stored
+// secretFingerprint is the fingerprint of one of the service's passwords, and
+// empty for a datastore that has no such password
+func secretFingerprint(s *service.Datastore, serviceName string, name string) string {
+	secret, ok := s.Definition.Dokku.Secrets[name]
+	if !ok {
+		return ""
+	}
+
+	return storedFingerprint(s.SecretFile(serviceName, secret))
+}
+
+// storedFingerprint is the fingerprint of the first line of a stored
 // secret, and empty when the file is absent. A missing file is left empty, so
 // an unset credential stays distinct from one that was stored.
-func storedBackupFingerprint(filename string) string {
+func storedFingerprint(filename string) string {
 	if !common.FileExists(filename) {
 		return ""
 	}
 
-	return backupFingerprint(common.ReadFirstLine(filename))
+	return fingerprint(common.ReadFirstLine(filename))
 }
 
 // backupFingerprint is the lowercase hex sha256 of the values joined by
 // newlines, with no trailing newline. A stored value is a single line, so the
 // join is unambiguous. One value is what `printf '%s' "$a" | sha256sum` prints,
 // and two are what `printf '%s\n%s' "$a" "$b" | sha256sum` prints.
-func backupFingerprint(values ...string) string {
+func fingerprint(values ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(values, "\n")))
 	return hex.EncodeToString(sum[:])
 }

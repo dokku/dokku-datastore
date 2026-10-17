@@ -484,3 +484,38 @@ func TestInfoReportsNoExposedDsnForAServiceThatIsNotExposed(t *testing.T) {
 		t.Errorf("expected no exposed dsn for a service that is not exposed, got %q", dsn)
 	}
 }
+
+// The passwords are reported the way the backup credentials are: as a sha256
+// fingerprint of the stored value, never as the value, and empty for a password
+// the datastore does not have.
+func TestInfoReportsThePasswordsAsFingerprints(t *testing.T) {
+	mysql := service.Datastores["mysql"]
+	withInfoService(t, mysql, "lollipop")
+	writeInfoFile(t, mysql.SecretFile("lollipop", mysql.Definition.Dokku.Secrets["password"]), "hunter2\n")
+	writeInfoFile(t, mysql.SecretFile("lollipop", mysql.Definition.Dokku.Secrets["root_password"]), "hunter3")
+
+	info := Info(context.Background(), InfoInput{Datastore: mysql, ServiceName: "lollipop"})
+
+	// printf '%s' hunter2 | sha256sum
+	if info["password-fingerprint"] != "f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb29541f94bcf526a3f6c7" {
+		t.Errorf("expected the password fingerprint, got %q", info["password-fingerprint"])
+	}
+
+	// printf '%s' hunter3 | sha256sum
+	if info["root-password-fingerprint"] != "fb8c2e2b85ca81eb4350199faddd983cb26af3064614e737ea9f479621cfa57a" {
+		t.Errorf("expected the root password fingerprint, got %q", info["root-password-fingerprint"])
+	}
+
+	for key, value := range info {
+		if strings.Contains(value, "hunter") && key != "dsn" && key != "exposed-dsn" {
+			t.Errorf("expected %s not to carry a password, got %q", key, value)
+		}
+	}
+
+	redis := service.Datastores["redis"]
+	withInfoService(t, redis, "lollipop")
+	info = Info(context.Background(), InfoInput{Datastore: redis, ServiceName: "lollipop"})
+	if info["root-password-fingerprint"] != "" {
+		t.Errorf("expected no root password fingerprint for a datastore without one, got %q", info["root-password-fingerprint"])
+	}
+}

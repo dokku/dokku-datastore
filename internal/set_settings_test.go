@@ -52,8 +52,6 @@ func TestSetPropertyRefusesASettingOwnedElsewhere(t *testing.T) {
 		"image":           "upgrade",
 		"image-version":   "upgrade",
 		"definition":      "upgrade",
-		"password":        "kept by the datastore itself",
-		"root-password":   "kept by the datastore itself",
 		"mounts":          "mount and unmount",
 		"backup-schedule": "backup-schedule and backup-unschedule",
 	}
@@ -174,9 +172,9 @@ func TestSetPropertyWritesTheBackupSettings(t *testing.T) {
 		t.Errorf("expected the service to be authenticated, got %q", info["backup-authenticated"])
 	}
 	for key, expected := range map[string]string{
-		"backup-access-key-id-fingerprint":     backupFingerprint("AKIAEXAMPLE"),
-		"backup-secret-access-key-fingerprint": backupFingerprint("wJalrXUtnFEMI"),
-		"backup-auth-fingerprint":              backupFingerprint("AKIAEXAMPLE", "wJalrXUtnFEMI"),
+		"backup-access-key-id-fingerprint":     fingerprint("AKIAEXAMPLE"),
+		"backup-secret-access-key-fingerprint": fingerprint("wJalrXUtnFEMI"),
+		"backup-auth-fingerprint":              fingerprint("AKIAEXAMPLE", "wJalrXUtnFEMI"),
 	} {
 		if info[key] != expected {
 			t.Errorf("expected %s to be %q, got %q", key, expected, info[key])
@@ -452,7 +450,7 @@ func TestReadPropertyRefusesAnUnknownKey(t *testing.T) {
 	redis := service.Datastores["redis"]
 	withInfoService(t, redis, "lollipop")
 
-	for _, key := range []string{"not-a-property", "password"} {
+	for _, key := range []string{"not-a-property", "image"} {
 		if _, err := ReadProperty(redis, "lollipop", key); err == nil {
 			t.Errorf("expected reading %s to be refused", key)
 		}

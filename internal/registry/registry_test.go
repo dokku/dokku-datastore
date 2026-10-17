@@ -2224,6 +2224,13 @@ func TestEveryDefinitionRendersWithItsDefaultTargets(t *testing.T) {
 					commands = append(commands, command)
 				}
 			}
+			// a secret's change is the one thing told the value it changes to
+			scope.NewSecret = "hunter3"
+			for _, secret := range found.Dokku.Secrets {
+				if secret.Change != nil {
+					commands = append(commands, *secret.Change)
+				}
+			}
 			for _, command := range commands {
 				for _, argument := range command.Arguments {
 					scope.Args[argument.Name] = "argument"
@@ -2533,5 +2540,94 @@ func TestPostgresChecksAMigrationTheSameWay(t *testing.T) {
 		if strings.Join(upgrade.Check.Exec, "\n") != strings.Join(first.Dokku.Upgrade.Check.Exec, "\n") {
 			t.Errorf("expected %s to check a migration as %s does", name, names[0])
 		}
+	}
+}
+
+// Every password a shipped datastore keeps can be changed once its service
+// exists, since set refuses one that cannot and an operator would be left with
+// a credential they can only replace by making the service again.
+func TestEverySecretCanBeChanged(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	for _, name := range loaded.Names() {
+		found, ok := loaded.Definition(name)
+		if !ok {
+			t.Fatalf("expected a %s definition", name)
+		}
+
+		for secretName, secret := range found.Dokku.Secrets {
+			if !secret.Changeable() {
+				t.Errorf("expected the %s secret of %s to declare a change or a rebuild", secretName, name)
+			}
+
+			// the value it changes to is only of use to a change that is told it
+			if secret.Change != nil {
+				told := false
+				for _, value := range secret.Change.Env {
+					if strings.Contains(value, definition.NewSecretField) {
+						told = true
+					}
+				}
+
+				if !told {
+					t.Errorf("expected the change of the %s secret of %s to be told the new value through its env", secretName, name)
+				}
+			}
+		}
+	}
+}
+
+// A password is changed the same way wherever a datastore is: postgres in every
+// definition, mysql and mariadb as each other and for both their accounts, and
+// omnisci for both of its accounts.
+func TestSecretChangesAreTheSameWhereTheDatastoreIs(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	changeScript := func(name string, secret string) string {
+		t.Helper()
+
+		parsed, ok := loaded.Definition(name)
+		if !ok {
+			t.Fatalf("expected a %s definition", name)
+		}
+
+		change := parsed.Dokku.Secrets[secret].Change
+		if change == nil {
+			t.Fatalf("expected %s to change its %s with a command", name, secret)
+		}
+
+		// the script, without the label and the arguments after it
+		if len(change.Exec) < 3 || change.Exec[0] != "sh" {
+			t.Fatalf("expected %s to change its %s with an inline script, got %q", name, secret, change.Exec)
+		}
+
+		return change.Exec[2]
+	}
+
+	postgres := loaded.NamesFor("postgres")
+	if len(postgres) != 11 {
+		t.Errorf("expected eleven postgres definitions, got %v", postgres)
+	}
+	for _, name := range postgres[1:] {
+		if changeScript(name, "password") != changeScript(postgres[0], "password") {
+			t.Errorf("expected %s to change its password as %s does", name, postgres[0])
+		}
+	}
+
+	mysql := changeScript("mysql", "password")
+	for _, pair := range [][2]string{{"mysql", "root_password"}, {"mariadb", "password"}, {"mariadb", "root_password"}} {
+		if changeScript(pair[0], pair[1]) != mysql {
+			t.Errorf("expected %s to change its %s as mysql changes its password", pair[0], pair[1])
+		}
+	}
+
+	if changeScript("omnisci", "root_password") != changeScript("omnisci", "password") {
+		t.Error("expected omnisci to change both of its passwords the same way")
 	}
 }

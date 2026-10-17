@@ -123,16 +123,71 @@ func (s *Datastore) seedConfigs(serviceName string) error {
 	})
 }
 
+// ChangeSecret has the datastore take a new value for one of its secrets and
+// then writes it to the secret's file, so that nothing reading the file is
+// handed a value the datastore does not yet accept. A secret the datastore
+// reads when its container is made has nothing to tell, and only its file is
+// written: making the container again is left to the caller, which knows
+// whether it was allowed to.
+func (s *Datastore) ChangeSecret(ctx context.Context, serviceName string, name string, value string) error {
+	secret, ok := s.Definition.Dokku.Secrets[name]
+	if !ok {
+		return fmt.Errorf("the %s datastore has no %s secret", s.Definition.Dokku.Plugin, name)
+	}
+
+	if !secret.Changeable() {
+		return fmt.Errorf("the %s datastore cannot change the %s secret of a service that exists", s.Definition.Dokku.Plugin, name)
+	}
+
+	if secret.Change != nil {
+		if err := s.run(ctx, serviceName, definition.SecretChangeName(name), runOptions{
+			Command:   secret.Change,
+			NewSecret: value,
+			Stdout:    os.Stderr,
+			Stderr:    os.Stderr,
+		}); err != nil {
+			return fmt.Errorf("unable to change the %s secret: %w", name, err)
+		}
+	}
+
+	// renamed over the old file rather than written into it, so that nothing
+	// reading the secret is ever handed half of one
+	filename := s.SecretFile(serviceName, secret)
+	if err := ReplaceFileAtomically(filename, value, PrivateFileMode); err != nil {
+		if secret.Change != nil {
+			return fmt.Errorf("the datastore now takes the new %s, but it could not be written to %s: %w", name, filename, err)
+		}
+
+		return fmt.Errorf("unable to write the %s secret to %s: %w", name, filename, err)
+	}
+
+	return nil
+}
+
+// SecretValue is the value a service's secret holds, as the templates read it,
+// and empty for a secret the definition does not declare.
+func (s *Datastore) SecretValue(serviceName string, name string) string {
+	secret, ok := s.Definition.Dokku.Secrets[name]
+	if !ok {
+		return ""
+	}
+
+	return common.ReadFirstLine(s.SecretFile(serviceName, secret))
+}
+
+// SecretFile is the file a service keeps a secret in.
+func (s *Datastore) SecretFile(serviceName string, secret definition.Secret) string {
+	return fmt.Sprintf("%s/%s", Folders(s, serviceName).Root, secret.File)
+}
+
 // writeSecrets generates and persists the credentials the definition declares.
 // They are generated once, in Go, and read off disk everywhere else: a value
 // four things read must not be produced by a template that runs again each time.
 // A value is taken from the overrides first, then from the environment, and is
 // only generated when neither has one.
 func (s *Datastore) writeSecrets(serviceName string, overrides map[string]string) error {
-	serviceFolders := Folders(s, serviceName)
-
 	for name, secret := range s.Definition.Dokku.Secrets {
-		filename := fmt.Sprintf("%s/%s", serviceFolders.Root, secret.File)
+		filename := s.SecretFile(serviceName, secret)
 		if common.FileExists(filename) {
 			continue
 		}
@@ -934,6 +989,10 @@ type runOptions struct {
 	// DisableStdioBuffer keeps no copy of what the command writes, for a dump
 	// streamed to Stdout
 	DisableStdioBuffer bool
+
+	// NewSecret is the value a secret is being changed to, which only a
+	// secret's change command is given
+	NewSecret string
 }
 
 // verbAction is what an operator is told could not be done when the image a
@@ -948,6 +1007,10 @@ func verbAction(name string) string {
 
 	if strings.HasPrefix(name, "upgrade.") {
 		return "upgrade"
+	}
+
+	if strings.HasPrefix(name, "secrets.") {
+		return "secret change"
 	}
 
 	return strings.TrimPrefix(name, "triggers.")
@@ -973,6 +1036,7 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 
 	scope := s.scope(serviceName)
 	scope.Args = options.Arguments
+	scope.NewSecret = options.NewSecret
 
 	// a command that names an image of its own runs beside the service in it -
 	// couchdb dumps with the tool dokku ships because its own image has no json

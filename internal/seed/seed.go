@@ -33,9 +33,9 @@ type Input struct {
 //
 // A config that already exists is left alone. Docker's own configs are immutable
 // and re-projected on every start, but a datastore's config file is something an
-// operator edits and expects to keep, so seeding stops at the first write. The
-// consequence, which nothing needs today, is that changing a credential leaves a
-// seeded file holding the old one.
+// operator edits and expects to keep, so seeding stops at the first write. A
+// seeded file holding a credential is never written again here, so a secret's
+// change command writes the new value into the file itself.
 func Configs(input Input) error {
 	for _, config := range input.Configs {
 		if err := ensureDirectory(filepath.Dir(config.Path), input); err != nil {

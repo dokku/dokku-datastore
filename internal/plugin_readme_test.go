@@ -289,15 +289,25 @@ func TestReadmeSettableProperties(t *testing.T) {
 				"| `backup-secret-access-key` | the secret access key backups authenticate with | immediately |",
 				"| `export-args` |",
 				"| `import-args` |",
+				"| `password` |",
+				"| `root-password` |",
+				"The `password` and `root-password` keys are changed in the datastore",
+				"so the service has to be running",
 			},
 		},
 		"redis": {
-			present: []string{"| `backup-bucket` |", "| `volume-targets` |"},
-			absent:  []string{"| `export-args` |", "| `import-args` |"},
+			present: []string{"| `backup-bucket` |", "| `volume-targets` |", "| `password` |", "The `password` key is changed in the datastore"},
+			absent:  []string{"| `export-args` |", "| `import-args` |", "| `root-password` |"},
+		},
+		"nats": {
+			present: []string{
+				"| `password` | the password the service and its linked apps use, changed in the datastore and in the url every linked app holds | once `set` restarts the service, with `--allow-restart` |",
+				"`set` refuses to unless it is given `--allow-restart`",
+			},
 		},
 		"memcached": {
 			present: []string{"| `shm-size` |"},
-			absent:  []string{"| `backup-secret-access-key` |", "| `backup-keyserver` |"},
+			absent:  []string{"| `backup-secret-access-key` |", "| `backup-keyserver` |", "| `password` |", "| `root-password` |", "key is changed in the datastore"},
 		},
 	}
 

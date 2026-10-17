@@ -316,6 +316,40 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		if secret.Length <= 0 {
 			return fail("secret %q needs a positive length", name)
 		}
+
+		// a secret read when the container is made is changed by making it
+		// again, which would undo nothing a change command had done and redo
+		// what it was meant to have done
+		if secret.Change != nil && secret.Rebuild {
+			return fail("secret %q declares both change and rebuild, which are two ways of doing the same thing", name)
+		}
+
+		// the change is told to the datastore, so it runs against the service
+		// rather than on the host, and nothing is there to read from stdin
+		if secret.Change != nil && secret.Change.Mode == ModeHost {
+			return fail("secret %q is changed on the host, but a change has to reach the datastore", name)
+		}
+
+		if secret.Change != nil && secret.Change.Stdin {
+			return fail("secret %q is changed by a command reading stdin, which nothing writes to", name)
+		}
+	}
+
+	// the value a secret is changed to only exists while it is being changed,
+	// so anything else naming it would render against nothing
+	notChange := func(name string) bool {
+		return strings.HasPrefix(name, "secrets.")
+	}
+	for _, body := range templateBodiesExcept(definition, notChange) {
+		if strings.Contains(body, NewSecretField) {
+			return fail("%q names %s, which only a secret's change is given", body, NewSecretField)
+		}
+	}
+
+	for name, config := range definition.Configs {
+		if strings.Contains(config.Content, NewSecretField) {
+			return fail("config %q names %s, which only a secret's change is given", name, NewSecretField)
+		}
 	}
 
 	for _, name := range definition.Dokku.ReservedNames {
@@ -645,6 +679,14 @@ func TargetReferences(body string) []string {
 // out unless asked for, since they are the only ones rendered against more than
 // a service's own scope.
 func templateBodies(definition Definition, withUpgrade bool) []string {
+	return templateBodiesExcept(definition, func(name string) bool {
+		return !withUpgrade && strings.HasPrefix(name, "upgrade.from.")
+	})
+}
+
+// templateBodiesExcept is every template a definition renders, but for the commands
+// skip names, as allCommands addresses them.
+func templateBodiesExcept(definition Definition, skip func(name string) bool) []string {
 	bodies := []string{definition.Service.Image, definition.Service.WorkingDir, definition.Dokku.DSN}
 	bodies = append(bodies, definition.Service.Command...)
 	for _, value := range definition.Service.Environment {
@@ -656,7 +698,7 @@ func templateBodies(definition Definition, withUpgrade bool) []string {
 	}
 
 	for name, command := range allCommands(definition) {
-		if !withUpgrade && strings.HasPrefix(name, "upgrade.from.") {
+		if skip(name) {
 			continue
 		}
 
@@ -720,6 +762,12 @@ func allCommands(definition Definition) map[string]Command {
 
 	if definition.Dokku.Upgrade.Check != nil {
 		commands["upgrade.check"] = *definition.Dokku.Upgrade.Check
+	}
+
+	for name, secret := range definition.Dokku.Secrets {
+		if secret.Change != nil {
+			commands[SecretChangeName(name)] = *secret.Change
+		}
 	}
 
 	return commands

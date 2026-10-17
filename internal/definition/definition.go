@@ -124,8 +124,8 @@ type Service struct {
 // config is immutable and re-projected on every start, but an operator edits a
 // datastore's config file and expects the edit to survive a restart, so dokku
 // seeds the content once into the bind mounted config directory and never
-// clobbers it afterwards. The consequence is that a credential change would
-// leave a seeded file stale, which nothing needs today.
+// clobbers it afterwards. A secret held in a seeded file is written into it by
+// the secret's change command, which leaves the rest of the file alone.
 type Config struct {
 	// Content is the file's body, templated against the service's state.
 	Content string `yaml:"content"`
@@ -333,6 +333,42 @@ type Secret struct {
 	// SERVICE_ROOT_PASSWORD, and are refused for a definition with no secret
 	// naming them.
 	Env string `yaml:"env"`
+
+	// Change has the datastore take a new value for the secret, which is how a
+	// datastore that keeps its own copy of a password is told it changed. It
+	// is rendered with the value in use as {{ .Secret.<name> }} and the one
+	// replacing it as {{ .NewSecret }}, which is best passed through env so it
+	// stays out of the container's process table. The secret's file is only
+	// written once it succeeds.
+	Change *Command `yaml:"change"`
+
+	// Rebuild marks a secret the datastore reads each time its container is
+	// made, so that writing the file and making the container again is the
+	// whole change. A secret declares this or Change, and one declaring
+	// neither cannot be changed once the service exists.
+	Rebuild bool `yaml:"rebuild"`
+}
+
+// Changeable reports whether a secret can be changed on a service that already
+// has one.
+func (s Secret) Changeable() bool {
+	return s.Change != nil || s.Rebuild
+}
+
+// RestartsService reports whether changing the secret stops the service, as
+// making its container again or running an offline command does.
+func (s Secret) RestartsService() bool {
+	return s.Rebuild || (s.Change != nil && s.Change.Mode == ModeOffline)
+}
+
+// NewSecretField is the scope field naming the value a secret is being changed
+// to, which only a secret's change command is given.
+const NewSecretField = ".NewSecret"
+
+// SecretChangeName is how a secret's change command is addressed where
+// commands are named, as in the checks a definition is parsed with.
+func SecretChangeName(secret string) string {
+	return "secrets." + secret + ".change"
 }
 
 // Command is one operation against a service.

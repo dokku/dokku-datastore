@@ -1092,3 +1092,124 @@ func TestVolumeTargets(t *testing.T) {
 		t.Errorf("expected the definition's own target for a scope without one, got %q", target)
 	}
 }
+
+// secretCompose is a definition with a password, which each secret test gives a
+// way of being changed
+const secretCompose = validCompose + `  secrets:
+    password:
+      file: PASSWORD
+      length: 16
+      env: SERVICE_PASSWORD
+`
+
+// A secret is changed by a command told the new value, or by making the
+// container again, and the command is kept as it was declared.
+func TestParseReadsHowASecretIsChanged(t *testing.T) {
+	compose := secretCompose + "      change:\n        exec: [passwd]\n        env:\n          OLD: \"{{ .Secret.password }}\"\n          NEW: \"{{ .NewSecret }}\"\n"
+	parsed, err := parseCompose(t, compose)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	secret := parsed.Dokku.Secrets["password"]
+	if secret.Change == nil || secret.Change.Env["NEW"] != "{{ .NewSecret }}" {
+		t.Fatalf("expected the change to be told the new value, got %+v", secret.Change)
+	}
+
+	if !secret.Changeable() || secret.RestartsService() {
+		t.Errorf("expected a change exec'd into the service to change the secret without a restart")
+	}
+
+	parsed, err = parseCompose(t, secretCompose+"      rebuild: true\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	secret = parsed.Dokku.Secrets["password"]
+	if !secret.Changeable() || !secret.RestartsService() {
+		t.Errorf("expected a secret read as the container is made to be changed by making it again")
+	}
+
+	parsed, err = parseCompose(t, secretCompose+"      change:\n        mode: offline\n        exec: [passwd]\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if !parsed.Dokku.Secrets["password"].RestartsService() {
+		t.Errorf("expected an offline change to stop the service")
+	}
+
+	parsed, err = parseCompose(t, secretCompose)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if parsed.Dokku.Secrets["password"].Changeable() {
+		t.Errorf("expected a secret declaring no way to change it to be unchangeable")
+	}
+}
+
+// A change that could not reach the datastore, or a new value named where it is
+// never given, is refused when the definition is loaded rather than when an
+// operator asks for a password to change.
+func TestParseRejectsABrokenSecretChange(t *testing.T) {
+	tests := []struct {
+		name     string
+		compose  string
+		expected string
+	}{
+		{
+			name:     "both a change and a rebuild",
+			compose:  secretCompose + "      rebuild: true\n      change:\n        exec: [passwd]\n",
+			expected: "declares both change and rebuild",
+		},
+		{
+			name:     "a change on the host",
+			compose:  secretCompose + "      change:\n        mode: host\n        exec: [passwd]\n",
+			expected: "changed on the host",
+		},
+		{
+			name:     "a change reading stdin",
+			compose:  secretCompose + "      change:\n        stdin: true\n        exec: [passwd]\n",
+			expected: "reading stdin",
+		},
+		{
+			name:     "a change with no exec",
+			compose:  secretCompose + "      change:\n        env:\n          NEW: \"{{ .NewSecret }}\"\n",
+			expected: "needs an exec",
+		},
+		{
+			name:     "a change replacing the entrypoint of the service",
+			compose:  secretCompose + "      change:\n        entrypoint: \"\"\n        exec: [passwd]\n",
+			expected: "cannot replace the entrypoint",
+		},
+		{
+			name:     "the new value named in a command",
+			compose:  secretCompose + "  commands:\n    connect:\n      exec: [thing, \"{{ .NewSecret }}\"]\n",
+			expected: "only a secret's change is given",
+		},
+		{
+			name:     "the new value named in the dsn",
+			compose:  strings.Replace(secretCompose, `dsn: "{{ .Scheme }}://`, `dsn: "{{ .Scheme }}://:{{ .NewSecret }}@`, 1),
+			expected: "only a secret's change is given",
+		},
+		{
+			name:     "the new value named in a config",
+			compose:  withConfigEntry(secretCompose, "      - source: thing_conf\n        target: /data/thing.conf\n") + "      key = {{ .NewSecret }}\n",
+			expected: "only a secret's change is given",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := parseCompose(t, test.compose)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+
+			if !strings.Contains(err.Error(), test.expected) {
+				t.Errorf("expected an error mentioning %q, got: %s", test.expected, err)
+			}
+		})
+	}
+}
