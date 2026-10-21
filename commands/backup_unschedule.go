@@ -21,6 +21,12 @@ type BackupUnscheduleCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+
+	// scheduleID is the one schedule to remove
+	scheduleID string
+
+	// all removes every schedule
+	all bool
 }
 
 // Name returns the name of the command
@@ -78,6 +84,8 @@ func (c *BackupUnscheduleCommand) ParsedArguments(args []string) (map[string]com
 func (c *BackupUnscheduleCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.StringVar(&c.scheduleID, "id", "", "the schedule to remove")
+	f.BoolVar(&c.all, "all", false, "remove every scheduled backup")
 	return f
 }
 
@@ -86,7 +94,10 @@ func (c *BackupUnscheduleCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--id":  complete.PredictNothing,
+			"--all": complete.PredictNothing,
+		},
 	)
 }
 
@@ -182,6 +193,8 @@ func (c *BackupUnscheduleCommand) Run(args []string) int {
 	if err := internal.UnscheduleBackup(ctx, internal.UnscheduleBackupInput{
 		Datastore:   datastore,
 		ServiceName: serviceName,
+		ID:          c.scheduleID,
+		All:         c.all,
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1

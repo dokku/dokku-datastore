@@ -44,24 +44,24 @@ assert_crontab_regenerated() {
 
   run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local
   assert_success
-  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE my-bucket;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE my-bucket --id default;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
 
   run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE"
   assert_success
-  assert_output "0 3 * * * dokku $PLUGIN:backup $SERVICE my-bucket &>> $DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+  assert_output "0 3 * * * dokku $PLUGIN:backup $SERVICE my-bucket --id default &>> $DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
 
   # and the same two as json, for something other than dokku to read
   run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local --format json
   assert_success
   run jq -r '.[0] | [.schedule, .command, .["log-file"]] | join(";")' <<<"$output"
   assert_success
-  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE my-bucket;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE my-bucket --id default;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
 
   run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE" --format json
   assert_success
   run jq -r '[.schedule, .["bucket-name"], (.["use-iam"] | tostring), .["crontab-line"]] | join("|")' <<<"$output"
   assert_success
-  assert_output "0 3 * * *|my-bucket|false|0 3 * * * dokku $PLUGIN:backup $SERVICE my-bucket &>> $DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+  assert_output "0 3 * * *|my-bucket|false|0 3 * * * dokku $PLUGIN:backup $SERVICE my-bucket --id default &>> $DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-schedule
   assert_success
@@ -78,7 +78,7 @@ assert_crontab_regenerated() {
 
   run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local
   assert_success
-  assert_output "@daily;dokku $PLUGIN:backup $SERVICE my-bucket --use-iam;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+  assert_output "@daily;dokku $PLUGIN:backup $SERVICE my-bucket --id default --use-iam;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-use-iam
   assert_success
@@ -102,7 +102,7 @@ assert_crontab_regenerated() {
   # dokku versions that read json entries are handed the mailto
   run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local json
   assert_success
-  assert_output "{\"schedule\":\"@daily\",\"command\":\"dokku $PLUGIN:backup $SERVICE my-bucket\",\"log-file\":\"$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log\",\"mailto\":\"ops@example.com,dba@example.com\"}"
+  assert_output "{\"schedule\":\"@daily\",\"command\":\"dokku $PLUGIN:backup $SERVICE my-bucket --id default\",\"log-file\":\"$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log\",\"mailto\":\"ops@example.com,dba@example.com\"}"
   run jq -c . <<<"$output"
   assert_success
 
@@ -116,7 +116,7 @@ assert_crontab_regenerated() {
   # and those that do not are handed the line they read, and told it is ignored
   run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local
   assert_success
-  assert_output "@daily;dokku $PLUGIN:backup $SERVICE my-bucket;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+  assert_output "@daily;dokku $PLUGIN:backup $SERVICE my-bucket --id default;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
   assert_stderr --partial "backup-mailto for $SERVICE is ignored"
 
   run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local --format json
@@ -127,7 +127,7 @@ assert_crontab_regenerated() {
 
   run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE"
   assert_success
-  assert_output "@daily dokku $PLUGIN:backup $SERVICE my-bucket 2>&1 | tee -a $DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+  assert_output "@daily dokku $PLUGIN:backup $SERVICE my-bucket --id default 2>&1 | tee -a $DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
 
   run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE" --format json
   assert_success
@@ -151,7 +151,7 @@ assert_crontab_regenerated() {
 
   run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local json
   assert_success
-  assert_output "{\"schedule\":\"0 3 * * *\",\"command\":\"dokku $PLUGIN:backup $SERVICE my-bucket\",\"log-file\":\"$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log\"}"
+  assert_output "{\"schedule\":\"0 3 * * *\",\"command\":\"dokku $PLUGIN:backup $SERVICE my-bucket --id default\",\"log-file\":\"$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log\"}"
 }
 
 @test "($DEFINITION) a mailto set on a service without a scheduled backup leaves the crontab alone" {
@@ -221,7 +221,7 @@ assert_crontab_regenerated() {
   # and the schedule the service already had is kept
   run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local
   assert_success
-  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE my-bucket;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE my-bucket --id default;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
 }
 
 @test "($DEFINITION) a bucket that breaks the s3 naming rules is refused" {
@@ -239,7 +239,7 @@ assert_crontab_regenerated() {
   # and the schedule the service already had is kept
   run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local
   assert_success
-  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE my-bucket;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE my-bucket --id default;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
 }
 
 @test "($DEFINITION) a scheduled backup's bucket and iam setting are changed with set" {
@@ -258,7 +258,7 @@ assert_crontab_regenerated() {
 
   run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local
   assert_success
-  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE other-bucket --use-iam;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE other-bucket --id default --use-iam;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
 
   # the crontab entry cannot be written without a bucket
   run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" backup-bucket
@@ -274,7 +274,7 @@ assert_crontab_regenerated() {
 
   run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local
   assert_success
-  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE other-bucket;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+  assert_output "0 3 * * *;dokku $PLUGIN:backup $SERVICE other-bucket --id default;$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
 
   # with nothing scheduled there is nothing for either to apply to
   run "$BIN" backup-unschedule "$PLUGIN" "$SERVICE"
@@ -356,4 +356,99 @@ assert_crontab_regenerated() {
   assert_stderr --partial "does not exist"
 
   rm -f "$log_file" "$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE-other.backup.log"
+}
+
+@test "($DEFINITION) a service can have several backup schedules" {
+  run "$BIN" backup-unschedule "$PLUGIN" "$SERVICE" --all
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup-schedule"
+  fi
+  assert_success
+
+  schedule_backup "$SERVICE" "0 3 * * *" my-bucket
+  assert_success
+  schedule_backup "$SERVICE" "*/15 * * * *" bucket-a --id frequent
+  assert_success
+  schedule_backup "$SERVICE" "@monthly" bucket-c --id monthly --use-iam
+  assert_success
+
+  local log="$DOKKU_LOGS_DIR/$PLUGIN.$SERVICE.backup.log"
+
+  run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local
+  assert_success
+  assert_line "0 3 * * *;dokku $PLUGIN:backup $SERVICE my-bucket --id default;$log"
+  assert_line "*/15 * * * *;dokku $PLUGIN:backup $SERVICE bucket-a --id frequent;$log"
+  assert_line "@monthly;dokku $PLUGIN:backup $SERVICE bucket-c --id monthly --use-iam;$log"
+
+  run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_line $'default\t0 3 * * * dokku '"$PLUGIN"':backup '"$SERVICE"' my-bucket --id default &>> '"$log"
+  assert_line $'frequent\t*/15 * * * * dokku '"$PLUGIN"':backup '"$SERVICE"' bucket-a --id frequent &>> '"$log"
+  assert_line $'monthly\t@monthly dokku '"$PLUGIN"':backup '"$SERVICE"' bucket-c --id monthly --use-iam &>> '"$log"
+
+  run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE" --format json
+  assert_success
+  run jq -r '.schedules[] | [.id, .schedule, .["bucket-name"], (.["use-iam"] | tostring)] | join("|")' <<<"$output"
+  assert_success
+  assert_line "default|0 3 * * *|my-bucket|false"
+  assert_line "frequent|*/15 * * * *|bucket-a|false"
+  assert_line "monthly|@monthly|bucket-c|true"
+
+  run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE" --id frequent
+  assert_success
+  assert_output "*/15 * * * * dokku $PLUGIN:backup $SERVICE bucket-a --id frequent &>> $log"
+
+  run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE" --id frequent --format json
+  assert_success
+  run jq -r '.id' <<<"$output"
+  assert_success
+  assert_output "frequent"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-schedule
+  assert_success
+  assert_output "0 3 * * *"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-schedules
+  assert_success
+  assert_output "default|0 3 * * *|my-bucket|false;frequent|*/15 * * * *|bucket-a|false;monthly|@monthly|bucket-c|true"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-storage-class STANDARD_IA --id frequent
+  assert_success
+
+  run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE" --id frequent --format json
+  assert_success
+  run jq -r '[.["storage-class"], (.overrides | join(","))] | join("|")' <<<"$output"
+  assert_success
+  assert_output "STANDARD_IA|backup-storage-class"
+
+  run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE" --id monthly --format json
+  assert_success
+  run jq -r '[.["storage-class"], (.overrides | length | tostring)] | join("|")' <<<"$output"
+  assert_success
+  assert_output "|0"
+
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" backup-bucket other-bucket
+  assert_failure
+  assert_stderr --partial "another scheduled backup"
+  refute_stderr --partial "There is no scheduled backup"
+
+  run --separate-stderr "$BIN" backup-unschedule "$PLUGIN" "$SERVICE"
+  assert_failure
+  assert_stderr --partial "pass --id or --all"
+
+  run "$BIN" backup-unschedule "$PLUGIN" "$SERVICE" --id frequent
+  assert_success
+
+  run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local
+  assert_success
+  refute_line --partial "--id frequent"
+  assert_line --partial "--id default"
+  assert_line --partial "--id monthly"
+
+  run "$BIN" backup-unschedule "$PLUGIN" "$SERVICE" --all
+  assert_success
+
+  run --separate-stderr "$BIN" trigger-cron-entries "$PLUGIN" docker-local
+  assert_success
+  assert_output ""
 }

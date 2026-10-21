@@ -244,8 +244,8 @@ type CronEntriesInput struct {
 }
 
 // CronEntriesForTrigger returns the tasks the cron-entries trigger prints, one
-// for each service with a scheduled backup, in the order the services are
-// listed. Alongside them are warnings: the services left out because what they
+// for each scheduled backup, in the order the services are listed and, within
+// a service, the default schedule first. Alongside them are warnings: the services left out because what they
 // were scheduled with cannot be run, as the dokku crontab is refused as a whole
 // when a line in it is invalid, so one service's schedule must not stop every
 // other task on the host; and the services whose MAILTO is ignored because dokku
@@ -260,21 +260,26 @@ func CronEntriesForTrigger(ctx context.Context, input CronEntriesInput) ([]CronT
 	tasks := []CronTask{}
 	warnings := []error{}
 	for _, serviceName := range services {
-		schedule, ok := ReadBackupSchedule(input.Datastore, serviceName)
-		if !ok {
-			continue
+		schedules, readErr := ReadBackupSchedules(input.Datastore, serviceName)
+		if readErr != nil {
+			warnings = append(warnings, fmt.Errorf("unable to read the scheduled backups for %s: %w", serviceName, readErr))
 		}
 
-		if err := schedule.Validate(); err != nil {
-			warnings = append(warnings, fmt.Errorf("skipping the scheduled backup for %s: %w", serviceName, err))
-			continue
-		}
+		for _, schedule := range schedules {
+			// the recipient cron mails is resolved here and not written back,
+			// so a service's backup-mailto does not become a setting of the schedule
+			resolved := schedule.withInheritedMailto(input.Datastore, serviceName)
+			if err := resolved.Validate(); err != nil {
+				warnings = append(warnings, fmt.Errorf("skipping the scheduled backup for %s: %w", serviceName, err))
+				continue
+			}
 
-		if schedule.Mailto != "" && input.EntryFormat != CronEntryFormatJSON {
-			warnings = append(warnings, fmt.Errorf("%s for %s is ignored, dokku does not support a per-entry MAILTO", service.BackupMailtoProperty, serviceName))
-		}
+			if resolved.Mailto != "" && input.EntryFormat != CronEntryFormatJSON {
+				warnings = append(warnings, fmt.Errorf("%s for %s is ignored, dokku does not support a per-entry MAILTO", service.BackupMailtoProperty, serviceName))
+			}
 
-		tasks = append(tasks, CronEntry(commandPrefix, serviceName, schedule))
+			tasks = append(tasks, CronEntry(commandPrefix, serviceName, resolved))
+		}
 	}
 
 	return tasks, warnings, nil

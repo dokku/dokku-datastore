@@ -31,6 +31,9 @@ type SetCommand struct {
 	// noRestart leaves the apps linked to a service running on the config they
 	// had when a password changes the url they hold
 	noRestart bool
+
+	// scheduleID records the property on one backup schedule instead of on the service
+	scheduleID string
 }
 
 // Name returns the name of the command
@@ -104,6 +107,7 @@ func (c *SetCommand) FlagSet() *flag.FlagSet {
 	c.GlobalFlags(f)
 	f.BoolVar(&c.allowRestart, "allow-restart", false, "restart or reexpose the service when the property only takes effect that way and its value changed")
 	f.BoolVar(&c.noRestart, "no-restart", false, "do not restart the linked apps when a password change updates the url they hold")
+	f.StringVar(&c.scheduleID, "id", "", "record the property on this backup schedule instead of on the service")
 	return f
 }
 
@@ -114,6 +118,7 @@ func (c *SetCommand) AutocompleteFlags() complete.Flags {
 		c.AutocompleteGlobalFlags(),
 		complete.Flags{
 			"--allow-restart": complete.PredictNothing,
+			"--id":            complete.PredictNothing,
 			"--no-restart":    complete.PredictNothing,
 		},
 	)
@@ -215,13 +220,16 @@ func (c *SetCommand) Run(args []string) int {
 
 	// validate before announcing, so an unusable key or value does not print a
 	// line claiming a change that will not happen
-	if err := internal.ValidateProperty(key); err != nil {
+	value := arguments["value"].StringValue()
+	if c.scheduleID != "" {
+		if err := internal.ValidateBackupScheduleOverride(datastore, serviceName, c.scheduleID, key, value); err != nil {
+			logger.Error(internal.ErrorInput{Error: err})
+			return 1
+		}
+	} else if err := internal.ValidateProperty(key); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
-	}
-
-	value := arguments["value"].StringValue()
-	if err := internal.ValidateServicePropertyValue(datastore, serviceName, key, value); err != nil {
+	} else if err := internal.ValidateServicePropertyValue(datastore, serviceName, key, value); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}
@@ -276,6 +284,15 @@ func (c *SetCommand) Run(args []string) int {
 		logger.Info(fmt.Sprintf("Setting %s", key))
 	default:
 		logger.Info(fmt.Sprintf("Setting %s to %s", key, value))
+	}
+
+	if c.scheduleID != "" {
+		if err := internal.SetBackupScheduleOverride(ctx, datastore, serviceName, c.scheduleID, key, value); err != nil {
+			logger.Error(internal.ErrorInput{Error: err})
+			return 1
+		}
+
+		return 0
 	}
 
 	if err := internal.SetProperty(datastore, serviceName, key, value); err != nil {

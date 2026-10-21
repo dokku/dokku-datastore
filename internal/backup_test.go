@@ -10,12 +10,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/dokku/dokku/plugins/common"
 )
 
 // withScheduleService points the package at a temporary root and creates a
@@ -182,23 +184,23 @@ func TestCronEntry(t *testing.T) {
 		{
 			name:     "a plain schedule",
 			schedule: BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket"},
-			expected: CronTask{Schedule: "0 3 * * *", Command: "dokku redis:backup lollipop my-bucket", LogFile: "/var/log/dokku/redis.lollipop.backup.log"},
-			text:     "0 3 * * *;dokku redis:backup lollipop my-bucket;/var/log/dokku/redis.lollipop.backup.log",
-			json:     `{"schedule":"0 3 * * *","command":"dokku redis:backup lollipop my-bucket","log-file":"/var/log/dokku/redis.lollipop.backup.log"}`,
+			expected: CronTask{Schedule: "0 3 * * *", Command: "dokku redis:backup lollipop my-bucket --id default", LogFile: "/var/log/dokku/redis.lollipop.backup.log"},
+			text:     "0 3 * * *;dokku redis:backup lollipop my-bucket --id default;/var/log/dokku/redis.lollipop.backup.log",
+			json:     `{"schedule":"0 3 * * *","command":"dokku redis:backup lollipop my-bucket --id default","log-file":"/var/log/dokku/redis.lollipop.backup.log"}`,
 		},
 		{
 			name:     "using an iam profile",
 			schedule: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", UseIAM: true},
-			expected: CronTask{Schedule: "@daily", Command: "dokku redis:backup lollipop my-bucket --use-iam", LogFile: "/var/log/dokku/redis.lollipop.backup.log"},
-			text:     "@daily;dokku redis:backup lollipop my-bucket --use-iam;/var/log/dokku/redis.lollipop.backup.log",
-			json:     `{"schedule":"@daily","command":"dokku redis:backup lollipop my-bucket --use-iam","log-file":"/var/log/dokku/redis.lollipop.backup.log"}`,
+			expected: CronTask{Schedule: "@daily", Command: "dokku redis:backup lollipop my-bucket --id default --use-iam", LogFile: "/var/log/dokku/redis.lollipop.backup.log"},
+			text:     "@daily;dokku redis:backup lollipop my-bucket --id default --use-iam;/var/log/dokku/redis.lollipop.backup.log",
+			json:     `{"schedule":"@daily","command":"dokku redis:backup lollipop my-bucket --id default --use-iam","log-file":"/var/log/dokku/redis.lollipop.backup.log"}`,
 		},
 		{
 			name:     "with a mailto",
 			schedule: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", Mailto: "ops@example.com"},
-			expected: CronTask{Schedule: "@daily", Command: "dokku redis:backup lollipop my-bucket", LogFile: "/var/log/dokku/redis.lollipop.backup.log", Mailto: "ops@example.com"},
-			text:     "@daily;dokku redis:backup lollipop my-bucket;/var/log/dokku/redis.lollipop.backup.log",
-			json:     `{"schedule":"@daily","command":"dokku redis:backup lollipop my-bucket","log-file":"/var/log/dokku/redis.lollipop.backup.log","mailto":"ops@example.com"}`,
+			expected: CronTask{Schedule: "@daily", Command: "dokku redis:backup lollipop my-bucket --id default", LogFile: "/var/log/dokku/redis.lollipop.backup.log", Mailto: "ops@example.com"},
+			text:     "@daily;dokku redis:backup lollipop my-bucket --id default;/var/log/dokku/redis.lollipop.backup.log",
+			json:     `{"schedule":"@daily","command":"dokku redis:backup lollipop my-bucket --id default","log-file":"/var/log/dokku/redis.lollipop.backup.log","mailto":"ops@example.com"}`,
 		},
 	}
 
@@ -283,17 +285,17 @@ func TestCrontabLine(t *testing.T) {
 		{
 			name:     "a plain schedule",
 			schedule: BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket"},
-			expected: "0 3 * * * dokku redis:backup lollipop my-bucket &>> /var/log/dokku/redis.lollipop.backup.log",
+			expected: "0 3 * * * dokku redis:backup lollipop my-bucket --id default &>> /var/log/dokku/redis.lollipop.backup.log",
 		},
 		{
 			name:     "using an iam profile",
 			schedule: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", UseIAM: true},
-			expected: "@daily dokku redis:backup lollipop my-bucket --use-iam &>> /var/log/dokku/redis.lollipop.backup.log",
+			expected: "@daily dokku redis:backup lollipop my-bucket --id default --use-iam &>> /var/log/dokku/redis.lollipop.backup.log",
 		},
 		{
 			name:     "with a mailto",
 			schedule: BackupSchedule{Schedule: "@daily", BucketName: "my-bucket", Mailto: "ops@example.com"},
-			expected: "@daily dokku redis:backup lollipop my-bucket 2>&1 | tee -a /var/log/dokku/redis.lollipop.backup.log",
+			expected: "@daily dokku redis:backup lollipop my-bucket --id default 2>&1 | tee -a /var/log/dokku/redis.lollipop.backup.log",
 		},
 	}
 
@@ -340,7 +342,7 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("expected the backup to be scheduled")
 	}
-	expected := BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket", UseIAM: true, Mailto: "ops@example.com"}
+	expected := BackupSchedule{ID: BackupScheduleIDDefault, Schedule: "0 3 * * *", BucketName: "my-bucket", UseIAM: true}
 	if schedule != expected {
 		t.Errorf("expected %+v, got %+v", expected, schedule)
 	}
@@ -349,7 +351,7 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to cat the schedule: %s", err)
 	}
-	if contents != "0 3 * * * dokku redis:backup lollipop my-bucket --use-iam 2>&1 | tee -a /var/log/dokku/redis.lollipop.backup.log\n" {
+	if contents != "0 3 * * * dokku redis:backup lollipop my-bucket --id default --use-iam 2>&1 | tee -a /var/log/dokku/redis.lollipop.backup.log\n" {
 		t.Errorf("unexpected cat output %q", contents)
 	}
 
@@ -358,13 +360,16 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 		t.Fatalf("failed to report the schedule: %s", err)
 	}
 	expectedReport := BackupScheduleReport{
+		ID:          BackupScheduleIDDefault,
 		Schedule:    "0 3 * * *",
 		BucketName:  "my-bucket",
 		UseIAM:      true,
+		Timestamp:   "true",
 		Mailto:      "ops@example.com",
+		Overrides:   []string{},
 		CrontabLine: strings.TrimSuffix(contents, "\n"),
 	}
-	if report != expectedReport {
+	if !reflect.DeepEqual(report, expectedReport) {
 		t.Errorf("expected %+v, got %+v", expectedReport, report)
 	}
 
@@ -378,8 +383,11 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("failed to schedule the backup again: %s", err)
 	}
-	if schedule, _ := ReadBackupSchedule(datastore, "lollipop"); schedule.UseIAM || schedule.Mailto != "ops@example.com" || schedule.Schedule != "@daily" {
-		t.Errorf("expected the new schedule without iam and with the mailto, got %+v", schedule)
+	if schedule, _ := ReadBackupSchedule(datastore, "lollipop"); schedule.UseIAM || schedule.Mailto != "" || schedule.Schedule != "@daily" {
+		t.Errorf("expected the new schedule without iam and without a mailto of its own, got %+v", schedule)
+	}
+	if mailto := service.BackupMailto(datastore, "lollipop"); mailto != "ops@example.com" {
+		t.Errorf("expected scheduling again to keep the service mailto, got %q", mailto)
 	}
 
 	if err := UnscheduleBackup(t.Context(), UnscheduleBackupInput{Datastore: datastore, ServiceName: "lollipop"}); err != nil {
@@ -1353,4 +1361,156 @@ func TestCallPostBackupWithoutAPluginPath(t *testing.T) {
 	if _, err := os.Stat(recorded); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("the trigger was called without a plugin path")
 	}
+}
+
+// A service keeps several schedules in one file, each with the settings it set
+// for itself, and a backup of one schedule runs with those on top of the service's.
+func TestMultipleBackupSchedules(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+	ctx := t.Context()
+
+	if err := ScheduleBackup(ctx, ScheduleBackupInput{
+		BucketName:  "my-bucket",
+		Datastore:   datastore,
+		Schedule:    "0 3 * * *",
+		ServiceName: "lollipop",
+	}); err != nil {
+		t.Fatalf("failed to schedule the default backup: %s", err)
+	}
+	if raw := common.PropertyGet("redis", "lollipop", BackupSchedulesProperty); raw != "" {
+		t.Errorf("expected no schedules file for an un-overridden default, got %q", raw)
+	}
+
+	for _, input := range []ScheduleBackupInput{
+		{ID: "frequent", Schedule: "*/15 * * * *", BucketName: "bucket-a"},
+		{ID: "monthly", Schedule: "@monthly", BucketName: "bucket-c", UseIAM: true},
+	} {
+		input.Datastore = datastore
+		input.ServiceName = "lollipop"
+		if err := ScheduleBackup(ctx, input); err != nil {
+			t.Fatalf("failed to schedule %s: %s", input.ID, err)
+		}
+	}
+
+	filename := filepath.Join(service.DokkuLibRoot, "config", "redis", "lollipop", BackupSchedulesProperty)
+	info, err := os.Stat(filename)
+	if err != nil {
+		t.Fatalf("failed to read the schedules file: %s", err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Errorf("expected the schedules file to be mode 0600, got %s", info.Mode().Perm())
+	}
+
+	if err := SetProperty(datastore, "lollipop", service.BackupStorageClassProperty, "GLACIER"); err != nil {
+		t.Fatalf("failed to set the service storage class: %s", err)
+	}
+	if err := SetProperty(datastore, "lollipop", service.BackupMailtoProperty, "ops@example.com"); err != nil {
+		t.Fatalf("failed to set the service mailto: %s", err)
+	}
+	if err := SetBackupEncryption(ctx, datastore, "lollipop", "service-secret"); err != nil {
+		t.Fatalf("failed to set the service passphrase: %s", err)
+	}
+	if err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "monthly", service.BackupStorageClassProperty, "STANDARD_IA"); err != nil {
+		t.Fatalf("failed to set the schedule storage class: %s", err)
+	}
+	if err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "monthly", backupEncryptionPassphraseProperty, "s3cret"); err != nil {
+		t.Fatalf("failed to set the schedule passphrase: %s", err)
+	}
+	if err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "frequent", service.BackupMailtoProperty, "dba@example.com"); err != nil {
+		t.Fatalf("failed to set the schedule mailto: %s", err)
+	}
+
+	stored := readTestSchedules(t, "lollipop")
+	if len(stored) != 2 || stored[0].ID != "frequent" || stored[1].ID != "monthly" {
+		t.Fatalf("expected frequent then monthly, got %+v", stored)
+	}
+	if stored[0].Mailto != "dba@example.com" || stored[1].StorageClass != "STANDARD_IA" || stored[1].EncryptionPassphrase != "s3cret" || !stored[1].UseIAM {
+		t.Errorf("expected the overrides to be stored on the schedules, got %+v", stored)
+	}
+
+	// replacing a schedule keeps its overrides and the other schedules
+	if err := ScheduleBackup(ctx, ScheduleBackupInput{
+		ID:          "frequent",
+		BucketName:  "bucket-b",
+		Datastore:   datastore,
+		Schedule:    "0 * * * *",
+		ServiceName: "lollipop",
+	}); err != nil {
+		t.Fatalf("failed to replace the frequent schedule: %s", err)
+	}
+	stored = readTestSchedules(t, "lollipop")
+	if len(stored) != 2 || stored[0].BucketName != "bucket-b" || stored[0].Mailto != "dba@example.com" || stored[1].EncryptionPassphrase != "s3cret" {
+		t.Errorf("expected the replacement to keep the other schedule and the overrides, got %+v", stored)
+	}
+
+	if err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "frequent", service.BackupMailtoProperty, ""); err != nil {
+		t.Fatalf("failed to clear the schedule mailto: %s", err)
+	}
+	if raw := common.PropertyGet("redis", "lollipop", BackupSchedulesProperty); strings.Contains(raw, "mailto") {
+		t.Errorf("expected clearing the override to remove it from the file, got %s", raw)
+	}
+
+	frequent, _, err := BackupScheduleCatOutput(datastore, "lollipop", "frequent")
+	if err != nil {
+		t.Fatalf("failed to cat the frequent schedule: %s", err)
+	}
+	frequentReport := frequent.(BackupScheduleReport)
+	serviceFingerprint := storedFingerprint(filepath.Join(service.Folders(datastore, "lollipop").BackupEncryption, encryptionKeyFile))
+	if frequentReport.StorageClass != "GLACIER" || frequentReport.Mailto != "ops@example.com" || frequentReport.EncryptionPassphraseFingerprint != serviceFingerprint {
+		t.Errorf("expected the frequent schedule to inherit the service settings, got %+v", frequentReport)
+	}
+
+	monthly, _, err := BackupScheduleCatOutput(datastore, "lollipop", "monthly")
+	if err != nil {
+		t.Fatalf("failed to cat the monthly schedule: %s", err)
+	}
+	monthlyReport := monthly.(BackupScheduleReport)
+	if monthlyReport.StorageClass != "STANDARD_IA" || monthlyReport.EncryptionPassphraseFingerprint != fingerprint("s3cret") || monthlyReport.EncryptionPassphraseFingerprint == serviceFingerprint {
+		t.Errorf("expected the monthly schedule to use its own settings, got %+v", monthlyReport)
+	}
+	if !slices.Equal(monthlyReport.Overrides, []string{service.BackupStorageClassProperty, backupEncryptionPassphraseProperty}) {
+		t.Errorf("expected the monthly overrides, got %v", monthlyReport.Overrides)
+	}
+	if encoded, err := json.Marshal(monthlyReport); err != nil || strings.Contains(string(encoded), "s3cret") {
+		t.Errorf("expected the report to leave the passphrase out, got %s", encoded)
+	}
+
+	err = SetProperty(datastore, "lollipop", BackupBucketProperty, "other-bucket")
+	if err == nil || strings.Contains(err.Error(), "There is no scheduled backup") || !strings.Contains(err.Error(), "backup-schedule --id") {
+		t.Errorf("expected the bucket to be refused without claiming there is no schedule, got %v", err)
+	}
+	err = SetBackupScheduleOverride(ctx, datastore, "lollipop", "monthly", backupAccessKeyIDProperty, "AKIAEXAMPLE")
+	if err == nil || !strings.Contains(err.Error(), "cannot be set on a schedule") {
+		t.Errorf("expected a credential to be refused on a schedule, got %v", err)
+	}
+
+	err = UnscheduleBackup(ctx, UnscheduleBackupInput{Datastore: datastore, ServiceName: "lollipop"})
+	if err == nil || !strings.Contains(err.Error(), "--id") || !strings.Contains(err.Error(), "--all") {
+		t.Errorf("expected unschedule to ask for --id or --all, got %v", err)
+	}
+	if err := UnscheduleBackup(ctx, UnscheduleBackupInput{Datastore: datastore, ServiceName: "lollipop", ID: "frequent"}); err != nil {
+		t.Fatalf("failed to unschedule frequent: %s", err)
+	}
+	if err := UnscheduleBackup(ctx, UnscheduleBackupInput{Datastore: datastore, ServiceName: "lollipop", ID: "monthly"}); err != nil {
+		t.Fatalf("failed to unschedule monthly: %s", err)
+	}
+	if common.PropertyExists("redis", "lollipop", BackupSchedulesProperty) {
+		t.Error("expected the schedules file to be removed with the last extra schedule")
+	}
+	if schedule, ok := ReadBackupSchedule(datastore, "lollipop"); !ok || schedule.ID != BackupScheduleIDDefault || schedule.BucketName != "my-bucket" {
+		t.Errorf("expected the default schedule to remain, got %+v", schedule)
+	}
+}
+
+// readTestSchedules reads the schedules file the way it was written
+func readTestSchedules(t *testing.T, serviceName string) []BackupSchedule {
+	t.Helper()
+
+	var schedules []BackupSchedule
+	raw := common.PropertyGet("redis", serviceName, BackupSchedulesProperty)
+	if err := json.Unmarshal([]byte(raw), &schedules); err != nil {
+		t.Fatalf("failed to read the schedules file: %s", err)
+	}
+
+	return schedules
 }

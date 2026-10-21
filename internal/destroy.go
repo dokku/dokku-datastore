@@ -100,6 +100,7 @@ func DestroyService(ctx context.Context, input DestroyServiceInput) error {
 	err = UnscheduleBackup(ctx, UnscheduleBackupInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
+		All:         true,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to remove backup schedule: %w", err)

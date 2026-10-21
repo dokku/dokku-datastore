@@ -272,7 +272,7 @@ func TestMigrateLegacyCronFileMovesAValidSchedule(t *testing.T) {
 	}
 
 	schedule, ok := ReadBackupSchedule(datastore, "lollipop")
-	expected := BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket", UseIAM: true}
+	expected := BackupSchedule{ID: BackupScheduleIDDefault, Schedule: "0 3 * * *", BucketName: "my-bucket", UseIAM: true}
 	if !ok || schedule != expected {
 		t.Errorf("expected %+v, got %+v", expected, schedule)
 	}
@@ -298,9 +298,12 @@ func TestMigrateLegacyCronFileKeepsAMailto(t *testing.T) {
 	}
 
 	schedule, ok := ReadBackupSchedule(datastore, "lollipop")
-	expected := BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket", Mailto: "ops@example.com"}
+	expected := BackupSchedule{ID: BackupScheduleIDDefault, Schedule: "0 3 * * *", BucketName: "my-bucket"}
 	if !ok || schedule != expected {
 		t.Errorf("expected %+v, got %+v", expected, schedule)
+	}
+	if service.BackupMailto(datastore, "lollipop") != "ops@example.com" {
+		t.Errorf("expected the mailto to be kept on the service, got %q", service.BackupMailto(datastore, "lollipop"))
 	}
 }
 
@@ -324,7 +327,7 @@ func TestMigrateLegacyCronFileDropsAMailtoItCannotWrite(t *testing.T) {
 	}
 
 	schedule, ok := ReadBackupSchedule(datastore, "lollipop")
-	expected := BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket"}
+	expected := BackupSchedule{ID: BackupScheduleIDDefault, Schedule: "0 3 * * *", BucketName: "my-bucket"}
 	if !ok || schedule != expected {
 		t.Errorf("expected %+v, got %+v", expected, schedule)
 	}
