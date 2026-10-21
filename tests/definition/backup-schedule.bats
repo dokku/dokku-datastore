@@ -495,7 +495,7 @@ assert_crontab_regenerated() {
   run "$BIN" set "$PLUGIN" "$SERVICE" backup-access-key-id AKIAROTATED --id monthly
   assert_success
 
-  run "$BIN" set "$PLUGIN" "$SERVICE" backup-secret-access-key --id monthly
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" backup-secret-access-key --id monthly
   assert_failure
   assert_stderr --partial "backup-deauth --id"
 
