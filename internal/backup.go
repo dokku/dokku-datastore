@@ -185,16 +185,26 @@ type BackupAuthInput struct {
 	SecretAccessKey  string
 	ServiceName      string
 	SignatureVersion string
+
+	// ScheduleID records the credentials on one backup schedule. Empty records
+	// them for the service, which a schedule without its own pair inherits.
+	ScheduleID string
 }
 
 // BackupAuth stores the credentials backups are shipped with. The stored
 // settings are replaced as a whole, so an optional setting that is not passed
-// is removed rather than left over from an earlier call.
+// is removed rather than left over from an earlier call. With a schedule id,
+// an optional setting that is not passed is cleared on that schedule, so the
+// schedule inherits the service's value.
 func BackupAuth(ctx context.Context, input BackupAuthInput) error {
 	// checked before anything is written, so a refused call leaves the stored
 	// settings as they were
 	if err := ValidateEndpointURL(input.EndpointURL); err != nil {
 		return err
+	}
+
+	if input.ScheduleID != "" {
+		return backupAuthSchedule(input)
 	}
 
 	folder := service.Folders(input.Datastore, input.ServiceName).Backup
@@ -232,14 +242,63 @@ func BackupAuth(ctx context.Context, input BackupAuthInput) error {
 	return nil
 }
 
-// BackupDeauth removes the stored backup credentials for a service
-func BackupDeauth(ctx context.Context, s *service.Datastore, serviceName string) error {
+// backupAuthSchedule stores the credentials on one existing schedule. The
+// service's files are left as they were. An omitted region, signature version
+// or endpoint is cleared, so that schedule inherits the service's value.
+func backupAuthSchedule(input BackupAuthInput) error {
+	if err := ValidateBackupScheduleID(input.ScheduleID); err != nil {
+		return err
+	}
+
+	schedule, err := LookupBackupSchedule(input.Datastore, input.ServiceName, input.ScheduleID)
+	if err != nil {
+		return err
+	}
+
+	schedule.AccessKeyID = input.AccessKeyID
+	schedule.SecretAccessKey = input.SecretAccessKey
+	schedule.DefaultRegion = input.DefaultRegion
+	schedule.SignatureVersion = input.SignatureVersion
+	schedule.EndpointURL = input.EndpointURL
+	return saveBackupSchedule(input.Datastore, input.ServiceName, schedule)
+}
+
+// BackupDeauth removes the stored backup credentials for a service. With a
+// schedule id, it clears that schedule's credentials and leaves the service's
+// files in place. Without one, it removes the service's backup directory,
+// which holds only those files, and leaves every schedule's own credentials.
+func BackupDeauth(ctx context.Context, s *service.Datastore, serviceName string, scheduleID string) error {
+	if scheduleID != "" {
+		return backupDeauthSchedule(s, serviceName, scheduleID)
+	}
+
 	folder := service.Folders(s, serviceName).Backup
 	if err := os.RemoveAll(folder); err != nil {
 		return fmt.Errorf("unable to remove %s: %w", folder, err)
 	}
 
 	return nil
+}
+
+// backupDeauthSchedule clears the five backup-auth values on one schedule, so
+// the next run inherits the service's credentials. Other settings that
+// schedule set for itself stay.
+func backupDeauthSchedule(s *service.Datastore, serviceName string, scheduleID string) error {
+	if err := ValidateBackupScheduleID(scheduleID); err != nil {
+		return err
+	}
+
+	schedule, err := LookupBackupSchedule(s, serviceName, scheduleID)
+	if err != nil {
+		return err
+	}
+
+	schedule.AccessKeyID = ""
+	schedule.SecretAccessKey = ""
+	schedule.DefaultRegion = ""
+	schedule.SignatureVersion = ""
+	schedule.EndpointURL = ""
+	return saveBackupSchedule(s, serviceName, schedule)
 }
 
 // SetBackupEncryption stores a passphrase future backups are encrypted with
@@ -525,6 +584,20 @@ type BackupSchedule struct {
 
 	// PublicKeyID is the gpg public key this schedule encrypts with.
 	PublicKeyID string `json:"public-key-id,omitempty"`
+
+	// AccessKeyID and SecretAccessKey are the credentials this schedule
+	// authenticates with. Both empty means the schedule inherits the service's
+	// pair. One of them set without the other is refused: the halves are never
+	// mixed with the service pair.
+	AccessKeyID     string `json:"access-key-id,omitempty"`
+	SecretAccessKey string `json:"secret-access-key,omitempty"`
+
+	// DefaultRegion, SignatureVersion and EndpointURL are where this schedule
+	// ships backups. Each is independent of the pair. Empty inherits the
+	// service's value, including when the schedule has its own pair.
+	DefaultRegion    string `json:"default-region,omitempty"`
+	SignatureVersion string `json:"signature-version,omitempty"`
+	EndpointURL      string `json:"endpoint-url,omitempty"`
 }
 
 // ValidateBackupScheduleID reports whether an id can name a schedule.
@@ -538,7 +611,27 @@ func ValidateBackupScheduleID(id string) error {
 
 // hasOverrides reports whether the schedule set any setting for itself.
 func (b BackupSchedule) hasOverrides() bool {
-	return b.StorageClass != "" || b.ObjectName != "" || b.Timestamp != "" || b.Mailto != "" || b.Keyserver != "" || b.ExportArgs != "" || b.hasOwnEncryption()
+	return b.StorageClass != "" || b.ObjectName != "" || b.Timestamp != "" || b.Mailto != "" || b.Keyserver != "" || b.ExportArgs != "" || b.hasOwnEncryption() || b.hasScheduleAuth()
+}
+
+// hasScheduleAuth reports whether the schedule set any of the five backup-auth
+// values for itself. The pair and the three settings around it are stored
+// together, and any one of them is enough to keep the schedule's object.
+func (b BackupSchedule) hasScheduleAuth() bool {
+	return b.AccessKeyID != "" || b.SecretAccessKey != "" || b.DefaultRegion != "" || b.SignatureVersion != "" || b.EndpointURL != ""
+}
+
+// credentialPairError reports a schedule that has one half of a credential pair.
+// A complete pair and a schedule with neither half are both ready to run.
+func (b BackupSchedule) credentialPairError(serviceName string) error {
+	switch {
+	case b.AccessKeyID != "" && b.SecretAccessKey == "":
+		return fmt.Errorf("scheduled backup %s for %s has %s set and no %s", b.ID, serviceName, backupAccessKeyIDProperty, backupSecretAccessKeyProperty)
+	case b.AccessKeyID == "" && b.SecretAccessKey != "":
+		return fmt.Errorf("scheduled backup %s for %s has %s set and no %s", b.ID, serviceName, backupSecretAccessKeyProperty, backupAccessKeyIDProperty)
+	default:
+		return nil
+	}
 }
 
 // hasOwnEncryption reports whether the schedule replaces the service's
@@ -569,6 +662,21 @@ func (b BackupSchedule) overrideNames() []string {
 	}
 	if b.ExportArgs != "" {
 		names = append(names, service.ExportArgsProperty)
+	}
+	if b.AccessKeyID != "" {
+		names = append(names, backupAccessKeyIDProperty)
+	}
+	if b.SecretAccessKey != "" {
+		names = append(names, backupSecretAccessKeyProperty)
+	}
+	if b.DefaultRegion != "" {
+		names = append(names, "backup-default-region")
+	}
+	if b.SignatureVersion != "" {
+		names = append(names, "backup-signature-version")
+	}
+	if b.EndpointURL != "" {
+		names = append(names, "backup-endpoint-url")
 	}
 	if b.EncryptionPassphrase != "" {
 		names = append(names, backupEncryptionPassphraseProperty)
@@ -654,6 +762,11 @@ func ReadBackupSchedule(s *service.Datastore, serviceName string) (BackupSchedul
 		schedule.ExportArgs = item.ExportArgs
 		schedule.EncryptionPassphrase = item.EncryptionPassphrase
 		schedule.PublicKeyID = item.PublicKeyID
+		schedule.AccessKeyID = item.AccessKeyID
+		schedule.SecretAccessKey = item.SecretAccessKey
+		schedule.DefaultRegion = item.DefaultRegion
+		schedule.SignatureVersion = item.SignatureVersion
+		schedule.EndpointURL = item.EndpointURL
 		break
 	}
 
@@ -989,6 +1102,12 @@ type BackupScheduleReport struct {
 	Keyserver                       string   `json:"keyserver"`
 	PublicKeyID                     string   `json:"public-key-id"`
 	EncryptionPassphraseFingerprint string   `json:"encryption-passphrase-fingerprint"`
+	AccessKeyIDFingerprint          string   `json:"access-key-id-fingerprint"`
+	SecretAccessKeyFingerprint      string   `json:"secret-access-key-fingerprint"`
+	AuthFingerprint                 string   `json:"auth-fingerprint"`
+	DefaultRegion                   string   `json:"default-region"`
+	SignatureVersion                string   `json:"signature-version"`
+	EndpointURL                     string   `json:"endpoint-url"`
 	ExportArgs                      string   `json:"export-args"`
 	Overrides                       []string `json:"overrides"`
 	CrontabLine                     string   `json:"crontab-line"`
@@ -1027,6 +1146,7 @@ func reportBackupSchedule(s *service.Datastore, serviceName string, schedule Bac
 	}
 
 	publicKeyID, passphraseFingerprint := resolvedScheduleEncryption(s, serviceName, schedule)
+	accessKeyFingerprint, secretFingerprint, authFingerprint, region, signatureVersion, endpointURL := resolvedScheduleAuth(s, serviceName, schedule)
 
 	return BackupScheduleReport{
 		ID:                              schedule.ID,
@@ -1040,10 +1160,64 @@ func reportBackupSchedule(s *service.Datastore, serviceName string, schedule Bac
 		Keyserver:                       keyserver,
 		PublicKeyID:                     publicKeyID,
 		EncryptionPassphraseFingerprint: passphraseFingerprint,
+		AccessKeyIDFingerprint:          accessKeyFingerprint,
+		SecretAccessKeyFingerprint:      secretFingerprint,
+		AuthFingerprint:                 authFingerprint,
+		DefaultRegion:                   region,
+		SignatureVersion:                signatureVersion,
+		EndpointURL:                     endpointURL,
 		ExportArgs:                      exportArgs,
 		Overrides:                       schedule.overrideNames(),
 		CrontabLine:                     CrontabLine(s.Properties().CommandPrefix, serviceName, resolved),
 	}
+}
+
+// resolvedScheduleAuth is the credential fingerprints and the region, signature
+// version and endpoint a run of this schedule would use when it is not asked
+// to authenticate with an instance role. A schedule with both keys reports
+// those. A schedule with neither reports the service's files. A schedule with
+// one key reports that key and leaves the other fingerprint empty, rather than
+// filling it from the service. Region, signature version and endpoint are each
+// the schedule's value when it set one, and the service's file otherwise.
+func resolvedScheduleAuth(s *service.Datastore, serviceName string, schedule BackupSchedule) (string, string, string, string, string, string) {
+	folder := service.Folders(s, serviceName).Backup
+	accessFingerprint := ""
+	secretFingerprint := ""
+	authFingerprint := ""
+	if schedule.AccessKeyID == "" && schedule.SecretAccessKey == "" {
+		accessFile := filepath.Join(folder, accessKeyIDFile)
+		secretFile := filepath.Join(folder, secretAccessKeyFile)
+		accessFingerprint = storedFingerprint(accessFile)
+		secretFingerprint = storedFingerprint(secretFile)
+		if common.FileExists(accessFile) && common.FileExists(secretFile) {
+			authFingerprint = fingerprint(common.ReadFirstLine(accessFile), common.ReadFirstLine(secretFile))
+		}
+	} else {
+		if schedule.AccessKeyID != "" {
+			accessFingerprint = fingerprint(schedule.AccessKeyID)
+		}
+		if schedule.SecretAccessKey != "" {
+			secretFingerprint = fingerprint(schedule.SecretAccessKey)
+		}
+		if schedule.AccessKeyID != "" && schedule.SecretAccessKey != "" {
+			authFingerprint = fingerprint(schedule.AccessKeyID, schedule.SecretAccessKey)
+		}
+	}
+
+	return accessFingerprint, secretFingerprint, authFingerprint,
+		scheduleOrServiceSetting(schedule.DefaultRegion, filepath.Join(folder, defaultRegionFile)),
+		scheduleOrServiceSetting(schedule.SignatureVersion, filepath.Join(folder, signatureVersionFile)),
+		scheduleOrServiceSetting(schedule.EndpointURL, filepath.Join(folder, endpointURLFile))
+}
+
+// scheduleOrServiceSetting is the schedule's own value, or the first line of
+// the service file when the schedule did not set one.
+func scheduleOrServiceSetting(value string, filename string) string {
+	if value != "" {
+		return value
+	}
+
+	return common.ReadFirstLine(filename)
 }
 
 // resolvedScheduleEncryption is the public key and the passphrase fingerprint
@@ -1572,6 +1746,61 @@ func backupScheduleForRun(input BackupInput) (BackupSchedule, error) {
 	return LookupBackupSchedule(input.Datastore, input.ServiceName, input.ScheduleID)
 }
 
+// resolveBackupAuth chooses the credentials and the region, signature version
+// and endpoint a backup runs with.
+//
+// --use-iam passes no access key and no secret. A schedule with both keys uses
+// that pair. A schedule with neither, and a backup that names no schedule, uses
+// the service's files. A schedule with one key is refused, and the error names
+// the schedule rather than a file the schedule does not have. Region, signature
+// version and endpoint are the schedule's value when it set one and the service
+// file otherwise, including when the backup authenticates with an instance role.
+func resolveBackupAuth(folder string, serviceName string, schedule BackupSchedule, useIAM bool) (string, string, map[string]string, error) {
+	settings := map[string]string{}
+	for _, entry := range []struct {
+		value string
+		name  string
+	}{
+		{schedule.DefaultRegion, defaultRegionFile},
+		{schedule.SignatureVersion, signatureVersionFile},
+		{schedule.EndpointURL, endpointURLFile},
+	} {
+		if entry.value != "" {
+			settings[entry.name] = entry.value
+			continue
+		}
+
+		filename := filepath.Join(folder, entry.name)
+		if common.FileExists(filename) {
+			settings[entry.name] = common.ReadFirstLine(filename)
+		}
+	}
+
+	if useIAM {
+		return "", "", settings, nil
+	}
+
+	if schedule.AccessKeyID != "" || schedule.SecretAccessKey != "" {
+		if err := schedule.credentialPairError(serviceName); err != nil {
+			return "", "", nil, err
+		}
+
+		return schedule.AccessKeyID, schedule.SecretAccessKey, settings, nil
+	}
+
+	accessKeyID := filepath.Join(folder, accessKeyIDFile)
+	if !common.FileExists(accessKeyID) {
+		return "", "", nil, errors.New("Missing AWS_ACCESS_KEY_ID file") //nolint:staticcheck // matches the bash datastore plugins
+	}
+
+	secretAccessKey := filepath.Join(folder, secretAccessKeyFile)
+	if !common.FileExists(secretAccessKey) {
+		return "", "", nil, errors.New("Missing AWS_SECRET_ACCESS_KEY file") //nolint:staticcheck // matches the bash datastore plugins
+	}
+
+	return common.ReadFirstLine(accessKeyID), common.ReadFirstLine(secretAccessKey), settings, nil
+}
+
 // Backup exports a service and ships the result to an s3 bucket
 func Backup(ctx context.Context, input BackupInput) error {
 	serviceFolders := service.Folders(input.Datastore, input.ServiceName)
@@ -1613,20 +1842,13 @@ func Backup(ctx context.Context, input BackupInput) error {
 		Settings:      map[string]string{},
 	}
 
-	if !input.UseIAM {
-		accessKeyID := filepath.Join(serviceFolders.Backup, accessKeyIDFile)
-		if !common.FileExists(accessKeyID) {
-			return errors.New("Missing AWS_ACCESS_KEY_ID file") //nolint:staticcheck // matches the bash datastore plugins
-		}
-
-		secretAccessKey := filepath.Join(serviceFolders.Backup, secretAccessKeyFile)
-		if !common.FileExists(secretAccessKey) {
-			return errors.New("Missing AWS_SECRET_ACCESS_KEY file") //nolint:staticcheck // matches the bash datastore plugins
-		}
-
-		arguments.AccessKeyID = common.ReadFirstLine(accessKeyID)
-		arguments.SecretAccessKey = common.ReadFirstLine(secretAccessKey)
+	accessKeyID, secretAccessKey, authSettings, err := resolveBackupAuth(serviceFolders.Backup, input.ServiceName, schedule, input.UseIAM)
+	if err != nil {
+		return err
 	}
+	arguments.AccessKeyID = accessKeyID
+	arguments.SecretAccessKey = secretAccessKey
+	arguments.Settings = authSettings
 
 	containerID := service.ContainerID(input.Datastore, input.ServiceName)
 	if !service.ContainerExists(ctx, containerID) {
@@ -1684,13 +1906,6 @@ func Backup(ctx context.Context, input BackupInput) error {
 		return fmt.Errorf("unable to read %s: %w", exportFile, err)
 	}
 	arguments.ExpectedSize = backupUploadSize(stat.Size())
-
-	for _, name := range []string{defaultRegionFile, signatureVersionFile, endpointURLFile} {
-		filename := filepath.Join(serviceFolders.Backup, name)
-		if common.FileExists(filename) {
-			arguments.Settings[name] = common.ReadFirstLine(filename)
-		}
-	}
 
 	// a schedule that set a passphrase or a public key replaces the service's
 	// pair for this run. The public key still takes precedence inside the pair.

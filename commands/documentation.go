@@ -74,7 +74,7 @@ func (c *BackupAuthCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *BackupAuthCommand) Usage() string {
-	return `<service> <aws-access-key-id> <aws-secret-access-key> <aws-default-region> <aws-signature-version> <endpoint-url>`
+	return `<service> <aws-access-key-id> <aws-secret-access-key> <aws-default-region> <aws-signature-version> <endpoint-url> [--id <id>]`
 }
 
 // Documentation returns the long form documentation for the command
@@ -89,7 +89,9 @@ dokku {{.CommandPrefix}}:backup-auth lollipop AWS_ACCESS_KEY_ID AWS_SECRET_ACCES
 more specific example for minio auth
 dokku {{.CommandPrefix}}:backup-auth lollipop MINIO_ACCESS_KEY_ID MINIO_SECRET_ACCESS_KEY us-east-1 s3v4 https://YOURMINIOSERVICE
 more specific example for digitalocean spaces auth, where the endpoint does not include the space name
-dokku {{.CommandPrefix}}:backup-auth lollipop SPACES_ACCESS_KEY SPACES_SECRET_KEY nyc3 s3v4 https://nyc3.digitaloceanspaces.com`
+dokku {{.CommandPrefix}}:backup-auth lollipop SPACES_ACCESS_KEY SPACES_SECRET_KEY nyc3 s3v4 https://nyc3.digitaloceanspaces.com
+record credentials on one schedule. the schedule is created first with backup-schedule --id. a region, signature version or endpoint url that is not passed is cleared on that schedule, so it inherits the service's value
+dokku {{.CommandPrefix}}:backup-auth lollipop AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY us-east-1 --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -105,13 +107,15 @@ func (c *BackupDeauthCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *BackupDeauthCommand) Usage() string {
-	return `<service>`
+	return `<service> [--id <id>]`
 }
 
 // Documentation returns the long form documentation for the command
 func (c *BackupDeauthCommand) Documentation() string {
 	return `remove s3 authentication
-dokku {{.CommandPrefix}}:backup-deauth lollipop`
+dokku {{.CommandPrefix}}:backup-deauth lollipop
+remove the credentials recorded on one schedule. the service's credentials stay, and that schedule uses them again
+dokku {{.CommandPrefix}}:backup-deauth lollipop --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1061,8 +1065,10 @@ dokku {{.CommandPrefix}}:set lollipop backup-public-key-id "<public-key-id>"
 ship the default scheduled backup to another bucket, or have it authenticate with an instance role, when that is the only schedule. both rewrite the crontab entry. with more than one schedule, change a schedule with backup-schedule --id
 dokku {{.CommandPrefix}}:set lollipop backup-bucket other-bucket
 dokku {{.CommandPrefix}}:set lollipop backup-use-iam true
-record a backup setting on one schedule. an empty value clears that schedule's own value and leaves the service's. credentials, the bucket and the instance role cannot be set this way
+record a backup setting on one schedule. an empty value clears that schedule's own value and leaves the service's. the bucket and the instance role cannot be set this way
 dokku {{.CommandPrefix}}:set lollipop backup-storage-class STANDARD_IA --id monthly
+give one schedule its own endpoint. the access key and the secret are set with backup-auth --id, and set rotates one of them once both are stored
+dokku {{.CommandPrefix}}:set lollipop backup-endpoint-url https://nyc3.digitaloceanspaces.com --id monthly
 set the keyserver a public key for backup encryption is fetched from
 dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com
 set the s3 storage class backups are uploaded with, one of STANDARD, REDUCED_REDUNDANCY, STANDARD_IA, ONEZONE_IA, INTELLIGENT_TIERING, GLACIER, DEEP_ARCHIVE or GLACIER_IR

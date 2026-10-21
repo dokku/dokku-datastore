@@ -515,7 +515,8 @@ func TestSetBackupBucketRefusesWhenAnotherScheduleExists(t *testing.T) {
 	}
 }
 
-// Credentials stay with the service. A schedule cannot be given one of its own.
+// A schedule is given a credential pair with backup-auth. set refuses the first
+// key, and still refuses a setting that is not a schedule override.
 func TestSetScheduleOverrideRefusesACredential(t *testing.T) {
 	datastore := withScheduleService(t, "lollipop")
 	ctx := t.Context()
@@ -530,7 +531,12 @@ func TestSetScheduleOverrideRefusesACredential(t *testing.T) {
 		t.Fatalf("failed to schedule the backup: %s", err)
 	}
 
-	for _, key := range []string{backupAccessKeyIDProperty, service.ImportArgsProperty, BackupBucketProperty} {
+	err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "frequent", backupAccessKeyIDProperty, "AKIAEXAMPLE")
+	if err == nil || !strings.Contains(err.Error(), "backup-auth --id") {
+		t.Errorf("expected the first access key to be refused, got %v", err)
+	}
+
+	for _, key := range []string{service.ImportArgsProperty, BackupBucketProperty} {
 		err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "frequent", key, "value")
 		refused := err != nil && (strings.Contains(err.Error(), "cannot be set on a schedule") || strings.Contains(err.Error(), "backup-schedule --id"))
 		if !refused {

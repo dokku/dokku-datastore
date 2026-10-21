@@ -21,6 +21,9 @@ type BackupDeauthCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+
+	// scheduleID clears the credentials recorded on one backup schedule
+	scheduleID string
 }
 
 // Name returns the name of the command
@@ -42,7 +45,8 @@ func (c *BackupDeauthCommand) Help() string {
 func (c *BackupDeauthCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Removes the backup credentials for a redis service named test": fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Removes the backup credentials for a redis service named test":                         fmt.Sprintf("%s %s redis test", appName, c.Name()),
+		"Removes the backup credentials for the monthly schedule of a redis service named test": fmt.Sprintf("%s %s redis test --id monthly", appName, c.Name()),
 	}
 }
 
@@ -78,6 +82,7 @@ func (c *BackupDeauthCommand) ParsedArguments(args []string) (map[string]command
 func (c *BackupDeauthCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.StringVar(&c.scheduleID, "id", "", "clear the credentials recorded on this backup schedule")
 	return f
 }
 
@@ -86,7 +91,9 @@ func (c *BackupDeauthCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--id": complete.PredictNothing,
+		},
 	)
 }
 
@@ -179,7 +186,7 @@ func (c *BackupDeauthCommand) Run(args []string) int {
 		return 1
 	}
 
-	if err := internal.BackupDeauth(ctx, datastore, serviceName); err != nil {
+	if err := internal.BackupDeauth(ctx, datastore, serviceName, c.scheduleID); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}

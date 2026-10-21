@@ -842,26 +842,50 @@ func regenerateCrontabIfScheduled(ctx context.Context, s *service.Datastore, ser
 }
 
 // scheduleOverrideProperties are the settings a schedule can set for itself.
-// Credentials stay with the service, and the cron expression, bucket and
-// instance role are changed with backup-schedule.
+// The cron expression, bucket and instance role are changed with backup-schedule.
 func scheduleOverrideProperty(key string) bool {
 	switch key {
-	case service.BackupStorageClassProperty, service.BackupObjectNameProperty, service.BackupTimestampProperty, service.BackupMailtoProperty, service.KeyserverProperty, service.ExportArgsProperty, backupEncryptionPassphraseProperty, "backup-public-key-id":
+	case service.BackupStorageClassProperty, service.BackupObjectNameProperty, service.BackupTimestampProperty, service.BackupMailtoProperty, service.KeyserverProperty, service.ExportArgsProperty, backupEncryptionPassphraseProperty, "backup-public-key-id", backupAccessKeyIDProperty, backupSecretAccessKeyProperty, "backup-default-region", "backup-signature-version", "backup-endpoint-url":
 		return true
 	default:
 		return false
 	}
 }
 
-// scheduleCredentialProperty reports whether a key is a backup credential,
-// which every schedule of a service shares.
-func scheduleCredentialProperty(key string) bool {
-	switch key {
-	case backupAccessKeyIDProperty, backupSecretAccessKeyProperty, "backup-default-region", "backup-signature-version", "backup-endpoint-url":
-		return true
-	default:
-		return false
+// schedulePairProperty reports whether a key is one half of the access key pair.
+// The pair is written with backup-auth and cleared with backup-deauth. set
+// rotates one half once both are already stored.
+func schedulePairProperty(key string) bool {
+	return key == backupAccessKeyIDProperty || key == backupSecretAccessKeyProperty
+}
+
+// validateSchedulePairEdit reports whether set may change one half of a
+// schedule's credential pair. A schedule without both keys is given them with
+// backup-auth --id. Clearing one half while the other remains is refused, so
+// the pair is dropped with backup-deauth --id.
+func validateSchedulePairEdit(s *service.Datastore, serviceName string, id string, key string, value string) error {
+	schedule, err := LookupBackupSchedule(s, serviceName, id)
+	if err != nil {
+		return err
 	}
+
+	other := schedule.SecretAccessKey
+	if key == backupSecretAccessKeyProperty {
+		other = schedule.AccessKeyID
+	}
+	if value == "" {
+		if other != "" {
+			return fmt.Errorf("clear %s and %s together with backup-deauth --id", backupAccessKeyIDProperty, backupSecretAccessKeyProperty)
+		}
+
+		return nil
+	}
+
+	if schedule.AccessKeyID == "" || schedule.SecretAccessKey == "" {
+		return fmt.Errorf("%s is set with backup-auth --id", key)
+	}
+
+	return nil
 }
 
 // ValidateBackupScheduleOverride reports whether a setting can be recorded on
@@ -872,9 +896,13 @@ func ValidateBackupScheduleOverride(s *service.Datastore, serviceName string, id
 		return err
 	}
 
+	if schedulePairProperty(key) {
+		if err := validateSchedulePairEdit(s, serviceName, id, key, value); err != nil {
+			return err
+		}
+	}
+
 	switch {
-	case scheduleCredentialProperty(key):
-		return fmt.Errorf("%s is kept for the service, and cannot be set on a schedule", key)
 	case key == BackupBucketProperty || key == BackupUseIAMProperty:
 		return fmt.Errorf("%s is part of the schedule itself, change it with backup-schedule --id", key)
 	case !scheduleOverrideProperty(key):
@@ -948,6 +976,16 @@ func (b *BackupSchedule) setOverride(key string, value string) error {
 		b.EncryptionPassphrase = value
 	case "backup-public-key-id":
 		b.PublicKeyID = value
+	case backupAccessKeyIDProperty:
+		b.AccessKeyID = value
+	case backupSecretAccessKeyProperty:
+		b.SecretAccessKey = value
+	case "backup-default-region":
+		b.DefaultRegion = value
+	case "backup-signature-version":
+		b.SignatureVersion = value
+	case "backup-endpoint-url":
+		b.EndpointURL = value
 	default:
 		return fmt.Errorf("%s cannot be set on a schedule", key)
 	}
