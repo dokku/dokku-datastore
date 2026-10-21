@@ -772,7 +772,7 @@ Each schedule is a line in the dokku crontab. The command it runs names the sche
 
 `info --backup-schedule`, `--backup-bucket` and `--backup-use-iam` stay the default schedule, and are empty (and `false` for the instance role) when that schedule is gone. `--backup-schedules` is every schedule on one line, the default one first and the others by id. A record is `id|cron|bucket|use-iam`, and records are separated by semicolons:
 
-```
+```text
 default|0 3 * * *|my-bucket|false;frequent|*/15 * * * *|bucket-a|false;monthly|@monthly|bucket-c|true
 ```
 
