@@ -54,6 +54,21 @@ download_backup() {
   [[ -s "$BATS_TEST_TMPDIR/extracted/backup/export" ]] || fail "the backup holds no dump"
 }
 
+# reports whether the only object in the bucket unpacks to a dump. Unlike
+# download_backup it returns a status, so a test can clean up before asserting.
+backup_holds_dump() {
+  local key
+  key="$(bucket_keys)"
+  [[ -n "$key" ]] || return 1
+  [[ "$(wc -l <<<"$key")" -eq 1 ]] || return 1
+
+  rm -rf "$BATS_TEST_TMPDIR/extracted"
+  aws_cli s3 cp "s3://$S3_BUCKET/$key" - >"$BATS_TEST_TMPDIR/backup.tgz" || return 1
+  mkdir -p "$BATS_TEST_TMPDIR/extracted"
+  tar -xzf "$BATS_TEST_TMPDIR/backup.tgz" -C "$BATS_TEST_TMPDIR/extracted" || return 1
+  [[ -s "$BATS_TEST_TMPDIR/extracted/backup/export" ]]
+}
+
 setup_file() {
   datastore_setup_file
   create_service "$SERVICE"
@@ -316,19 +331,4 @@ setup() {
   [[ "$schedule_auth_status" -eq 0 ]] || fail "storing the schedule credentials failed"
   [[ "$schedule_status" -eq 0 ]] || fail "the backup with the schedule credentials failed: $schedule_output"
   [[ "$schedule_dump" -eq 1 ]] || fail "the backup with the schedule credentials uploaded no dump"
-}
-
-# reports whether the only object in the bucket unpacks to a dump. Unlike
-# download_backup it returns a status, so a test can clean up before asserting.
-backup_holds_dump() {
-  local key
-  key="$(bucket_keys)"
-  [[ -n "$key" ]] || return 1
-  [[ "$(wc -l <<<"$key")" -eq 1 ]] || return 1
-
-  rm -rf "$BATS_TEST_TMPDIR/extracted"
-  aws_cli s3 cp "s3://$S3_BUCKET/$key" - >"$BATS_TEST_TMPDIR/backup.tgz" || return 1
-  mkdir -p "$BATS_TEST_TMPDIR/extracted"
-  tar -xzf "$BATS_TEST_TMPDIR/backup.tgz" -C "$BATS_TEST_TMPDIR/extracted" || return 1
-  [[ -s "$BATS_TEST_TMPDIR/extracted/backup/export" ]]
 }
