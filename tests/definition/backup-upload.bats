@@ -261,3 +261,74 @@ setup() {
 
   download_backup
 }
+
+# a schedule with no credentials of its own uploads with the service pair.
+# a pair stored on the schedule is what the upload uses instead, which a key
+# the server refuses shows by failing while the service pair is still in place.
+@test "($DEFINITION) backup --id uploads with the schedule credentials or the service pair" {
+  run "$BIN" backup-schedule "$PLUGIN" "$SERVICE" "@monthly" "$S3_BUCKET" --id monthly
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup-schedule"
+  fi
+  assert_success
+
+  # no pair on the schedule, so the service credentials from setup upload
+  run "$BIN" backup "$PLUGIN" "$SERVICE" "$S3_BUCKET" --id monthly
+  local inherited_status="$status" inherited_output="$output"
+  local inherited_dump=0
+  if [[ "$inherited_status" -eq 0 ]] && backup_holds_dump; then
+    inherited_dump=1
+  fi
+  aws_cli s3 rm --recursive "s3://$S3_BUCKET/" >/dev/null
+
+  run "$BIN" backup-auth "$PLUGIN" "$SERVICE" WRONGACCESSKEY wrong-secret us-east-1 s3v4 "$(s3_endpoint)" --id monthly
+  local refused_auth_status="$status"
+  run "$BIN" backup "$PLUGIN" "$SERVICE" "$S3_BUCKET" --id monthly
+  local refused_status="$status" refused_output="$output"
+  local refused_keys
+  refused_keys="$(bucket_keys)"
+  aws_cli s3 rm --recursive "s3://$S3_BUCKET/" >/dev/null
+
+  run "$BIN" backup-auth "$PLUGIN" "$SERVICE" "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" us-east-1 s3v4 "$(s3_endpoint)" --id monthly
+  local schedule_auth_status="$status"
+  run "$BIN" backup "$PLUGIN" "$SERVICE" "$S3_BUCKET" --id monthly
+  local schedule_status="$status" schedule_output="$output"
+  local schedule_dump=0
+  if [[ "$schedule_status" -eq 0 ]] && backup_holds_dump; then
+    schedule_dump=1
+  fi
+
+  # dropped before the assertions, so a failure here does not leave the
+  # schedule's credentials in place for the tests that follow
+  run "$BIN" backup-deauth "$PLUGIN" "$SERVICE" --id monthly
+  assert_success
+  run "$BIN" backup-unschedule "$PLUGIN" "$SERVICE" --id monthly
+  assert_success
+
+  if [[ "$inherited_status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup"
+  fi
+  [[ "$inherited_status" -eq 0 ]] || fail "the backup with the service credentials failed: $inherited_output"
+  [[ "$inherited_dump" -eq 1 ]] || fail "the backup with the service credentials uploaded no dump"
+  [[ "$refused_auth_status" -eq 0 ]] || fail "storing the refused schedule credentials failed"
+  [[ "$refused_status" -ne 0 ]] || fail "a schedule with a refused key uploaded: $refused_output"
+  [[ -z "$refused_keys" ]] || fail "a schedule with a refused key left an object: $refused_keys"
+  [[ "$schedule_auth_status" -eq 0 ]] || fail "storing the schedule credentials failed"
+  [[ "$schedule_status" -eq 0 ]] || fail "the backup with the schedule credentials failed: $schedule_output"
+  [[ "$schedule_dump" -eq 1 ]] || fail "the backup with the schedule credentials uploaded no dump"
+}
+
+# reports whether the only object in the bucket unpacks to a dump. Unlike
+# download_backup it returns a status, so a test can clean up before asserting.
+backup_holds_dump() {
+  local key
+  key="$(bucket_keys)"
+  [[ -n "$key" ]] || return 1
+  [[ "$(wc -l <<<"$key")" -eq 1 ]] || return 1
+
+  rm -rf "$BATS_TEST_TMPDIR/extracted"
+  aws_cli s3 cp "s3://$S3_BUCKET/$key" - >"$BATS_TEST_TMPDIR/backup.tgz" || return 1
+  mkdir -p "$BATS_TEST_TMPDIR/extracted"
+  tar -xzf "$BATS_TEST_TMPDIR/backup.tgz" -C "$BATS_TEST_TMPDIR/extracted" || return 1
+  [[ -s "$BATS_TEST_TMPDIR/extracted/backup/export" ]]
+}
