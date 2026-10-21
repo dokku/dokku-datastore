@@ -22,6 +22,9 @@ type BackupAuthCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+
+	// scheduleID records the credentials on one backup schedule
+	scheduleID string
 }
 
 // Name returns the name of the command
@@ -43,7 +46,8 @@ func (c *BackupAuthCommand) Help() string {
 func (c *BackupAuthCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Stores s3 credentials for a redis service named test": fmt.Sprintf("%s %s redis test KEYID SECRET", appName, c.Name()),
+		"Stores s3 credentials for a redis service named test":                         fmt.Sprintf("%s %s redis test KEYID SECRET", appName, c.Name()),
+		"Stores s3 credentials for the monthly schedule of a redis service named test": fmt.Sprintf("%s %s redis test KEYID SECRET --id monthly", appName, c.Name()),
 	}
 }
 
@@ -109,6 +113,7 @@ func (c *BackupAuthCommand) ParsedArguments(args []string) (map[string]command.A
 func (c *BackupAuthCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.StringVar(&c.scheduleID, "id", "", "record the credentials on this backup schedule")
 	return f
 }
 
@@ -117,7 +122,9 @@ func (c *BackupAuthCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--id": complete.PredictNothing,
+		},
 	)
 }
 
@@ -233,6 +240,7 @@ func (c *BackupAuthCommand) Run(args []string) int {
 		Datastore:        datastore,
 		DefaultRegion:    arguments["aws-default-region"].StringValue(),
 		EndpointURL:      arguments["endpoint-url"].StringValue(),
+		ScheduleID:       c.scheduleID,
 		SecretAccessKey:  secretAccessKey,
 		ServiceName:      serviceName,
 		SignatureVersion: arguments["aws-signature-version"].StringValue(),

@@ -452,3 +452,66 @@ assert_crontab_regenerated() {
   assert_success
   assert_output ""
 }
+
+@test "($DEFINITION) a schedule can store its own backup credentials" {
+  run "$BIN" backup-unschedule "$PLUGIN" "$SERVICE" --all
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup-schedule"
+  fi
+  assert_success
+
+  run "$BIN" backup-auth "$PLUGIN" "$SERVICE" AKIAEXAMPLE wJalrXUtnFEMI us-east-1 s3v4 http://127.0.0.1:9000
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement backup-auth"
+  fi
+  assert_success
+
+  schedule_backup "$SERVICE" "@monthly" bucket-c --id monthly
+  assert_success
+
+  run "$BIN" backup-auth "$PLUGIN" "$SERVICE" AKIAMONTHLY monthly-secret eu-west-1 --id monthly
+  assert_success
+
+  # the service credentials are untouched
+  [[ "$(cat "$(service_root)/backup/AWS_ACCESS_KEY_ID")" == "AKIAEXAMPLE" ]] || fail "backup-auth --id replaced the service access key"
+  [[ -e "$(service_root)/backup/ENDPOINT_URL" ]] || fail "backup-auth --id removed the service endpoint"
+
+  local service_fingerprint monthly_fingerprint
+  service_fingerprint="$(printf '%s\n%s' AKIAEXAMPLE wJalrXUtnFEMI | sha256sum | cut -d' ' -f1)"
+  monthly_fingerprint="$(printf '%s\n%s' AKIAMONTHLY monthly-secret | sha256sum | cut -d' ' -f1)"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-auth-fingerprint
+  assert_success
+  assert_output "$service_fingerprint"
+
+  run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE" --id monthly --format json
+  assert_success
+  refute_output --partial "AKIAMONTHLY"
+  refute_output --partial "monthly-secret"
+  run jq -r '[.["auth-fingerprint"], .["default-region"], .["endpoint-url"], (.overrides | join(","))] | join("|")' <<<"$output"
+  assert_success
+  assert_output "$monthly_fingerprint|eu-west-1|http://127.0.0.1:9000|backup-access-key-id,backup-secret-access-key,backup-default-region"
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-access-key-id AKIAROTATED --id monthly
+  assert_success
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-secret-access-key --id monthly
+  assert_failure
+  assert_stderr --partial "backup-deauth --id"
+
+  run "$BIN" backup-deauth "$PLUGIN" "$SERVICE" --id monthly
+  assert_success
+
+  run --separate-stderr "$BIN" backup-schedule-cat "$PLUGIN" "$SERVICE" --id monthly --format json
+  assert_success
+  run jq -r '.["auth-fingerprint"]' <<<"$output"
+  assert_success
+  assert_output "$service_fingerprint"
+
+  [[ -d "$(service_root)/backup" ]] || fail "backup-deauth --id removed the service credentials"
+
+  run "$BIN" backup-deauth "$PLUGIN" "$SERVICE"
+  assert_success
+  run "$BIN" backup-unschedule "$PLUGIN" "$SERVICE" --all
+  assert_success
+}

@@ -1480,8 +1480,8 @@ func TestMultipleBackupSchedules(t *testing.T) {
 		t.Errorf("expected the bucket to be refused without claiming there is no schedule, got %v", err)
 	}
 	err = SetBackupScheduleOverride(ctx, datastore, "lollipop", "monthly", backupAccessKeyIDProperty, "AKIAEXAMPLE")
-	if err == nil || !strings.Contains(err.Error(), "cannot be set on a schedule") {
-		t.Errorf("expected a credential to be refused on a schedule, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "backup-auth --id") {
+		t.Errorf("expected the first access key to be refused, got %v", err)
 	}
 
 	err = UnscheduleBackup(ctx, UnscheduleBackupInput{Datastore: datastore, ServiceName: "lollipop"})
@@ -1499,6 +1499,146 @@ func TestMultipleBackupSchedules(t *testing.T) {
 	}
 	if schedule, ok := ReadBackupSchedule(datastore, "lollipop"); !ok || schedule.ID != BackupScheduleIDDefault || schedule.BucketName != "my-bucket" {
 		t.Errorf("expected the default schedule to remain, got %+v", schedule)
+	}
+}
+
+// A schedule can carry its own credentials. A run that names no schedule, or a
+// schedule with no pair of its own, uses the service's files unless it
+// authenticates with an instance role.
+func TestScheduleCredentials(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+	ctx := t.Context()
+	for _, input := range []ScheduleBackupInput{
+		{Schedule: "0 3 * * *", BucketName: "my-bucket"},
+		{ID: "monthly", Schedule: "@monthly", BucketName: "bucket-c"},
+	} {
+		input.Datastore = datastore
+		input.ServiceName = "lollipop"
+		if err := ScheduleBackup(ctx, input); err != nil {
+			t.Fatalf("failed to schedule %s: %s", input.ID, err)
+		}
+	}
+
+	if err := BackupAuth(ctx, BackupAuthInput{
+		AccessKeyID:     "AKIAEXAMPLE",
+		Datastore:       datastore,
+		EndpointURL:     "http://10.0.0.3:9000",
+		SecretAccessKey: "wJalrXUtnFEMI",
+		ServiceName:     "lollipop",
+	}); err != nil {
+		t.Fatalf("failed to store the service credentials: %s", err)
+	}
+
+	folder := service.Folders(datastore, "lollipop").Backup
+	accessKeyID, secretAccessKey, settings, err := resolveBackupAuth(folder, "lollipop", BackupSchedule{}, false)
+	if err != nil {
+		t.Fatalf("failed to resolve the service credentials: %s", err)
+	}
+	if accessKeyID != "AKIAEXAMPLE" || secretAccessKey != "wJalrXUtnFEMI" || settings[endpointURLFile] != "http://10.0.0.3:9000" {
+		t.Errorf("expected the service credentials, got %q %q %v", accessKeyID, secretAccessKey, settings)
+	}
+
+	if err := BackupAuth(ctx, BackupAuthInput{
+		AccessKeyID:     "AKIAMONTHLY",
+		Datastore:       datastore,
+		DefaultRegion:   "eu-west-1",
+		SecretAccessKey: "monthly-secret",
+		ServiceName:     "lollipop",
+		ScheduleID:      "monthly",
+	}); err != nil {
+		t.Fatalf("failed to store the schedule credentials: %s", err)
+	}
+	if contents, readErr := os.ReadFile(filepath.Join(folder, accessKeyIDFile)); readErr != nil || string(contents) != "AKIAEXAMPLE" {
+		t.Errorf("expected the service access key to stay, got %q %v", contents, readErr)
+	}
+
+	monthly, err := LookupBackupSchedule(datastore, "lollipop", "monthly")
+	if err != nil {
+		t.Fatalf("failed to read the monthly schedule: %s", err)
+	}
+	accessKeyID, secretAccessKey, settings, err = resolveBackupAuth(folder, "lollipop", monthly, false)
+	if err != nil {
+		t.Fatalf("failed to resolve the monthly credentials: %s", err)
+	}
+	if accessKeyID != "AKIAMONTHLY" || secretAccessKey != "monthly-secret" || settings[defaultRegionFile] != "eu-west-1" || settings[endpointURLFile] != "http://10.0.0.3:9000" {
+		t.Errorf("expected the monthly pair and the service endpoint, got %q %q %v", accessKeyID, secretAccessKey, settings)
+	}
+	if _, ok := settings[signatureVersionFile]; ok {
+		t.Errorf("expected no signature version, got %v", settings)
+	}
+
+	accessKeyID, secretAccessKey, settings, err = resolveBackupAuth(folder, "lollipop", monthly, true)
+	if err != nil {
+		t.Fatalf("failed to resolve an instance role: %s", err)
+	}
+	if accessKeyID != "" || secretAccessKey != "" || settings[defaultRegionFile] != "eu-west-1" || settings[endpointURLFile] != "http://10.0.0.3:9000" {
+		t.Errorf("expected no keys and the resolved settings, got %q %q %v", accessKeyID, secretAccessKey, settings)
+	}
+
+	report := reportBackupSchedule(datastore, "lollipop", monthly)
+	if report.AccessKeyIDFingerprint != fingerprint("AKIAMONTHLY") || report.SecretAccessKeyFingerprint != fingerprint("monthly-secret") || report.AuthFingerprint != fingerprint("AKIAMONTHLY", "monthly-secret") {
+		t.Errorf("expected the monthly fingerprints, got %+v", report)
+	}
+	if report.DefaultRegion != "eu-west-1" || report.EndpointURL != "http://10.0.0.3:9000" {
+		t.Errorf("expected the resolved region and endpoint, got %+v", report)
+	}
+	if !slices.Equal(report.Overrides, []string{backupAccessKeyIDProperty, backupSecretAccessKeyProperty, "backup-default-region"}) {
+		t.Errorf("expected the auth overrides, got %v", report.Overrides)
+	}
+	if encoded, marshalErr := json.Marshal(report); marshalErr != nil || strings.Contains(string(encoded), "monthly-secret") || strings.Contains(string(encoded), "AKIAMONTHLY") {
+		t.Errorf("expected the report to leave the credentials out, got %s", encoded)
+	}
+
+	if err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "monthly", backupAccessKeyIDProperty, "AKIAROTATED"); err != nil {
+		t.Fatalf("failed to rotate the access key: %s", err)
+	}
+	monthly, err = LookupBackupSchedule(datastore, "lollipop", "monthly")
+	if err != nil {
+		t.Fatalf("failed to read the rotated schedule: %s", err)
+	}
+	if monthly.AccessKeyID != "AKIAROTATED" || monthly.SecretAccessKey != "monthly-secret" {
+		t.Errorf("expected the rotated pair, got %+v", monthly)
+	}
+	if err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "monthly", backupAccessKeyIDProperty, ""); err == nil || !strings.Contains(err.Error(), "backup-deauth --id") {
+		t.Errorf("expected clearing one key to be refused, got %v", err)
+	}
+
+	if err := BackupDeauth(ctx, datastore, "lollipop", "monthly"); err != nil {
+		t.Fatalf("failed to remove the schedule credentials: %s", err)
+	}
+	monthly, err = LookupBackupSchedule(datastore, "lollipop", "monthly")
+	if err != nil {
+		t.Fatalf("failed to read the deauthed schedule: %s", err)
+	}
+	if monthly.hasScheduleAuth() {
+		t.Errorf("expected the schedule credentials to be cleared, got %+v", monthly)
+	}
+	accessKeyID, _, _, err = resolveBackupAuth(folder, "lollipop", monthly, false)
+	if err != nil || accessKeyID != "AKIAEXAMPLE" {
+		t.Errorf("expected the service access key after deauth, got %q %v", accessKeyID, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(folder, accessKeyIDFile)); statErr != nil {
+		t.Errorf("expected deauth of the schedule to leave the service credentials, got %s", statErr)
+	}
+
+	half := monthly
+	half.AccessKeyID = "AKIAONLY"
+	if _, _, _, err := resolveBackupAuth(folder, "lollipop", half, false); err == nil || strings.Contains(err.Error(), "Missing AWS_ACCESS_KEY_ID file") || !strings.Contains(err.Error(), "monthly") {
+		t.Errorf("expected a half pair to name the schedule, got %v", err)
+	}
+
+	if err := BackupAuth(ctx, BackupAuthInput{
+		AccessKeyID:     "AKIAMONTHLY",
+		Datastore:       datastore,
+		EndpointURL:     "not a url",
+		SecretAccessKey: "monthly-secret",
+		ServiceName:     "lollipop",
+		ScheduleID:      "monthly",
+	}); err == nil || !strings.Contains(err.Error(), "endpoint url") {
+		t.Errorf("expected the endpoint to be refused, got %v", err)
+	}
+	if monthly, lookupErr := LookupBackupSchedule(datastore, "lollipop", "monthly"); lookupErr != nil || monthly.hasScheduleAuth() {
+		t.Errorf("expected the refused call to leave the schedule, got %+v %v", monthly, lookupErr)
 	}
 }
 
