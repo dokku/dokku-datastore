@@ -38,7 +38,7 @@ func (c *BackupCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *BackupCommand) Usage() string {
-	return `<service> <bucket-name> [-u|--use-iam]`
+	return `<service> <bucket-name> [--id <id>] [-u|--use-iam]`
 }
 
 // Documentation returns the long form documentation for the command
@@ -46,6 +46,8 @@ func (c *BackupCommand) Documentation() string {
 	return `backup the 'lollipop' service to the 'my-s3-bucket' bucket on AWS
 > once a backup ends, scheduled or not, the service-action plugin trigger is fired with "post-backup {{.CommandPrefix}} <service> <bucket-name> <success|failure>", and a trigger that fails is only warned about
 dokku {{.CommandPrefix}}:backup lollipop my-s3-bucket --use-iam
+backup with the settings recorded on one schedule. the bucket and --use-iam still come from this command
+dokku {{.CommandPrefix}}:backup lollipop my-s3-bucket --id monthly
 backup the 'lollipop' service under a path in the bucket
 dokku {{.CommandPrefix}}:backup lollipop my-s3-bucket/{{.CommandPrefix}}-backups
 {{- if .AllDatabases}}
@@ -125,7 +127,7 @@ func (c *BackupScheduleCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *BackupScheduleCommand) Usage() string {
-	return `<service> <schedule> <bucket-name> [-u|--use-iam]`
+	return `<service> <schedule> <bucket-name> [--id <id>] [-u|--use-iam]`
 }
 
 // Documentation returns the long form documentation for the command
@@ -135,9 +137,13 @@ func (c *BackupScheduleCommand) Documentation() string {
 > the backup is added to the dokku crontab through the cron-entries plugin trigger, so it is listed by "dokku cron:list --global" and its output is appended to /var/log/dokku/{{.CommandPrefix}}.<service>.backup.log, which "dokku {{.CommandPrefix}}:backup-logs <service>" prints
 > each scheduled backup fires the same service-action post-backup trigger as "dokku {{.CommandPrefix}}:backup", so a plugin can report whether it succeeded
 > NOTE: dokku only writes a crontab when the global scheduler or at least one app uses the docker-local scheduler, so a scheduled backup does not run on a host that only uses k3s or null
+> calling it again without --id replaces that schedule's cron expression, bucket and instance role, and leaves every other schedule in place
+> --id names another schedule, or replaces the one that id already names. --id default is the schedule made without --id
 dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket
 schedule a backup and authenticate via iam
-dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket --use-iam`
+dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket --use-iam
+schedule a second backup under its own id
+dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 1 * *" my-s3-bucket --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -148,18 +154,20 @@ func (c *BackupScheduleCommand) Group() string {
 // Description returns the one line description of the command, in the idiom of the
 // plugin rather than of the binary
 func (c *BackupScheduleCatCommand) Description() string {
-	return `cat the crontab line of the scheduled backup for the service`
+	return `cat the crontab line of a scheduled backup for the service`
 }
 
 // Usage returns the argument sketch rendered after the command name
 func (c *BackupScheduleCatCommand) Usage() string {
-	return `<service>`
+	return `<service> [--id <id>]`
 }
 
 // Documentation returns the long form documentation for the command
 func (c *BackupScheduleCatCommand) Documentation() string {
-	return `cat the crontab line of the scheduled backup for the service
-dokku {{.CommandPrefix}}:backup-schedule-cat lollipop`
+	return `cat the crontab line of the scheduled backup for the service. with more than one schedule, each line is preceded by its id
+dokku {{.CommandPrefix}}:backup-schedule-cat lollipop
+cat one schedule
+dokku {{.CommandPrefix}}:backup-schedule-cat lollipop --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -202,14 +210,16 @@ func (c *BackupSetEncryptionCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *BackupSetEncryptionCommand) Usage() string {
-	return `<service> <passphrase>`
+	return `<service> <passphrase> [--id <id>]`
 }
 
 // Documentation returns the long form documentation for the command
 func (c *BackupSetEncryptionCommand) Documentation() string {
 	return `set the GPG-compatible passphrase for encrypting backups for backups
 dokku {{.CommandPrefix}}:backup-set-encryption lollipop
-public key encryption will take precendence over the passphrase encryption if both types are set.`
+public key encryption will take precendence over the passphrase encryption if both types are set.
+record the passphrase on one schedule. it replaces the service's passphrase and public key for that schedule
+dokku {{.CommandPrefix}}:backup-set-encryption lollipop --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -225,7 +235,7 @@ func (c *BackupSetPublicKeyEncryptionCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *BackupSetPublicKeyEncryptionCommand) Usage() string {
-	return `<service> <public-key-id>`
+	return `<service> <public-key-id> [--id <id>]`
 }
 
 // Documentation returns the long form documentation for the command
@@ -233,7 +243,9 @@ func (c *BackupSetPublicKeyEncryptionCommand) Documentation() string {
 	return `set the GPG Public Key for encrypting backups
 dokku {{.CommandPrefix}}:backup-set-public-key-encryption lollipop
 the <public-key-id> is fetched from 'keyserver.ubuntu.com', unless the service names another one with the backup-keyserver property
-dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com`
+dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com
+record the public key on one schedule
+dokku {{.CommandPrefix}}:backup-set-public-key-encryption lollipop --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -249,13 +261,17 @@ func (c *BackupUnscheduleCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *BackupUnscheduleCommand) Usage() string {
-	return `<service>`
+	return `<service> [--id <id>|--all]`
 }
 
 // Documentation returns the long form documentation for the command
 func (c *BackupUnscheduleCommand) Documentation() string {
-	return `remove the scheduled backup from the dokku crontab
-dokku {{.CommandPrefix}}:backup-unschedule lollipop`
+	return `remove the scheduled backup from the dokku crontab. with one schedule, that schedule is removed. with several, name one with --id, or pass --all
+dokku {{.CommandPrefix}}:backup-unschedule lollipop
+remove one schedule
+dokku {{.CommandPrefix}}:backup-unschedule lollipop --id monthly
+remove every schedule
+dokku {{.CommandPrefix}}:backup-unschedule lollipop --all`
 }
 
 // Group is the readme usage section the command is documented under
@@ -271,13 +287,15 @@ func (c *BackupUnsetEncryptionCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *BackupUnsetEncryptionCommand) Usage() string {
-	return `<service>`
+	return `<service> [--id <id>]`
 }
 
 // Documentation returns the long form documentation for the command
 func (c *BackupUnsetEncryptionCommand) Documentation() string {
 	return `unset the GPG encryption passphrase for backups
-dokku {{.CommandPrefix}}:backup-unset-encryption lollipop`
+dokku {{.CommandPrefix}}:backup-unset-encryption lollipop
+clear the passphrase recorded on one schedule, so that schedule inherits the service's encryption again
+dokku {{.CommandPrefix}}:backup-unset-encryption lollipop --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -293,13 +311,15 @@ func (c *BackupUnsetPublicKeyEncryptionCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *BackupUnsetPublicKeyEncryptionCommand) Usage() string {
-	return `<service>`
+	return `<service> [--id <id>]`
 }
 
 // Documentation returns the long form documentation for the command
 func (c *BackupUnsetPublicKeyEncryptionCommand) Documentation() string {
 	return `unset the GPG Public Key encryption for backups
-dokku {{.CommandPrefix}}:backup-unset-public-key-encryption lollipop`
+dokku {{.CommandPrefix}}:backup-unset-public-key-encryption lollipop
+clear the public key recorded on one schedule
+dokku {{.CommandPrefix}}:backup-unset-public-key-encryption lollipop --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -998,7 +1018,7 @@ func (c *SetCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *SetCommand) Usage() string {
-	return `<service> <key> <value>`
+	return `<service> <key> [<value>] [--id <id>]`
 }
 
 // Documentation returns the long form documentation for the command
@@ -1038,9 +1058,11 @@ dokku {{.CommandPrefix}}:set lollipop backup-secret-access-key "<secret-access-k
 encrypt backups with a passphrase, or with a gpg public key
 dokku {{.CommandPrefix}}:set lollipop backup-encryption-passphrase "<passphrase>"
 dokku {{.CommandPrefix}}:set lollipop backup-public-key-id "<public-key-id>"
-ship a scheduled backup to another bucket, or have it authenticate with an instance role. both rewrite the crontab entry, and need a schedule made with backup-schedule
+ship the default scheduled backup to another bucket, or have it authenticate with an instance role, when that is the only schedule. both rewrite the crontab entry. with more than one schedule, change a schedule with backup-schedule --id
 dokku {{.CommandPrefix}}:set lollipop backup-bucket other-bucket
 dokku {{.CommandPrefix}}:set lollipop backup-use-iam true
+record a backup setting on one schedule. an empty value clears that schedule's own value and leaves the service's. credentials, the bucket and the instance role cannot be set this way
+dokku {{.CommandPrefix}}:set lollipop backup-storage-class STANDARD_IA --id monthly
 set the keyserver a public key for backup encryption is fetched from
 dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com
 set the s3 storage class backups are uploaded with, one of STANDARD, REDUCED_REDUNDANCY, STANDARD_IA, ONEZONE_IA, INTELLIGENT_TIERING, GLACIER, DEEP_ARCHIVE or GLACIER_IR

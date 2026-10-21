@@ -21,6 +21,9 @@ type BackupUnsetPublicKeyEncryptionCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+
+	// scheduleID clears the public key recorded on one backup schedule
+	scheduleID string
 }
 
 // Name returns the name of the command
@@ -78,6 +81,7 @@ func (c *BackupUnsetPublicKeyEncryptionCommand) ParsedArguments(args []string) (
 func (c *BackupUnsetPublicKeyEncryptionCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.StringVar(&c.scheduleID, "id", "", "clear the public key recorded on this backup schedule")
 	return f
 }
 
@@ -86,7 +90,9 @@ func (c *BackupUnsetPublicKeyEncryptionCommand) AutocompleteFlags() complete.Fla
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--id": complete.PredictNothing,
+		},
 	)
 }
 
@@ -179,7 +185,12 @@ func (c *BackupUnsetPublicKeyEncryptionCommand) Run(args []string) int {
 		return 1
 	}
 
-	if err := internal.UnsetBackupPublicKeyEncryption(ctx, datastore, serviceName); err != nil {
+	if c.scheduleID != "" {
+		err = internal.SetBackupScheduleOverride(ctx, datastore, serviceName, c.scheduleID, "backup-public-key-id", "")
+	} else {
+		err = internal.UnsetBackupPublicKeyEncryption(ctx, datastore, serviceName)
+	}
+	if err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}

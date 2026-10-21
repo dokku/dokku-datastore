@@ -22,6 +22,9 @@ type BackupSetEncryptionCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+
+	// scheduleID records the passphrase on one backup schedule
+	scheduleID string
 }
 
 // Name returns the name of the command
@@ -85,6 +88,7 @@ func (c *BackupSetEncryptionCommand) ParsedArguments(args []string) (map[string]
 func (c *BackupSetEncryptionCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.StringVar(&c.scheduleID, "id", "", "record the passphrase on this backup schedule")
 	return f
 }
 
@@ -93,7 +97,9 @@ func (c *BackupSetEncryptionCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--id": complete.PredictNothing,
+		},
 	)
 }
 
@@ -195,7 +201,12 @@ func (c *BackupSetEncryptionCommand) Run(args []string) int {
 		return 1
 	}
 
-	if err := internal.SetBackupEncryption(ctx, datastore, serviceName, passphrase); err != nil {
+	if c.scheduleID != "" {
+		err = internal.SetBackupScheduleOverride(ctx, datastore, serviceName, c.scheduleID, "backup-encryption-passphrase", passphrase)
+	} else {
+		err = internal.SetBackupEncryption(ctx, datastore, serviceName, passphrase)
+	}
+	if err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}

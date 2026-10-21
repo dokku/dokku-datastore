@@ -45,6 +45,7 @@ var InfoKeys = []InfoKey{
 	{Name: "backup-object-name", Description: "show the name backups are uploaded under in place of the default"},
 	{Name: "backup-public-key-id", Description: "show the gpg public key id backups are encrypted with"},
 	{Name: "backup-schedule", Description: "show the cron schedule backups run on"},
+	{Name: "backup-schedules", Description: "show every scheduled backup, as id, schedule, bucket and use-iam"},
 	{Name: "backup-secret-access-key-fingerprint", Description: "show a sha256 fingerprint of the stored backup secret access key"},
 	{Name: "backup-signature-version", Description: "show the signature version backups authenticate with"},
 	{Name: "backup-storage-class", Description: "show the s3 storage class backups are uploaded with"},
@@ -209,6 +210,10 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info["backup-bucket"] = schedule.BucketName
 	info["backup-use-iam"] = strconv.FormatBool(schedule.UseIAM)
 	info["backup-mailto"] = service.BackupMailto(input.Datastore, input.ServiceName)
+	// a schedules file that does not decode still leaves the default schedule,
+	// which is what this line is built from
+	schedules, _ := ReadBackupSchedules(input.Datastore, input.ServiceName)
+	info["backup-schedules"] = FormatBackupSchedules(schedules)
 
 	return info
 }

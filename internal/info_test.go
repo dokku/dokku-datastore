@@ -519,3 +519,47 @@ func TestInfoReportsThePasswordsAsFingerprints(t *testing.T) {
 		t.Errorf("expected no root password fingerprint for a datastore without one, got %q", info["root-password-fingerprint"])
 	}
 }
+
+// The keys a single schedule was reported on stay the default schedule. Every
+// schedule is reported on its own key, and a passphrase that exists only on a
+// schedule does not count as the service being encrypted.
+func TestInfoReportsEveryBackupSchedule(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+	ctx := t.Context()
+
+	for _, input := range []ScheduleBackupInput{
+		{Schedule: "0 3 * * *", BucketName: "my-bucket"},
+		{ID: "frequent", Schedule: "*/15 * * * *", BucketName: "bucket-a"},
+		{ID: "monthly", Schedule: "@monthly", BucketName: "bucket-c", UseIAM: true},
+	} {
+		input.Datastore = datastore
+		input.ServiceName = "lollipop"
+		if err := ScheduleBackup(ctx, input); err != nil {
+			t.Fatalf("failed to schedule %q: %s", input.ID, err)
+		}
+	}
+	if err := SetProperty(datastore, "lollipop", service.BackupStorageClassProperty, "GLACIER"); err != nil {
+		t.Fatalf("failed to set the service storage class: %s", err)
+	}
+	if err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "monthly", service.BackupStorageClassProperty, "STANDARD_IA"); err != nil {
+		t.Fatalf("failed to set the schedule storage class: %s", err)
+	}
+	if err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "monthly", backupEncryptionPassphraseProperty, "s3cret"); err != nil {
+		t.Fatalf("failed to set the schedule passphrase: %s", err)
+	}
+
+	info := Info(ctx, InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	expected := map[string]string{
+		"backup-schedule":      "0 3 * * *",
+		"backup-bucket":        "my-bucket",
+		"backup-use-iam":       "false",
+		"backup-schedules":     "default|0 3 * * *|my-bucket|false;frequent|*/15 * * * *|bucket-a|false;monthly|@monthly|bucket-c|true",
+		"backup-storage-class": "GLACIER",
+		"backup-encrypted":     "false",
+	}
+	for key, value := range expected {
+		if info[key] != value {
+			t.Errorf("expected %s to be %q, got %q", key, value, info[key])
+		}
+	}
+}

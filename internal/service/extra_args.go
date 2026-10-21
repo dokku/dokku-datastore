@@ -101,6 +101,13 @@ func (s *Datastore) extraArgs(serviceName string, verbName string, given []strin
 	return args, nil
 }
 
+// SplitExtraArgs splits a value into arguments the way a shell would, the same
+// way the export-args property is read. A schedule that sets its own export
+// arguments hands the result to that one export.
+func SplitExtraArgs(value string) ([]string, error) {
+	return parseExtraArgs(value)
+}
+
 // parseExtraArgs splits a value into arguments the way a shell would.
 //
 // Nothing is expanded, and a variable is refused rather than dropped: it would

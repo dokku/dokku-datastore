@@ -24,6 +24,9 @@ type BackupScheduleCommand struct {
 	GlobalFlagCommand
 	// useIAM uses the iam profile attached to the server instead of stored credentials
 	useIAM bool
+
+	// scheduleID is the schedule to record. Empty records the default schedule.
+	scheduleID string
 }
 
 // Name returns the name of the command
@@ -94,6 +97,7 @@ func (c *BackupScheduleCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
 	f.BoolVarP(&c.useIAM, "use-iam", "u", false, "use the IAM profile associated with the current server")
+	f.StringVar(&c.scheduleID, "id", "", "the schedule to record, in place of the default schedule")
 	return f
 }
 
@@ -102,7 +106,9 @@ func (c *BackupScheduleCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--id": complete.PredictNothing,
+		},
 	)
 }
 
@@ -219,6 +225,7 @@ func (c *BackupScheduleCommand) Run(args []string) int {
 		Schedule:    schedule,
 		ServiceName: serviceName,
 		UseIAM:      c.useIAM,
+		ID:          c.scheduleID,
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1

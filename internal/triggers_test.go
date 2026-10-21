@@ -251,8 +251,8 @@ func TestCronEntriesForTrigger(t *testing.T) {
 			}
 
 			expected := []CronTask{
-				{Schedule: "0 3 * * *", Command: "dokku redis:backup apple my-bucket", LogFile: "/var/log/dokku/redis.apple.backup.log"},
-				{Schedule: "@daily", Command: "dokku redis:backup cherry other-bucket --use-iam", LogFile: "/var/log/dokku/redis.cherry.backup.log"},
+				{Schedule: "0 3 * * *", Command: "dokku redis:backup apple my-bucket --id default", LogFile: "/var/log/dokku/redis.apple.backup.log"},
+				{Schedule: "@daily", Command: "dokku redis:backup cherry other-bucket --id default --use-iam", LogFile: "/var/log/dokku/redis.cherry.backup.log"},
 			}
 			if !slices.Equal(tasks, expected) {
 				t.Errorf("expected %+v, got %+v", expected, tasks)
@@ -287,7 +287,7 @@ func TestCronEntriesForTriggerWithAMailto(t *testing.T) {
 	}
 
 	expected := []CronTask{
-		{Schedule: "0 3 * * *", Command: "dokku redis:backup apple my-bucket", LogFile: "/var/log/dokku/redis.apple.backup.log", Mailto: "ops@example.com"},
+		{Schedule: "0 3 * * *", Command: "dokku redis:backup apple my-bucket --id default", LogFile: "/var/log/dokku/redis.apple.backup.log", Mailto: "ops@example.com"},
 	}
 
 	tasks, warnings, err := CronEntriesForTrigger(t.Context(), cronEntriesInput(datastore, CronEntryFormatJSON))
@@ -326,5 +326,47 @@ func TestCronEntriesForTriggerWithNothingScheduled(t *testing.T) {
 
 	if len(entries) != 0 || len(skipped) != 0 {
 		t.Errorf("expected nothing, got %q and %v", entries, skipped)
+	}
+}
+
+// Each schedule is its own task. A schedule that set its own recipient uses
+// that, and every other schedule uses the service's.
+func TestCronEntriesForTriggerWithSeveralSchedules(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+	ctx := t.Context()
+
+	for _, input := range []ScheduleBackupInput{
+		{Schedule: "0 3 * * *", BucketName: "my-bucket"},
+		{ID: "frequent", Schedule: "*/15 * * * *", BucketName: "bucket-a"},
+		{ID: "monthly", Schedule: "@monthly", BucketName: "bucket-c", UseIAM: true},
+	} {
+		input.Datastore = datastore
+		input.ServiceName = "lollipop"
+		if err := ScheduleBackup(ctx, input); err != nil {
+			t.Fatalf("failed to schedule %q: %s", input.ID, err)
+		}
+	}
+	if err := SetProperty(datastore, "lollipop", service.BackupMailtoProperty, "ops@example.com"); err != nil {
+		t.Fatalf("failed to set the service mailto: %s", err)
+	}
+	if err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "frequent", service.BackupMailtoProperty, "dba@example.com"); err != nil {
+		t.Fatalf("failed to set the schedule mailto: %s", err)
+	}
+
+	tasks, warnings, err := CronEntriesForTrigger(ctx, cronEntriesInput(datastore, CronEntryFormatJSON))
+	if err != nil {
+		t.Fatalf("failed to list the cron entries: %s", err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings, got %v", warnings)
+	}
+
+	expected := []CronTask{
+		{Schedule: "0 3 * * *", Command: "dokku redis:backup lollipop my-bucket --id default", LogFile: "/var/log/dokku/redis.lollipop.backup.log", Mailto: "ops@example.com"},
+		{Schedule: "*/15 * * * *", Command: "dokku redis:backup lollipop bucket-a --id frequent", LogFile: "/var/log/dokku/redis.lollipop.backup.log", Mailto: "dba@example.com"},
+		{Schedule: "@monthly", Command: "dokku redis:backup lollipop bucket-c --id monthly --use-iam", LogFile: "/var/log/dokku/redis.lollipop.backup.log", Mailto: "ops@example.com"},
+	}
+	if !slices.Equal(tasks, expected) {
+		t.Errorf("expected %+v, got %+v", expected, tasks)
 	}
 }

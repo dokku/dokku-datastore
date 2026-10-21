@@ -25,6 +25,9 @@ type BackupCommand struct {
 	GlobalFlagCommand
 	// useIAM uses the iam profile attached to the server instead of stored credentials
 	useIAM bool
+
+	// scheduleID is the schedule whose settings this backup runs with
+	scheduleID string
 }
 
 // Name returns the name of the command
@@ -89,6 +92,7 @@ func (c *BackupCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
 	f.BoolVarP(&c.useIAM, "use-iam", "u", false, "use the IAM profile associated with the current server")
+	f.StringVar(&c.scheduleID, "id", "", "run with the settings of this schedule")
 	return f
 }
 
@@ -97,7 +101,9 @@ func (c *BackupCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--id": complete.PredictNothing,
+		},
 	)
 }
 
@@ -206,13 +212,18 @@ func (c *BackupCommand) Run(args []string) int {
 
 	// the start and end of each run are marked with the time, since a scheduled
 	// backup appends everything it prints to the service's backup log
-	logger.Header2(fmt.Sprintf("Backing up %s to %s at %s", serviceName, bucketName, internal.BackupTimestamp(time.Now()))) //nolint:errcheck
+	message := fmt.Sprintf("Backing up %s to %s at %s", serviceName, bucketName, internal.BackupTimestamp(time.Now()))
+	if c.scheduleID != "" {
+		message = fmt.Sprintf("Backing up %s (%s) to %s at %s", serviceName, c.scheduleID, bucketName, internal.BackupTimestamp(time.Now()))
+	}
+	logger.Header2(message) //nolint:errcheck
 
 	if err := internal.Backup(ctx, internal.BackupInput{
 		BucketName:  bucketName,
 		Datastore:   datastore,
 		ServiceName: serviceName,
 		UseIAM:      c.useIAM,
+		ScheduleID:  c.scheduleID,
 	}); err != nil {
 		logger.Info(fmt.Sprintf("Backup of %s failed at %s", serviceName, internal.BackupTimestamp(time.Now())))
 		logger.Error(internal.ErrorInput{Error: err})

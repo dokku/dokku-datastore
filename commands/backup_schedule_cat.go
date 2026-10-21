@@ -21,6 +21,9 @@ type BackupScheduleCatCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+
+	// scheduleID is the one schedule to print. Empty prints every schedule.
+	scheduleID string
 }
 
 // Name returns the name of the command
@@ -78,6 +81,7 @@ func (c *BackupScheduleCatCommand) ParsedArguments(args []string) (map[string]co
 func (c *BackupScheduleCatCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.StringVar(&c.scheduleID, "id", "", "the schedule to print")
 	return f
 }
 
@@ -86,7 +90,9 @@ func (c *BackupScheduleCatCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--id": complete.PredictNothing,
+		},
 	)
 }
 
@@ -179,13 +185,13 @@ func (c *BackupScheduleCatCommand) Run(args []string) int {
 		return 1
 	}
 
-	report, err := internal.BackupScheduleCatReport(datastore, serviceName)
+	report, text, err := internal.BackupScheduleCatOutput(datastore, serviceName, c.scheduleID)
 	if err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}
 
-	if err := logger.Document(report, report.CrontabLine+"\n"); err != nil {
+	if err := logger.Document(report, text); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
 	}

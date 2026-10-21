@@ -296,6 +296,17 @@ const (
 	// BackupUseIAMProperty is set when a scheduled backup runs against an
 	// instance role rather than against stored credentials
 	BackupUseIAMProperty = "backup-use-iam"
+
+	// BackupSchedulesProperty is the file every schedule besides an
+	// un-overridden default is recorded in, together with the settings each
+	// one sets for itself. It is a JSON array, and it is absent when the only
+	// schedule is the default one with nothing of its own.
+	BackupSchedulesProperty = "backup-schedules"
+
+	// BackupScheduleIDDefault is the schedule backup-schedule records when it
+	// is given no --id. It is the schedule the three properties above name,
+	// and --id default names that same schedule rather than a second one.
+	BackupScheduleIDDefault = "default"
 )
 
 // backupScheduleProperties are every property a scheduled backup writes
@@ -451,22 +462,136 @@ func ValidateEndpointURL(value string) error {
 	return nil
 }
 
-// BackupSchedule is the scheduled backup a service is recorded with
+// backupScheduleIDPattern is what a schedule id may be made of, the same
+// characters a service name may be made of. The id is written into the command
+// a scheduled backup runs, so anything a shell would read specially is refused.
+var backupScheduleIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// BackupSchedule is one scheduled backup a service is recorded with.
+//
+// The cron expression, the bucket and whether it uses an instance role are the
+// schedule itself. Every other field is a setting the schedule set for itself:
+// a field left empty inherits the service's value, and the resolved value is
+// filled in when a backup runs or the crontab is written. It is never written
+// back, or a service value would become a setting of the schedule.
 type BackupSchedule struct {
+	// ID is the name the schedule is addressed by. The schedule made without
+	// --id has BackupScheduleIDDefault.
+	ID string `json:"id"`
+
 	// Schedule is the cron schedule the backup runs on
-	Schedule string
+	Schedule string `json:"schedule"`
 
 	// BucketName is the bucket the dump is shipped to
-	BucketName string
+	BucketName string `json:"bucket-name"`
 
 	// UseIAM reports whether the backup runs against an instance role rather
-	// than against stored credentials
-	UseIAM bool
+	// than against stored credentials. It is written even when false, so a
+	// schedule that does not use an instance role is distinct from one whose
+	// file was cut short.
+	UseIAM bool `json:"use-iam"`
 
-	// Mailto is who cron mails the output of the backup to, instead of the
-	// global MAILTO. It is the service's backup-mailto property, which is set
-	// with the set command rather than recorded with the schedule.
-	Mailto string
+	// StorageClass is the storage class this schedule uploads with, empty when
+	// it inherits the service's backup-storage-class.
+	StorageClass string `json:"storage-class,omitempty"`
+
+	// ObjectName is the key this schedule uploads under, empty when it inherits
+	// the service's backup-object-name.
+	ObjectName string `json:"object-name,omitempty"`
+
+	// Timestamp is "true" or "false" when this schedule decides for itself
+	// whether the key ends in the time the backup started, and empty when it
+	// inherits the service's backup-timestamp.
+	Timestamp string `json:"timestamp,omitempty"`
+
+	// Mailto is who cron mails the output of this schedule to, empty when it
+	// inherits the service's backup-mailto. The resolved recipient is what the
+	// crontab is written with, and it is not stored back onto this field.
+	Mailto string `json:"mailto,omitempty"`
+
+	// Keyserver is where this schedule fetches a public key from, empty when
+	// it inherits the service's backup-keyserver.
+	Keyserver string `json:"keyserver,omitempty"`
+
+	// ExportArgs are the extra arguments this schedule's export is run with,
+	// empty when it inherits the service's export-args.
+	ExportArgs string `json:"export-args,omitempty"`
+
+	// EncryptionPassphrase is the passphrase this schedule encrypts with. Set
+	// together with PublicKeyID it replaces the service's encryption, and the
+	// public key still takes precedence. Empty alongside PublicKeyID means the
+	// schedule inherits the service's passphrase and public key.
+	EncryptionPassphrase string `json:"encryption-passphrase,omitempty"`
+
+	// PublicKeyID is the gpg public key this schedule encrypts with.
+	PublicKeyID string `json:"public-key-id,omitempty"`
+}
+
+// ValidateBackupScheduleID reports whether an id can name a schedule.
+func ValidateBackupScheduleID(id string) error {
+	if !backupScheduleIDPattern.MatchString(id) {
+		return fmt.Errorf("invalid backup schedule id %q: valid characters are [A-Za-z0-9_-]+", id)
+	}
+
+	return nil
+}
+
+// hasOverrides reports whether the schedule set any setting for itself.
+func (b BackupSchedule) hasOverrides() bool {
+	return b.StorageClass != "" || b.ObjectName != "" || b.Timestamp != "" || b.Mailto != "" || b.Keyserver != "" || b.ExportArgs != "" || b.hasOwnEncryption()
+}
+
+// hasOwnEncryption reports whether the schedule replaces the service's
+// passphrase and public key with its own pair. Either field being set does,
+// and a public key still takes precedence over a passphrase inside that pair.
+func (b BackupSchedule) hasOwnEncryption() bool {
+	return b.EncryptionPassphrase != "" || b.PublicKeyID != ""
+}
+
+// overrideNames are the properties the schedule set for itself, in the order
+// the set command documents them.
+func (b BackupSchedule) overrideNames() []string {
+	names := []string{}
+	if b.StorageClass != "" {
+		names = append(names, service.BackupStorageClassProperty)
+	}
+	if b.ObjectName != "" {
+		names = append(names, service.BackupObjectNameProperty)
+	}
+	if b.Timestamp != "" {
+		names = append(names, service.BackupTimestampProperty)
+	}
+	if b.Mailto != "" {
+		names = append(names, service.BackupMailtoProperty)
+	}
+	if b.Keyserver != "" {
+		names = append(names, service.KeyserverProperty)
+	}
+	if b.ExportArgs != "" {
+		names = append(names, service.ExportArgsProperty)
+	}
+	if b.EncryptionPassphrase != "" {
+		names = append(names, backupEncryptionPassphraseProperty)
+	}
+	if b.PublicKeyID != "" {
+		names = append(names, "backup-public-key-id")
+	}
+
+	return names
+}
+
+// withInheritedMailto returns the schedule with the recipient cron mails filled
+// in from the service when the schedule did not set its own. The result is what
+// the crontab is built from, and it is not what gets written back.
+func (b BackupSchedule) withInheritedMailto(s *service.Datastore, serviceName string) BackupSchedule {
+	if b.Mailto == "" {
+		b.Mailto = service.BackupMailto(s, serviceName)
+	}
+	if b.ID == "" {
+		b.ID = BackupScheduleIDDefault
+	}
+
+	return b
 }
 
 // Validate reports whether a schedule can be written into the dokku crontab
@@ -482,15 +607,16 @@ func (b BackupSchedule) Validate() error {
 	return service.ValidateBackupMailto(b.Mailto)
 }
 
-// ReadBackupSchedule reads the scheduled backup a service is recorded with, and
-// reports whether it has one
-func ReadBackupSchedule(s *service.Datastore, serviceName string) (BackupSchedule, bool) {
+// readDefaultBackupSchedule reads the schedule made without --id from the three
+// properties it is recorded in, and reports whether there is one. Its own
+// settings, when it has any, are on the default object in the schedules file.
+func readDefaultBackupSchedule(s *service.Datastore, serviceName string) (BackupSchedule, bool) {
 	commandPrefix := s.Properties().CommandPrefix
 	schedule := BackupSchedule{
+		ID:         BackupScheduleIDDefault,
 		Schedule:   common.PropertyGet(commandPrefix, serviceName, BackupScheduleProperty),
 		BucketName: common.PropertyGet(commandPrefix, serviceName, BackupBucketProperty),
 		UseIAM:     common.PropertyGet(commandPrefix, serviceName, BackupUseIAMProperty) == "true",
-		Mailto:     service.BackupMailto(s, serviceName),
 	}
 
 	if schedule.Schedule == "" {
@@ -498,6 +624,248 @@ func ReadBackupSchedule(s *service.Datastore, serviceName string) (BackupSchedul
 	}
 
 	return schedule, true
+}
+
+// ReadBackupSchedule reads the schedule made without --id, including any
+// settings it set for itself, and reports whether the service has one.
+func ReadBackupSchedule(s *service.Datastore, serviceName string) (BackupSchedule, bool) {
+	schedule, ok := readDefaultBackupSchedule(s, serviceName)
+	if !ok {
+		return BackupSchedule{}, false
+	}
+
+	stored, err := readStoredBackupSchedules(s, serviceName)
+	if err != nil {
+		return schedule, true
+	}
+
+	for _, item := range stored {
+		if item.ID != BackupScheduleIDDefault {
+			continue
+		}
+
+		// the three properties win when the file disagrees with them, so a
+		// schedule changed with set is what a backup runs
+		schedule.StorageClass = item.StorageClass
+		schedule.ObjectName = item.ObjectName
+		schedule.Timestamp = item.Timestamp
+		schedule.Mailto = item.Mailto
+		schedule.Keyserver = item.Keyserver
+		schedule.ExportArgs = item.ExportArgs
+		schedule.EncryptionPassphrase = item.EncryptionPassphrase
+		schedule.PublicKeyID = item.PublicKeyID
+		break
+	}
+
+	return schedule, true
+}
+
+// ReadBackupSchedules reads every schedule a service has. The default schedule
+// is first, when it has one, and the others follow by id. A schedules file
+// that does not decode is reported, and a default schedule recorded in the
+// three properties is still returned.
+func ReadBackupSchedules(s *service.Datastore, serviceName string) ([]BackupSchedule, error) {
+	stored, err := readStoredBackupSchedules(s, serviceName)
+
+	var schedules []BackupSchedule
+	if schedule, ok := ReadBackupSchedule(s, serviceName); ok {
+		schedules = append(schedules, schedule)
+	}
+
+	if err != nil {
+		return schedules, err
+	}
+
+	named := make([]BackupSchedule, 0, len(stored))
+	for _, schedule := range stored {
+		if schedule.ID == "" || schedule.ID == BackupScheduleIDDefault {
+			continue
+		}
+
+		named = append(named, schedule)
+	}
+	sort.Slice(named, func(i, j int) bool { return named[i].ID < named[j].ID })
+
+	return append(schedules, named...), nil
+}
+
+// LookupBackupSchedule reads the schedule an id names. The default id reads
+// the three properties, so it finds that schedule even when the schedules file
+// has no object for it.
+func LookupBackupSchedule(s *service.Datastore, serviceName string, id string) (BackupSchedule, error) {
+	if id == "" {
+		id = BackupScheduleIDDefault
+	}
+	if err := ValidateBackupScheduleID(id); err != nil {
+		return BackupSchedule{}, err
+	}
+
+	schedules, err := ReadBackupSchedules(s, serviceName)
+	for _, schedule := range schedules {
+		if schedule.ID == id {
+			return schedule, nil
+		}
+	}
+	if err != nil {
+		return BackupSchedule{}, err
+	}
+
+	return BackupSchedule{}, fmt.Errorf("There is no scheduled backup %s for %s.", id, serviceName) //nolint:staticcheck // matches the bash datastore plugins
+}
+
+// FormatBackupSchedules renders every schedule on one line, the way info
+// reports them. Records are separated by semicolons and the id, cron
+// expression, bucket and use-iam of one schedule by pipes. No schedule is an
+// empty line.
+func FormatBackupSchedules(schedules []BackupSchedule) string {
+	if len(schedules) == 0 {
+		return ""
+	}
+
+	parts := make([]string, len(schedules))
+	for i, schedule := range schedules {
+		parts[i] = strings.Join([]string{schedule.ID, schedule.Schedule, schedule.BucketName, strconv.FormatBool(schedule.UseIAM)}, "|")
+	}
+
+	return strings.Join(parts, ";")
+}
+
+// readStoredBackupSchedules reads the schedules file. A missing file is no
+// extra schedule. A file that does not decode is an error, so a writer does
+// not replace schedules it could not read.
+func readStoredBackupSchedules(s *service.Datastore, serviceName string) ([]BackupSchedule, error) {
+	raw := strings.TrimSpace(common.PropertyGet(s.Properties().CommandPrefix, serviceName, BackupSchedulesProperty))
+	if raw == "" {
+		return nil, nil
+	}
+
+	var schedules []BackupSchedule
+	if err := json.Unmarshal([]byte(raw), &schedules); err != nil {
+		return nil, fmt.Errorf("unable to read the scheduled backups for %s: %w", serviceName, err)
+	}
+
+	return schedules, nil
+}
+
+// writeStoredBackupSchedules records the schedules file. The default schedule
+// is kept only when it set something for itself, and it is written first. An
+// empty list deletes the file rather than leaving an empty array.
+func writeStoredBackupSchedules(s *service.Datastore, serviceName string, schedules []BackupSchedule) error {
+	commandPrefix := s.Properties().CommandPrefix
+	kept := make([]BackupSchedule, 0, len(schedules))
+	var defaultSchedule *BackupSchedule
+	named := make([]BackupSchedule, 0, len(schedules))
+	for _, schedule := range schedules {
+		switch schedule.ID {
+		case BackupScheduleIDDefault:
+			if schedule.hasOverrides() {
+				copy := schedule
+				defaultSchedule = &copy
+			}
+		case "":
+		default:
+			named = append(named, schedule)
+		}
+	}
+	sort.Slice(named, func(i, j int) bool { return named[i].ID < named[j].ID })
+	if defaultSchedule != nil {
+		kept = append(kept, *defaultSchedule)
+	}
+	kept = append(kept, named...)
+
+	if len(kept) == 0 {
+		if err := common.PropertyDelete(commandPrefix, serviceName, BackupSchedulesProperty); err != nil {
+			return fmt.Errorf("unable to record the scheduled backups: %w", err)
+		}
+
+		return nil
+	}
+
+	encoded, err := json.Marshal(kept)
+	if err != nil {
+		return fmt.Errorf("unable to record the scheduled backups: %w", err)
+	}
+
+	if err := common.PropertyWrite(commandPrefix, serviceName, BackupSchedulesProperty, string(encoded)); err != nil {
+		return fmt.Errorf("unable to record the scheduled backups: %w", err)
+	}
+
+	return nil
+}
+
+// syncDefaultScheduleIdentity copies the default schedule's cron expression,
+// bucket and instance role onto its object in the schedules file, when it has
+// one, and leaves the settings that object set for itself in place. A default
+// schedule with nothing of its own is not given an object.
+func syncDefaultScheduleIdentity(s *service.Datastore, serviceName string, identity BackupSchedule) error {
+	stored, err := readStoredBackupSchedules(s, serviceName)
+	if err != nil {
+		return err
+	}
+
+	for i, item := range stored {
+		if item.ID != BackupScheduleIDDefault {
+			continue
+		}
+
+		item.Schedule = identity.Schedule
+		item.BucketName = identity.BucketName
+		item.UseIAM = identity.UseIAM
+		stored[i] = item
+		return writeStoredBackupSchedules(s, serviceName, stored)
+	}
+
+	return nil
+}
+
+// upsertNamedBackupSchedule records a schedule other than the default one,
+// replacing that id's cron expression, bucket and instance role and keeping
+// the settings it already set for itself.
+func upsertNamedBackupSchedule(s *service.Datastore, serviceName string, schedule BackupSchedule) error {
+	stored, err := readStoredBackupSchedules(s, serviceName)
+	if err != nil {
+		return err
+	}
+
+	for i, item := range stored {
+		if item.ID != schedule.ID {
+			continue
+		}
+
+		item.Schedule = schedule.Schedule
+		item.BucketName = schedule.BucketName
+		item.UseIAM = schedule.UseIAM
+		stored[i] = item
+		return writeStoredBackupSchedules(s, serviceName, stored)
+	}
+
+	return writeStoredBackupSchedules(s, serviceName, append(stored, schedule))
+}
+
+// saveBackupSchedule writes one schedule back, keeping every other schedule.
+// The default schedule's object is dropped when it no longer sets anything for
+// itself. Its cron expression, bucket and instance role stay in their properties.
+func saveBackupSchedule(s *service.Datastore, serviceName string, schedule BackupSchedule) error {
+	stored, err := readStoredBackupSchedules(s, serviceName)
+	if err != nil {
+		return err
+	}
+
+	replaced := false
+	for i, item := range stored {
+		if item.ID != schedule.ID {
+			continue
+		}
+
+		stored[i] = schedule
+		replaced = true
+		break
+	}
+	if !replaced {
+		stored = append(stored, schedule)
+	}
+
+	return writeStoredBackupSchedules(s, serviceName, stored)
 }
 
 // defaultLogsDir is where dokku keeps its logs when DOKKU_LOGS_DIR is not set,
@@ -533,7 +901,12 @@ func BackupTimestamp(t time.Time) string {
 // backupCommand is the command a scheduled backup runs. It is run from the dokku
 // crontab, whose PATH includes wherever dokku is installed.
 func backupCommand(commandPrefix string, serviceName string, schedule BackupSchedule) string {
-	command := fmt.Sprintf("dokku %s:backup %s %s", commandPrefix, serviceName, schedule.BucketName)
+	id := schedule.ID
+	if id == "" {
+		id = BackupScheduleIDDefault
+	}
+
+	command := fmt.Sprintf("dokku %s:backup %s %s --id %s", commandPrefix, serviceName, schedule.BucketName, id)
 	if schedule.UseIAM {
 		command = fmt.Sprintf("%s --use-iam", command)
 	}
@@ -600,42 +973,153 @@ func CrontabLine(commandPrefix string, serviceName string, schedule BackupSchedu
 	return fmt.Sprintf("%s %s &>> %s", task.Schedule, task.Command, task.LogFile)
 }
 
-// BackupScheduleReport is a service's scheduled backup as backup-schedule-cat
-// reports it in json: what it was scheduled with, and the crontab line that is
-// all the text form prints.
+// BackupScheduleReport is one scheduled backup as backup-schedule-cat reports
+// it in json. The settings are the ones a backup of that schedule runs with,
+// after inheriting from the service, and overrides names the properties the
+// schedule set itself. The passphrase is reported as a fingerprint.
 type BackupScheduleReport struct {
-	Schedule    string `json:"schedule"`
-	BucketName  string `json:"bucket-name"`
-	UseIAM      bool   `json:"use-iam"`
-	Mailto      string `json:"mailto"`
-	CrontabLine string `json:"crontab-line"`
+	ID                              string   `json:"id"`
+	Schedule                        string   `json:"schedule"`
+	BucketName                      string   `json:"bucket-name"`
+	UseIAM                          bool     `json:"use-iam"`
+	StorageClass                    string   `json:"storage-class"`
+	ObjectName                      string   `json:"object-name"`
+	Timestamp                       string   `json:"timestamp"`
+	Mailto                          string   `json:"mailto"`
+	Keyserver                       string   `json:"keyserver"`
+	PublicKeyID                     string   `json:"public-key-id"`
+	EncryptionPassphraseFingerprint string   `json:"encryption-passphrase-fingerprint"`
+	ExportArgs                      string   `json:"export-args"`
+	Overrides                       []string `json:"overrides"`
+	CrontabLine                     string   `json:"crontab-line"`
 }
 
-// BackupScheduleCatReport reports a service's scheduled backup
-func BackupScheduleCatReport(s *service.Datastore, serviceName string) (BackupScheduleReport, error) {
-	schedule, ok := ReadBackupSchedule(s, serviceName)
-	if !ok {
-		return BackupScheduleReport{}, fmt.Errorf("There is no scheduled backup for %s.", serviceName) //nolint:staticcheck // matches the bash datastore plugins
+// BackupSchedulesReport is every scheduled backup, as backup-schedule-cat
+// reports them when a service has more than one and no schedule was named.
+type BackupSchedulesReport struct {
+	Schedules []BackupScheduleReport `json:"schedules"`
+}
+
+// reportBackupSchedule builds the report of one schedule, with the settings it
+// inherits from the service filled in.
+func reportBackupSchedule(s *service.Datastore, serviceName string, schedule BackupSchedule) BackupScheduleReport {
+	resolved := schedule.withInheritedMailto(s, serviceName)
+
+	storageClass := schedule.StorageClass
+	if storageClass == "" {
+		storageClass = service.BackupStorageClass(s, serviceName)
 	}
+	objectName := schedule.ObjectName
+	if objectName == "" {
+		objectName = service.BackupObjectName(s, serviceName)
+	}
+	timestamp := schedule.Timestamp
+	if timestamp == "" {
+		timestamp = strconv.FormatBool(service.BackupTimestamp(s, serviceName))
+	}
+	keyserver := schedule.Keyserver
+	if keyserver == "" {
+		keyserver = service.Keyserver(s, serviceName)
+	}
+	exportArgs := schedule.ExportArgs
+	if exportArgs == "" {
+		exportArgs = service.ServiceExtraArgs(s, serviceName, service.ExportArgsProperty)
+	}
+
+	publicKeyID, passphraseFingerprint := resolvedScheduleEncryption(s, serviceName, schedule)
 
 	return BackupScheduleReport{
-		Schedule:    schedule.Schedule,
-		BucketName:  schedule.BucketName,
-		UseIAM:      schedule.UseIAM,
-		Mailto:      schedule.Mailto,
-		CrontabLine: CrontabLine(s.Properties().CommandPrefix, serviceName, schedule),
-	}, nil
+		ID:                              schedule.ID,
+		Schedule:                        schedule.Schedule,
+		BucketName:                      schedule.BucketName,
+		UseIAM:                          schedule.UseIAM,
+		StorageClass:                    storageClass,
+		ObjectName:                      objectName,
+		Timestamp:                       timestamp,
+		Mailto:                          resolved.Mailto,
+		Keyserver:                       keyserver,
+		PublicKeyID:                     publicKeyID,
+		EncryptionPassphraseFingerprint: passphraseFingerprint,
+		ExportArgs:                      exportArgs,
+		Overrides:                       schedule.overrideNames(),
+		CrontabLine:                     CrontabLine(s.Properties().CommandPrefix, serviceName, resolved),
+	}
 }
 
-// BackupScheduleCat returns the crontab line a service's scheduled backup runs
-// from
-func BackupScheduleCat(s *service.Datastore, serviceName string) (string, error) {
-	report, err := BackupScheduleCatReport(s, serviceName)
-	if err != nil {
-		return "", err
+// resolvedScheduleEncryption is the public key and the passphrase fingerprint
+// a schedule runs with. A schedule that set either replaces the service's
+// pair, and otherwise the service's files are reported.
+func resolvedScheduleEncryption(s *service.Datastore, serviceName string, schedule BackupSchedule) (string, string) {
+	if schedule.hasOwnEncryption() {
+		passphraseFingerprint := ""
+		if schedule.EncryptionPassphrase != "" {
+			passphraseFingerprint = fingerprint(schedule.EncryptionPassphrase)
+		}
+
+		return schedule.PublicKeyID, passphraseFingerprint
 	}
 
-	return report.CrontabLine + "\n", nil
+	folder := service.Folders(s, serviceName).BackupEncryption
+	return common.ReadFirstLine(filepath.Join(folder, publicKeyIDFile)), storedFingerprint(filepath.Join(folder, encryptionKeyFile))
+}
+
+// BackupScheduleCatOutput reports a service's scheduled backups. One schedule,
+// or an id, is that schedule and the text is its crontab line. Several, with
+// no id, are every schedule and the text is the id and the crontab line of
+// each, separated by a tab.
+func BackupScheduleCatOutput(s *service.Datastore, serviceName string, id string) (any, string, error) {
+	if id != "" {
+		schedule, err := LookupBackupSchedule(s, serviceName, id)
+		if err != nil {
+			return nil, "", err
+		}
+
+		report := reportBackupSchedule(s, serviceName, schedule)
+		return report, report.CrontabLine + "\n", nil
+	}
+
+	schedules, err := ReadBackupSchedules(s, serviceName)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(schedules) == 0 {
+		return nil, "", fmt.Errorf("There is no scheduled backup for %s.", serviceName) //nolint:staticcheck // matches the bash datastore plugins
+	}
+	if len(schedules) == 1 {
+		report := reportBackupSchedule(s, serviceName, schedules[0])
+		return report, report.CrontabLine + "\n", nil
+	}
+
+	reports := make([]BackupScheduleReport, 0, len(schedules))
+	lines := make([]string, 0, len(schedules))
+	for _, schedule := range schedules {
+		report := reportBackupSchedule(s, serviceName, schedule)
+		reports = append(reports, report)
+		lines = append(lines, schedule.ID+"\t"+report.CrontabLine)
+	}
+
+	return BackupSchedulesReport{Schedules: reports}, strings.Join(lines, "\n") + "\n", nil
+}
+
+// BackupScheduleCatReport reports a service's only scheduled backup.
+func BackupScheduleCatReport(s *service.Datastore, serviceName string) (BackupScheduleReport, error) {
+	value, _, err := BackupScheduleCatOutput(s, serviceName, "")
+	if err != nil {
+		return BackupScheduleReport{}, err
+	}
+
+	report, ok := value.(BackupScheduleReport)
+	if !ok {
+		return BackupScheduleReport{}, fmt.Errorf("%s has more than one scheduled backup, pass --id", serviceName)
+	}
+
+	return report, nil
+}
+
+// BackupScheduleCat returns the text backup-schedule-cat prints for a service.
+func BackupScheduleCat(s *service.Datastore, serviceName string) (string, error) {
+	_, text, err := BackupScheduleCatOutput(s, serviceName, "")
+	return text, err
 }
 
 // ParseCronEntry reads back the schedule a legacy cron file was written with,
@@ -752,12 +1236,26 @@ type ScheduleBackupInput struct {
 	Schedule    string
 	ServiceName string
 	UseIAM      bool
+
+	// ID is the schedule to record. Empty records the default schedule, which
+	// replaces that schedule's cron expression, bucket and instance role and
+	// leaves every other schedule, and that schedule's own settings, in place.
+	ID string
 }
 
 // ScheduleBackup records a scheduled backup for a service and has dokku write it
-// into its crontab
+// into its crontab. A schedule named with an id replaces only that schedule.
 func ScheduleBackup(ctx context.Context, input ScheduleBackupInput) error {
+	id := input.ID
+	if id == "" {
+		id = BackupScheduleIDDefault
+	}
+	if err := ValidateBackupScheduleID(id); err != nil {
+		return err
+	}
+
 	schedule := BackupSchedule{
+		ID:         id,
 		Schedule:   input.Schedule,
 		BucketName: input.BucketName,
 		UseIAM:     input.UseIAM,
@@ -774,7 +1272,23 @@ func ScheduleBackup(ctx context.Context, input ScheduleBackupInput) error {
 		return err
 	}
 
-	if err := writeBackupSchedule(input.Datastore, input.ServiceName, schedule); err != nil {
+	if id == BackupScheduleIDDefault {
+		if err := writeBackupSchedule(input.Datastore, input.ServiceName, schedule); err != nil {
+			return err
+		}
+
+		// the three properties are what a backup reads. Keeping the file in
+		// step with them fails the command when the file cannot be read, after
+		// the properties and the crontab already name the new schedule.
+		syncErr := syncDefaultScheduleIdentity(input.Datastore, input.ServiceName, schedule)
+		if err := regenerateCrontab(ctx); err != nil {
+			return err
+		}
+
+		return syncErr
+	}
+
+	if err := upsertNamedBackupSchedule(input.Datastore, input.ServiceName, schedule); err != nil {
 		return err
 	}
 
@@ -788,21 +1302,109 @@ type UnscheduleBackupInput struct {
 
 	// ServiceName is the service to stop backing up
 	ServiceName string
+
+	// ID is the one schedule to remove. Empty removes the only schedule, and
+	// refuses when the service has more than one.
+	ID string
+
+	// All removes every schedule. Destroying a service sets it, so a service
+	// with several schedules is removed whole.
+	All bool
 }
 
-// UnscheduleBackup removes a service's scheduled backup and has dokku write its
-// crontab without it. A service with no scheduled backup is left alone, so that
+// UnscheduleBackup removes a scheduled backup and has dokku write its crontab
+// without it. A service with no scheduled backup is left alone, so that
 // destroying one does not rewrite the crontab for nothing.
 func UnscheduleBackup(ctx context.Context, input UnscheduleBackupInput) error {
-	if _, ok := ReadBackupSchedule(input.Datastore, input.ServiceName); !ok {
+	if input.ID != "" && input.All {
+		return errors.New("--id and --all cannot be combined")
+	}
+
+	if input.All {
+		return removeAllBackupSchedules(ctx, input.Datastore, input.ServiceName)
+	}
+
+	id := input.ID
+	if id == "" {
+		schedules, err := ReadBackupSchedules(input.Datastore, input.ServiceName)
+		if err != nil {
+			return err
+		}
+
+		switch len(schedules) {
+		case 0:
+			return nil
+		case 1:
+			id = schedules[0].ID
+		default:
+			return fmt.Errorf("%s has more than one scheduled backup, pass --id or --all", input.ServiceName)
+		}
+	} else if err := ValidateBackupScheduleID(id); err != nil {
+		return err
+	}
+
+	if _, err := LookupBackupSchedule(input.Datastore, input.ServiceName, id); err != nil {
+		return err
+	}
+
+	if err := removeBackupSchedule(input.Datastore, input.ServiceName, id); err != nil {
+		return err
+	}
+
+	return regenerateCrontab(ctx)
+}
+
+// removeBackupSchedule removes one schedule. The schedules file is rewritten
+// before the default schedule's properties are deleted, so a file that cannot
+// be read does not drop the default schedule and leave its settings behind.
+func removeBackupSchedule(s *service.Datastore, serviceName string, id string) error {
+	stored, err := readStoredBackupSchedules(s, serviceName)
+	if err != nil {
+		return err
+	}
+
+	kept := make([]BackupSchedule, 0, len(stored))
+	for _, schedule := range stored {
+		if schedule.ID == id {
+			continue
+		}
+
+		kept = append(kept, schedule)
+	}
+	if err := writeStoredBackupSchedules(s, serviceName, kept); err != nil {
+		return err
+	}
+
+	if id != BackupScheduleIDDefault {
 		return nil
 	}
 
-	commandPrefix := input.Datastore.Properties().CommandPrefix
+	commandPrefix := s.Properties().CommandPrefix
 	for _, property := range backupScheduleProperties {
-		if err := common.PropertyDelete(commandPrefix, input.ServiceName, property); err != nil {
+		if err := common.PropertyDelete(commandPrefix, serviceName, property); err != nil {
 			return fmt.Errorf("unable to remove the %s property: %w", property, err)
 		}
+	}
+
+	return nil
+}
+
+// removeAllBackupSchedules removes every schedule, including a schedules file
+// that does not decode. Nothing scheduled leaves the crontab as it is.
+func removeAllBackupSchedules(ctx context.Context, s *service.Datastore, serviceName string) error {
+	commandPrefix := s.Properties().CommandPrefix
+	scheduled := common.PropertyExists(commandPrefix, serviceName, BackupScheduleProperty) || common.PropertyExists(commandPrefix, serviceName, BackupSchedulesProperty)
+
+	properties := append([]string{}, backupScheduleProperties...)
+	properties = append(properties, BackupSchedulesProperty)
+	for _, property := range properties {
+		if err := common.PropertyDelete(commandPrefix, serviceName, property); err != nil {
+			return fmt.Errorf("unable to remove the %s property: %w", property, err)
+		}
+	}
+
+	if !scheduled {
+		return nil
 	}
 
 	return regenerateCrontab(ctx)
@@ -915,6 +1517,11 @@ type BackupInput struct {
 	Datastore   *service.Datastore
 	ServiceName string
 	UseIAM      bool
+
+	// ScheduleID is the schedule whose settings this backup runs with. Empty
+	// uses the service's settings, and the bucket and instance role still come
+	// from this input, which is what the crontab line passes.
+	ScheduleID string
 }
 
 // the status a backup ended with, as the post-backup trigger is handed it
@@ -954,22 +1561,54 @@ func CallPostBackup(ctx context.Context, input PostBackupInput) error {
 	return nil
 }
 
+// backupScheduleForRun reads the schedule a backup was asked to run with.
+// A backup that names no schedule uses the service's settings, which an empty
+// schedule stands in for.
+func backupScheduleForRun(input BackupInput) (BackupSchedule, error) {
+	if input.ScheduleID == "" {
+		return BackupSchedule{}, nil
+	}
+
+	return LookupBackupSchedule(input.Datastore, input.ServiceName, input.ScheduleID)
+}
+
 // Backup exports a service and ships the result to an s3 bucket
 func Backup(ctx context.Context, input BackupInput) error {
 	serviceFolders := service.Folders(input.Datastore, input.ServiceName)
 	commandPrefix := input.Datastore.Properties().CommandPrefix
 
-	backupName := service.BackupObjectName(input.Datastore, input.ServiceName)
+	schedule, err := backupScheduleForRun(input)
+	if err != nil {
+		return err
+	}
+
+	backupName := schedule.ObjectName
+	if backupName == "" {
+		backupName = service.BackupObjectName(input.Datastore, input.ServiceName)
+	}
 	if backupName == "" {
 		backupName = fmt.Sprintf("%s-%s", commandPrefix, input.ServiceName)
+	}
+
+	omitTimestamp := !service.BackupTimestamp(input.Datastore, input.ServiceName)
+	if schedule.Timestamp != "" {
+		omitTimestamp = schedule.Timestamp == "false"
+	}
+	keyserver := schedule.Keyserver
+	if keyserver == "" {
+		keyserver = service.Keyserver(input.Datastore, input.ServiceName)
+	}
+	storageClass := schedule.StorageClass
+	if storageClass == "" {
+		storageClass = service.BackupStorageClass(input.Datastore, input.ServiceName)
 	}
 
 	arguments := BackupArgsInput{
 		BucketName:    input.BucketName,
 		BackupName:    backupName,
-		OmitTimestamp: !service.BackupTimestamp(input.Datastore, input.ServiceName),
-		Keyserver:     service.Keyserver(input.Datastore, input.ServiceName),
-		StorageClass:  service.BackupStorageClass(input.Datastore, input.ServiceName),
+		OmitTimestamp: omitTimestamp,
+		Keyserver:     keyserver,
+		StorageClass:  storageClass,
 		Image:         hostenv.S3BackupImage,
 		Settings:      map[string]string{},
 	}
@@ -1021,7 +1660,17 @@ func Backup(ctx context.Context, input BackupInput) error {
 	exportFile := handle.Name()
 	defer os.Remove(exportFile)
 
-	if err := input.Datastore.ExportService(ctx, backupExport(input.Datastore, input.ServiceName, handle)); err != nil {
+	export := backupExport(input.Datastore, input.ServiceName, handle)
+	if schedule.ExportArgs != "" {
+		extraArgs, err := service.SplitExtraArgs(schedule.ExportArgs)
+		if err != nil {
+			handle.Close()
+			return fmt.Errorf("unable to read the export arguments of %s: %w", schedule.ID, err)
+		}
+
+		export.ExtraArgs = extraArgs
+	}
+	if err := input.Datastore.ExportService(ctx, export); err != nil {
 		handle.Close()
 		return err
 	}
@@ -1036,12 +1685,25 @@ func Backup(ctx context.Context, input BackupInput) error {
 	}
 	arguments.ExpectedSize = backupUploadSize(stat.Size())
 
-	for folder, names := range map[string][]string{
-		serviceFolders.Backup:           {defaultRegionFile, signatureVersionFile, endpointURLFile},
-		serviceFolders.BackupEncryption: {encryptionKeyFile, publicKeyIDFile},
-	} {
-		for _, name := range names {
-			filename := filepath.Join(folder, name)
+	for _, name := range []string{defaultRegionFile, signatureVersionFile, endpointURLFile} {
+		filename := filepath.Join(serviceFolders.Backup, name)
+		if common.FileExists(filename) {
+			arguments.Settings[name] = common.ReadFirstLine(filename)
+		}
+	}
+
+	// a schedule that set a passphrase or a public key replaces the service's
+	// pair for this run. The public key still takes precedence inside the pair.
+	if schedule.hasOwnEncryption() {
+		if schedule.EncryptionPassphrase != "" {
+			arguments.Settings[encryptionKeyFile] = schedule.EncryptionPassphrase
+		}
+		if schedule.PublicKeyID != "" {
+			arguments.Settings[publicKeyIDFile] = schedule.PublicKeyID
+		}
+	} else {
+		for _, name := range []string{encryptionKeyFile, publicKeyIDFile} {
+			filename := filepath.Join(serviceFolders.BackupEncryption, name)
 			if common.FileExists(filename) {
 				arguments.Settings[name] = common.ReadFirstLine(filename)
 			}

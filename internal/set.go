@@ -245,6 +245,8 @@ var SettableProperties = []SettableProperty{
 			return ValidateBucketName(value)
 		},
 		validateService: validateBackupBucket,
+		write:           writeBackupBucket,
+		read:            propertyReader(BackupBucketProperty),
 		apply:           regenerateCrontabIfScheduled,
 	},
 	{
@@ -731,9 +733,14 @@ func writeBackupSetting(folder string, name string, value string) error {
 
 // requireBackupSchedule refuses a value for a schedule setting on a service with
 // no scheduled backup, since the setting would have nothing to apply to.
-// Clearing is always allowed.
+// Clearing is always allowed. Either is refused once the service has a schedule
+// other than the default one, because these keys only name that one.
 func requireBackupSchedule(key string) func(s *service.Datastore, serviceName string, value string) error {
 	return func(s *service.Datastore, serviceName string, value string) error {
+		if err := refuseUnnamedScheduleEdit(s, serviceName, key); err != nil {
+			return err
+		}
+
 		if value == "" {
 			return nil
 		}
@@ -746,10 +753,32 @@ func requireBackupSchedule(key string) func(s *service.Datastore, serviceName st
 	}
 }
 
+// refuseUnnamedScheduleEdit refuses backup-bucket and backup-use-iam once any
+// schedule other than the default one exists. Those keys change the default
+// schedule, and they do not name one of several.
+func refuseUnnamedScheduleEdit(s *service.Datastore, serviceName string, key string) error {
+	schedules, err := ReadBackupSchedules(s, serviceName)
+	if err != nil {
+		return err
+	}
+
+	for _, schedule := range schedules {
+		if schedule.ID != BackupScheduleIDDefault {
+			return fmt.Errorf("%s changes the default schedule, and %s has another scheduled backup. Change a schedule with backup-schedule --id", key, serviceName)
+		}
+	}
+
+	return nil
+}
+
 // validateBackupBucket refuses a bucket for a service with no scheduled backup,
 // and refuses to clear the one a scheduled backup is shipped to, since its
 // crontab entry cannot be written without it
 func validateBackupBucket(s *service.Datastore, serviceName string, value string) error {
+	if err := refuseUnnamedScheduleEdit(s, serviceName, BackupBucketProperty); err != nil {
+		return err
+	}
+
 	if value != "" {
 		return requireBackupSchedule(BackupBucketProperty)(s, serviceName, value)
 	}
@@ -779,18 +808,151 @@ func writeBackupUseIAM(s *service.Datastore, serviceName string, value string) e
 		value = ""
 	}
 
-	return writeProperty(s, serviceName, BackupUseIAMProperty, value)
+	if err := writeProperty(s, serviceName, BackupUseIAMProperty, value); err != nil {
+		return err
+	}
+
+	identity, _ := readDefaultBackupSchedule(s, serviceName)
+	return syncDefaultScheduleIdentity(s, serviceName, identity)
+}
+
+// writeBackupBucket records the bucket the default schedule is shipped to, and
+// keeps that schedule's object in the schedules file in step with it.
+func writeBackupBucket(s *service.Datastore, serviceName string, value string) error {
+	if err := writeProperty(s, serviceName, BackupBucketProperty, value); err != nil {
+		return err
+	}
+
+	identity, _ := readDefaultBackupSchedule(s, serviceName)
+	return syncDefaultScheduleIdentity(s, serviceName, identity)
 }
 
 // regenerateCrontabIfScheduled has dokku write its crontab again for a service
 // with a scheduled backup, which is where the backup settings the crontab
-// carries are read
+// carries are read. Any schedule is enough, including one that is not the default.
 func regenerateCrontabIfScheduled(ctx context.Context, s *service.Datastore, serviceName string) error {
-	if _, ok := ReadBackupSchedule(s, serviceName); !ok {
+	schedules, err := ReadBackupSchedules(s, serviceName)
+	if len(schedules) > 0 {
+		if regenErr := regenerateCrontab(ctx); regenErr != nil {
+			return regenErr
+		}
+	}
+
+	return err
+}
+
+// scheduleOverrideProperties are the settings a schedule can set for itself.
+// Credentials stay with the service, and the cron expression, bucket and
+// instance role are changed with backup-schedule.
+func scheduleOverrideProperty(key string) bool {
+	switch key {
+	case service.BackupStorageClassProperty, service.BackupObjectNameProperty, service.BackupTimestampProperty, service.BackupMailtoProperty, service.KeyserverProperty, service.ExportArgsProperty, backupEncryptionPassphraseProperty, "backup-public-key-id":
+		return true
+	default:
+		return false
+	}
+}
+
+// scheduleCredentialProperty reports whether a key is a backup credential,
+// which every schedule of a service shares.
+func scheduleCredentialProperty(key string) bool {
+	switch key {
+	case backupAccessKeyIDProperty, backupSecretAccessKeyProperty, "backup-default-region", "backup-signature-version", "backup-endpoint-url":
+		return true
+	default:
+		return false
+	}
+}
+
+// ValidateBackupScheduleOverride reports whether a setting can be recorded on
+// one schedule. An empty value clears that schedule's own setting and leaves
+// the service's value in place.
+func ValidateBackupScheduleOverride(s *service.Datastore, serviceName string, id string, key string, value string) error {
+	if err := ValidateBackupScheduleID(id); err != nil {
+		return err
+	}
+
+	switch {
+	case scheduleCredentialProperty(key):
+		return fmt.Errorf("%s is kept for the service, and cannot be set on a schedule", key)
+	case key == BackupBucketProperty || key == BackupUseIAMProperty:
+		return fmt.Errorf("%s is part of the schedule itself, change it with backup-schedule --id", key)
+	case !scheduleOverrideProperty(key):
+		return fmt.Errorf("%s cannot be set on a schedule", key)
+	}
+
+	if _, err := LookupBackupSchedule(s, serviceName, id); err != nil {
+		return err
+	}
+
+	if value == "" {
 		return nil
 	}
 
-	return regenerateCrontab(ctx)
+	property, _ := LookupSettableProperty(key)
+	if property.validate != nil {
+		if err := property.validate(value); err != nil {
+			return err
+		}
+	}
+	if property.validateService != nil {
+		if err := property.validateService(s, serviceName, value); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// SetBackupScheduleOverride records a setting on one schedule, or clears the
+// schedule's own value when value is empty, and has dokku write its crontab
+// again when the service has a schedule.
+func SetBackupScheduleOverride(ctx context.Context, s *service.Datastore, serviceName string, id string, key string, value string) error {
+	if err := ValidateBackupScheduleOverride(s, serviceName, id, key, value); err != nil {
+		return err
+	}
+
+	schedule, err := LookupBackupSchedule(s, serviceName, id)
+	if err != nil {
+		return err
+	}
+
+	if err := schedule.setOverride(key, value); err != nil {
+		return err
+	}
+
+	if err := saveBackupSchedule(s, serviceName, schedule); err != nil {
+		return err
+	}
+
+	return regenerateCrontabIfScheduled(ctx, s, serviceName)
+}
+
+// setOverride records one setting on a schedule, or clears it. The value has
+// already been accepted.
+func (b *BackupSchedule) setOverride(key string, value string) error {
+	switch key {
+	case service.BackupStorageClassProperty:
+		b.StorageClass = value
+	case service.BackupObjectNameProperty:
+		b.ObjectName = value
+	case service.BackupTimestampProperty:
+		b.Timestamp = value
+	case service.BackupMailtoProperty:
+		b.Mailto = value
+	case service.KeyserverProperty:
+		b.Keyserver = value
+	case service.ExportArgsProperty:
+		b.ExportArgs = value
+	case backupEncryptionPassphraseProperty:
+		b.EncryptionPassphrase = value
+	case "backup-public-key-id":
+		b.PublicKeyID = value
+	default:
+		return fmt.Errorf("%s cannot be set on a schedule", key)
+	}
+
+	return nil
 }
 
 // extraArgsValidator reports whether a value splits into the arguments an

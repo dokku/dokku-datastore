@@ -477,3 +477,64 @@ func TestSettablePropertyRequiresRestart(t *testing.T) {
 		}
 	}
 }
+
+// backup-bucket and backup-use-iam name the default schedule, so they are
+// refused once another schedule exists, including when the default one is gone.
+func TestSetBackupBucketRefusesWhenAnotherScheduleExists(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+	ctx := t.Context()
+
+	for _, input := range []ScheduleBackupInput{
+		{Schedule: "0 3 * * *", BucketName: "my-bucket"},
+		{ID: "frequent", Schedule: "*/15 * * * *", BucketName: "bucket-a"},
+	} {
+		input.Datastore = datastore
+		input.ServiceName = "lollipop"
+		if err := ScheduleBackup(ctx, input); err != nil {
+			t.Fatalf("failed to schedule %q: %s", input.ID, err)
+		}
+	}
+
+	for _, key := range []string{BackupBucketProperty, BackupUseIAMProperty} {
+		value := "other-bucket"
+		if key == BackupUseIAMProperty {
+			value = "true"
+		}
+		err := SetProperty(datastore, "lollipop", key, value)
+		if err == nil || strings.Contains(err.Error(), "There is no scheduled backup") || !strings.Contains(err.Error(), "backup-schedule --id") {
+			t.Errorf("expected %s to be refused without claiming there is no schedule, got %v", key, err)
+		}
+	}
+
+	if err := UnscheduleBackup(ctx, UnscheduleBackupInput{Datastore: datastore, ServiceName: "lollipop", ID: BackupScheduleIDDefault}); err != nil {
+		t.Fatalf("failed to remove the default schedule: %s", err)
+	}
+	err := SetProperty(datastore, "lollipop", BackupBucketProperty, "other-bucket")
+	if err == nil || strings.Contains(err.Error(), "There is no scheduled backup") {
+		t.Errorf("expected the bucket to be refused once only a named schedule is left, got %v", err)
+	}
+}
+
+// Credentials stay with the service. A schedule cannot be given one of its own.
+func TestSetScheduleOverrideRefusesACredential(t *testing.T) {
+	datastore := withScheduleService(t, "lollipop")
+	ctx := t.Context()
+
+	if err := ScheduleBackup(ctx, ScheduleBackupInput{
+		ID:          "frequent",
+		BucketName:  "bucket-a",
+		Datastore:   datastore,
+		Schedule:    "*/15 * * * *",
+		ServiceName: "lollipop",
+	}); err != nil {
+		t.Fatalf("failed to schedule the backup: %s", err)
+	}
+
+	for _, key := range []string{backupAccessKeyIDProperty, service.ImportArgsProperty, BackupBucketProperty} {
+		err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "frequent", key, "value")
+		refused := err != nil && (strings.Contains(err.Error(), "cannot be set on a schedule") || strings.Contains(err.Error(), "backup-schedule --id"))
+		if !refused {
+			t.Errorf("expected %s to be refused on a schedule, got %v", key, err)
+		}
+	}
+}

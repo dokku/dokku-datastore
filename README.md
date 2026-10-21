@@ -40,11 +40,11 @@ Available commands are:
     backup-auth                           Stores the credentials backups are shipped with
     backup-deauth                         Removes the stored backup credentials for a service
     backup-logs                           Shows the log of a service's scheduled backups
-    backup-schedule                       Schedules a recurring backup of a service to an s3 bucket
-    backup-schedule-cat                   Prints the crontab line of a service's scheduled backup
+    backup-schedule                       Schedules a recurring backup of a service to an s3 bucket, optionally under --id
+    backup-schedule-cat                   Prints the crontab line of a service's scheduled backups, or one named with --id
     backup-set-encryption                 Encrypts future backups of a service with a passphrase
     backup-set-public-key-encryption      Encrypts future backups of a service with a gpg public key
-    backup-unschedule                     Removes the backup schedule for a service
+    backup-unschedule                     Removes a scheduled backup, or every one with --all
     backup-unset-encryption               Removes the backup passphrase for a service
     backup-unset-public-key-encryption    Removes the backup public key for a service
     clone                                 Clones a service onto a new one
@@ -751,6 +751,39 @@ A bucket named `s3://my-space` was passed through as it was, so the backup was u
 
 Buckets created in `us-east-1` before March 2018 may have uppercase letters and underscores, which the naming rules no longer allow, and are refused as well. A backup already scheduled to one keeps its entry in the dokku crontab, but the backup it runs is refused, and the reason is written to the service's backup log.
 
+## Multiple backup schedules
+
+A service has one scheduled backup until another is added. `backup-schedule` without `--id` records that schedule, and calling it again replaces its cron expression, bucket and instance role. `--id <name>` adds a schedule under that name, or replaces the one that name already has. `--id default` is the schedule made without `--id`, not a second copy. An id is made of letters, numbers, dashes and underscores.
+
+```shell
+# the schedule a service already had
+dokku redis:backup-schedule lollipop "0 3 * * *" my-bucket
+
+# a frequent backup and a monthly one, each to its own bucket
+dokku redis:backup-schedule lollipop "*/15 * * * *" bucket-a --id frequent
+dokku redis:backup-schedule lollipop "@monthly" bucket-c --id monthly --use-iam
+```
+
+Each schedule is a line in the dokku crontab. The command it runs names the schedule, `dokku redis:backup lollipop my-bucket --id default`, and appends `--use-iam` when that schedule authenticates with an instance role. A line written before schedules had ids runs with the service's settings, which is what an un-overridden schedule does. The next time the crontab is written, the line gains `--id`.
+
+`backup-schedule-cat` prints the one crontab line when a service has one schedule, and one line per schedule when it has several: the id, a tab, then the crontab line. `--id` prints one schedule in the single-schedule form. `--format json` for one schedule is the object it always was, plus the id and the settings that backup runs with. For several schedules it is `{"schedules":[...]}`. The passphrase is a fingerprint. `overrides` lists the properties that schedule set itself.
+
+`backup-unschedule` removes the only schedule. With several and no `--id` it refuses, and says to pass `--id` or `--all`. `--id` removes that one, including `--id default`. `--all` removes every schedule. Destroying a service removes every schedule.
+
+`info --backup-schedule`, `--backup-bucket` and `--backup-use-iam` stay the default schedule, and are empty (and `false` for the instance role) when that schedule is gone. `--backup-schedules` is every schedule on one line, the default one first and the others by id. A record is `id|cron|bucket|use-iam`, and records are separated by semicolons:
+
+```
+default|0 3 * * *|my-bucket|false;frequent|*/15 * * * *|bucket-a|false;monthly|@monthly|bucket-c|true
+```
+
+The other backup keys `info` reports stay the service's values. A passphrase that exists only on a schedule does not make `--backup-encrypted` true.
+
+A schedule can set its own storage class, object name, timestamp, mailto, keyserver, export arguments, passphrase and public key. `set <key> <value> --id <id>` records it, and an empty value clears that schedule's own value so it inherits the service's again. The schedule has to exist already. Credentials stay on the service: the access key, the secret, the region, the signature version and the endpoint. `set backup-bucket` and `set backup-use-iam` still change the default schedule, and only when it is the only one; otherwise they are refused, and the schedule is changed with `backup-schedule --id`. The encryption commands take the same `--id`.
+
+A schedule that sets a passphrase or a public key uses that pair instead of the service's, and the public key still takes precedence inside the pair. Export arguments set on a schedule are what that schedule's export runs with. Anything a schedule does not set is the service's value, read when the backup runs. `backup` without `--id` uses the service's settings. `backup --id <id>` uses that schedule's settings, and the bucket and `--use-iam` still come from the command, which is what the crontab line passes. A backup started with `--id` names that id in the line it writes for the bucket.
+
+On disk, the default schedule's cron expression, bucket and instance role stay in `backup-schedule`, `backup-bucket` and `backup-use-iam` under `$DOKKU_LIB_ROOT/config/<prefix>/<service>/`. Every other schedule, and any setting a schedule sets for itself, is one object in the `backup-schedules` file in that same directory, mode `0600`. The file is a JSON array. It is absent when the only schedule is the default one with nothing of its own, and an empty array is deleted rather than left in place. The default schedule is an object in the array only when it has set something for itself, and the three property files win when that object disagrees with them. A passphrase recorded on a schedule is in that object. `info` and `backup-schedule-cat` never print it. Credentials stay in the service's `backup/` directory, and the service's encryption files stay the pair a schedule inherits. Clone does not copy schedules. Destroy removes the directory, and unscheduling removes the schedule and its own settings with it.
+
 ## Scheduled backup email
 
 The bash plugins wrote each scheduled backup to a cron file of its own in `/etc/cron.d`, where a `MAILTO` line could be added by hand to have the backup's output mailed. Scheduled backups are now part of the dokku crontab, which only has the global `MAILTO` set with `dokku cron:set --global mailto`, and their output is appended to the service's backup log, so cron had nothing to mail. A service may now name who the output of its scheduled backups is mailed to through the `backup-mailto` property.
@@ -765,7 +798,7 @@ dokku redis:set lollipop backup-mailto
 
 The recipients are a comma-separated list of email addresses or local users, without spaces, and anything else is refused before it is written. Dokku writes the backup under a `MAILTO` line of its own in its crontab, and cron mails all of the backup's output, whether the backup succeeded or failed, while it is still appended to the log file. A mail transfer agent has to be configured on the host for the mail to be delivered.
 
-The property is read when dokku writes its crontab, so setting or clearing it on a service with a scheduled backup has dokku write the crontab again. It is kept when the backup is scheduled again or unscheduled, and applies to whichever backup the service is scheduled with next. `info` reports it under `--backup-mailto`, empty when nothing was set, and `clone` copies it.
+The property is read when dokku writes its crontab, so setting or clearing it on a service with a scheduled backup has dokku write the crontab again. It is kept when a backup is scheduled again or unscheduled. The service value applies to every schedule that has not set its own. `info` reports the service value under `--backup-mailto`, empty when nothing was set, and `clone` copies it.
 
 The recipients are handed to dokku through the `cron-entries` trigger as a json entry, which only dokku versions including [dokku/dokku#9104](https://github.com/dokku/dokku/pull/9104) read. Older versions refuse the whole crontab when they see one, so the plugin hands them the entry it always has, and warns that the recipients are ignored. `backup-schedule-cat` shows the line a dokku version that reads them writes.
 
@@ -1092,7 +1125,7 @@ Every command takes `--quiet`, `--trace` and `--format`, and dokku's own `--quie
 
 `--quiet` leaves out what a command says it is doing - its headers and progress messages - and keeps its errors, its warnings and whatever it was asked to print. `--trace` echoes every command run on the way, to stderr. Both are handed on as `DOKKU_QUIET_OUTPUT=1` and `DOKKU_TRACE=1`, so the triggers and `dokku` commands a command runs are quiet or traced the way the bash plugins' were.
 
-`--format json` prints a command's result as json on stdout: `create`, `info`, `list`, `links`, `app-links`, `backup-schedule-cat`, `trigger-cron-entries` and `trigger-service-list` have one. Everything else - progress, warnings and errors as json objects, and whatever a trigger or a docker command prints on the way - goes to stderr, so stdout can be handed straight to a json reader. The text a trigger prints without it is unchanged, since dokku reads it a line at a time. `readme` and `trigger-help` only print text, and refuse `--format json`.
+`--format json` prints a command's result as json on stdout: `create`, `info`, `list`, `links`, `app-links`, `backup-schedule-cat`, `trigger-cron-entries` and `trigger-service-list` have one. `backup-schedule-cat` prints one schedule as an object, and several as `{"schedules":[...]}`. `info` reports every schedule on the `backup-schedules` key as one line, which is the same line `--backup-schedules` prints. Everything else - progress, warnings and errors as json objects, and whatever a trigger or a docker command prints on the way - goes to stderr, so stdout can be handed straight to a json reader. The text a trigger prints without it is unchanged, since dokku reads it a line at a time. `readme` and `trigger-help` only print text, and refuse `--format json`.
 
 ```shell
 dokku-datastore backup-schedule-cat redis lollipop --format json
