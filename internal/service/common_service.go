@@ -889,15 +889,10 @@ func Start(ctx context.Context, input StartInput) error {
 }
 
 // writeContainerID notes which container the service is answering on, which is
-// what everything that addresses it by id reads.
+// what everything that addresses it by id reads. The file is replaced, not
+// rewritten, because a docker run under sudo leaves its cidfile owned by root.
 func (input StartInput) writeContainerID(containerID string) error {
-	return common.WriteStringToFile(common.WriteStringToFileInput{
-		Content:   containerID,
-		Filename:  Files(input.Datastore, input.ServiceName).ID,
-		GroupName: hostenv.SystemGroup(),
-		Mode:      0644,
-		Username:  hostenv.SystemUser(),
-	})
+	return ReplaceFileAtomically(Files(input.Datastore, input.ServiceName).ID, containerID, 0644)
 }
 
 // reconcilePorts brings the service's ambassador in line with the container

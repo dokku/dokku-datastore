@@ -647,3 +647,31 @@ func TestActionForStatus(t *testing.T) {
 		})
 	}
 }
+
+// docker writes the ID file through --cidfile. Where docker runs under sudo, as
+// on the dokku/dokku image, that file belongs to root, and a start that keeps
+// the container running has to replace it rather than open it for writing.
+func TestWriteContainerIDReplacesAnUnwritableIDFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can open any file for writing")
+	}
+
+	mariadb := Datastores["mariadb"]
+	withServiceRoot(t, mariadb, "lollipop")
+	idFile := Files(mariadb, "lollipop").ID
+	if err := os.WriteFile(idFile, []byte("old"), 0444); err != nil {
+		t.Fatalf("failed to write the id file: %v", err)
+	}
+
+	if err := (StartInput{Datastore: mariadb, ServiceName: "lollipop"}).writeContainerID("new"); err != nil {
+		t.Fatalf("failed to write the container id: %v", err)
+	}
+
+	contents, err := os.ReadFile(idFile)
+	if err != nil {
+		t.Fatalf("failed to read the id file: %v", err)
+	}
+	if string(contents) != "new" {
+		t.Errorf("expected the id file to hold %q, got %q", "new", contents)
+	}
+}
