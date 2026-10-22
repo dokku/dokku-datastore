@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/dokku/dokku-datastore/internal/execx"
@@ -24,6 +26,7 @@ import (
 	"github.com/dokku/dokku-datastore/internal/verb"
 
 	"github.com/dokku/dokku/plugins/common"
+	"gopkg.in/yaml.v3"
 	"mvdan.cc/sh/v3/shell"
 )
 
@@ -829,13 +832,84 @@ func (s *Datastore) ResetService(ctx context.Context, input ResetServiceInput) e
 // beside. It gets the mounts the command declares rather than the service's,
 // since what it is usually doing is filling a directory the service will mount
 // over.
+//
+// What ran is recorded once it succeeds, so that a service whose hook has
+// changed since, or which was made before it ran at all, has it run again the
+// next time its container is made.
 func (s *Datastore) RunPreCreate(ctx context.Context, serviceName string) error {
 	hook := s.Definition.Dokku.Hooks.PreCreate
 	if hook == nil {
 		return nil
 	}
 
-	return s.runOneOff(ctx, serviceName, "hooks.pre_create", "creation", hook, s.scope(serviceName), oneOffOptions{})
+	if err := s.runOneOff(ctx, serviceName, "hooks.pre_create", "creation", hook, s.scope(serviceName), oneOffOptions{}); err != nil {
+		return err
+	}
+
+	return s.recordPreCreate(serviceName)
+}
+
+// preCreateFingerprint identifies the pre_create hook a service would run: the
+// hook as declared and the image it runs in. A new image can ship files the
+// hook copies out, so it counts as a change as much as the hook's own does.
+// It is empty for a definition with no hook.
+func (s *Datastore) preCreateFingerprint(serviceName string) (string, error) {
+	hook := s.Definition.Dokku.Hooks.PreCreate
+	if hook == nil {
+		return "", nil
+	}
+
+	declared, err := yaml.Marshal(hook)
+	if err != nil {
+		return "", fmt.Errorf("unable to read the pre_create hook: %w", err)
+	}
+
+	sum := sha256.New()
+	sum.Write(declared)
+	sum.Write([]byte(s.taggedImage(serviceName)))
+	return hex.EncodeToString(sum.Sum(nil)), nil
+}
+
+// preCreateCurrent reports whether the pre_create hook last run for a service
+// is the one its definition declares now. A definition with no hook is always
+// current, and a service with nothing recorded never is.
+func (s *Datastore) preCreateCurrent(serviceName string) (bool, error) {
+	fingerprint, err := s.preCreateFingerprint(serviceName)
+	if err != nil || fingerprint == "" {
+		return true, err
+	}
+
+	recorded, err := os.ReadFile(Files(s, serviceName).PreCreate)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("unable to read the pre_create hook last run: %w", err)
+	}
+
+	return strings.TrimSpace(string(recorded)) == fingerprint, nil
+}
+
+// recordPreCreate writes the fingerprint of the pre_create hook that just ran.
+func (s *Datastore) recordPreCreate(serviceName string) error {
+	fingerprint, err := s.preCreateFingerprint(serviceName)
+	if err != nil || fingerprint == "" {
+		return err
+	}
+
+	filename := Files(s, serviceName).PreCreate
+	err = common.WriteStringToFile(common.WriteStringToFileInput{
+		Content:   fingerprint,
+		Filename:  filename,
+		GroupName: hostenv.SystemGroup(),
+		Mode:      0644,
+		Username:  hostenv.SystemUser(),
+	})
+	if err != nil {
+		return fmt.Errorf("unable to write %s: %w", filename, err)
+	}
+
+	return nil
 }
 
 // HasUpgradeStep reports whether this definition migrates the data of a
@@ -1109,6 +1183,13 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 //
 // An earlier release made every source a directory, a file's included, so an
 // empty directory where a file belongs is taken away for the file to be made.
+//
+// A pre_create hook that has changed since it last ran for the service is run
+// again too, even with every source there: a definition that starts mounting a
+// directory the service already has, such as graphite's config, needs what the
+// hook copies into it, and a directory an operator already put files in is not
+// missing. Every hook leaves what is already there alone, so running one again
+// only fills in what is absent.
 func (s *Datastore) ensureBindSources(ctx context.Context, serviceName string) error {
 	root := Folders(s, serviceName).Root
 	resolve := func(volume definition.Volume) string {
@@ -1132,7 +1213,12 @@ func (s *Datastore) ensureBindSources(ctx context.Context, serviceName string) e
 		}
 	}
 
-	if !missing {
+	current, err := s.preCreateCurrent(serviceName)
+	if err != nil {
+		return err
+	}
+
+	if !missing && current {
 		return nil
 	}
 

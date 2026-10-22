@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -713,6 +714,78 @@ func TestEnsureBindSourcesMakesWhatIsMissing(t *testing.T) {
 
 	if contents, _ := os.ReadFile(config); string(contents) != "edited\n" {
 		t.Errorf("expected the operator's edit to be kept, got %q", contents)
+	}
+}
+
+// A service made before its definition's pre_create hook changed has every
+// source it mounts, so nothing is missing, yet it lacks what the new hook
+// fills in: graphite's config directory is there, empty or holding only what
+// an operator put in it, and carbon would start without its own config. The
+// hook is run again whenever the one last run for the service differs.
+func TestPreCreateIsCurrentOnlyForTheHookLastRun(t *testing.T) {
+	graphite, ok := Datastores["graphite"]
+	if !ok {
+		t.Fatal("expected graphite to be registered")
+	}
+
+	root := withServiceRoot(t, graphite, "lollipop")
+
+	// nothing recorded is a service made before the hook was, or by the bash
+	// plugin, and either has it run
+	current, err := graphite.preCreateCurrent("lollipop")
+	if err != nil || current {
+		t.Fatalf("expected a service with nothing recorded to need the hook, got %v and %v", current, err)
+	}
+
+	if err := graphite.recordPreCreate("lollipop"); err != nil {
+		t.Fatalf("unable to record the hook: %s", err)
+	}
+
+	recorded, err := os.ReadFile(filepath.Join(root, "PRE_CREATE"))
+	if err != nil || len(strings.TrimSpace(string(recorded))) == 0 {
+		t.Fatalf("expected the hook to be recorded, got %q and %v", recorded, err)
+	}
+
+	current, err = graphite.preCreateCurrent("lollipop")
+	if err != nil || !current {
+		t.Fatalf("expected the hook just recorded to be current, got %v and %v", current, err)
+	}
+
+	// the same hook fingerprints the same way, or every container made would
+	// run it again
+	again, err := graphite.preCreateFingerprint("lollipop")
+	if err != nil || again != strings.TrimSpace(string(recorded)) {
+		t.Errorf("expected the fingerprint to be stable, got %q and %v", again, err)
+	}
+
+	changed := *graphite
+	hook := *graphite.Definition.Dokku.Hooks.PreCreate
+	hook.Exec = append(slices.Clone(hook.Exec), "true")
+	changed.Definition.Dokku.Hooks.PreCreate = &hook
+
+	current, err = changed.preCreateCurrent("lollipop")
+	if err != nil || current {
+		t.Errorf("expected a changed hook to need running again, got %v and %v", current, err)
+	}
+}
+
+// A definition with no pre_create hook has nothing to run again, and nothing
+// is recorded for it.
+func TestPreCreateIsCurrentWithoutAHook(t *testing.T) {
+	rabbitmq := rabbitmqWithoutHooks(t)
+	root := withServiceRoot(t, rabbitmq, "lollipop")
+
+	current, err := rabbitmq.preCreateCurrent("lollipop")
+	if err != nil || !current {
+		t.Errorf("expected no hook to be current, got %v and %v", current, err)
+	}
+
+	if err := rabbitmq.recordPreCreate("lollipop"); err != nil {
+		t.Fatalf("unable to record the hook: %s", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "PRE_CREATE")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected nothing to be recorded without a hook, got %v", err)
 	}
 }
 

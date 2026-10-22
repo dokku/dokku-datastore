@@ -989,6 +989,20 @@ dokku rabbitmq:unexpose lollipop
 dokku rabbitmq:expose lollipop
 ```
 
+### A definition whose pre_create hook changes
+
+A definition's `pre_create` hook fills what the service mounts before its container is made, such as the configuration clickhouse copies out of its image. It used to run when a service was created, and again only when something the service mounts was missing. A definition that started mounting a directory every service already has, or whose hook started copying something new, never had it run for the services that already existed.
+
+The hook that ran is now recorded in the service's `PRE_CREATE` file, and the hook is run again the next time the service's container is made whenever it or the service's image has changed since. Every hook leaves what is already there alone, so running one again only fills in what is missing. Every service of a definition with a hook has it run once more after upgrading. For elasticsearch, that run changes the owner of everything in the service's data directory again, which takes longer on a large one.
+
+Graphite's config directory is the first to need this. It is now mounted at `/opt/graphite/conf`, where carbon reads its configuration, and filled with the files the image ships there, so a `storage-schemas.conf` written there takes effect. A graphite service made before keeps any file already in its config directory and has the rest copied in once its container is made again.
+
+```shell
+# the container is kept by a restart, so stop and start the service instead
+dokku graphite:stop lollipop
+dokku graphite:start lollipop
+```
+
 ### Limiting where and to whom a service is exposed
 
 Two properties limit an exposed service without naming an address in every port:
