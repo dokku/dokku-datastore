@@ -1643,6 +1643,52 @@ func TestGraphiteNamesEveryPortItNeeds(t *testing.T) {
 	}
 }
 
+// The config directory info reports is where carbon reads its configuration
+// from, and is filled with the files the image ships before the mount hides
+// them. The bash plugin made the directory and never mounted it, so nothing
+// written there reached carbon.
+func TestGraphiteMountsItsConfig(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	graphite, ok := loaded.Definition("graphite")
+	if !ok {
+		t.Fatal("expected a graphite definition")
+	}
+
+	mounted := false
+	for _, volume := range graphite.Service.Volumes {
+		if volume.Source == "{{ .HostRoot }}/config" && volume.Target == "/opt/graphite/conf" {
+			mounted = true
+		}
+	}
+	if !mounted {
+		t.Errorf("expected the config directory to be mounted at /opt/graphite/conf, got %v", graphite.Service.Volumes)
+	}
+
+	hook := graphite.Dokku.Hooks.PreCreate
+	if hook == nil {
+		t.Fatal("expected a pre_create hook")
+	}
+
+	seeded := false
+	for _, volume := range hook.Volumes {
+		if volume.Source == "{{ .HostRoot }}/config" {
+			seeded = true
+		}
+	}
+	if !seeded {
+		t.Errorf("expected the pre_create hook to mount the config directory, got %v", hook.Volumes)
+	}
+
+	// without -n a rebuild would put back what an operator changed
+	if exec := strings.Join(hook.Exec, " "); !strings.Contains(exec, "cp -n /opt/graphite/conf/") {
+		t.Errorf("expected the image's config to be copied without overwriting anything, got %q", exec)
+	}
+}
+
 // Every service the bash plugin creates gets an empty grafana password: it
 // passes GRAPHITE_PASSWORD from a variable its create function never assigns.
 func TestGraphitePassesThePasswordItGenerates(t *testing.T) {
@@ -2268,7 +2314,7 @@ func TestVolumeKeysArePinned(t *testing.T) {
 		"elasticsearch-7":           {"config", "data"},
 		"elasticsearch-8":           {"config", "data"},
 		"elasticsearch-9":           {"config", "data"},
-		"graphite":                  {"data/grafana", "data/whisper", "data/graphite-web/graphite.db"},
+		"graphite":                  {"data/grafana", "data/whisper", "data/graphite-web/graphite.db", "config"},
 		"mariadb":                   {"config", "data"},
 		"meilisearch":               {"data"},
 		"memcached":                 {},

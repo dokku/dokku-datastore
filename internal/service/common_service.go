@@ -328,6 +328,11 @@ type ServiceFiles struct {
 
 	// Compose is the rendered compose file describing the service
 	Compose string
+
+	// PreCreate records the pre_create hook that last ran for the service, so
+	// a hook that has changed since is run again before the next container is
+	// made on what it fills
+	PreCreate string
 }
 
 // LegacyCronDir is where earlier versions of the plugin wrote the cron file a
@@ -359,6 +364,7 @@ func Files(s *Datastore, serviceName string) ServiceFiles {
 		ShmSize:       filepath.Join(folders.Root, "SHM_SIZE"),
 		Backend:       filepath.Join(folders.Root, "BACKEND"),
 		Compose:       filepath.Join(folders.Root, "docker-compose.yml"),
+		PreCreate:     filepath.Join(folders.Root, "PRE_CREATE"),
 	}
 }
 
