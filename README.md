@@ -313,6 +313,22 @@ dokku graphite:upgrade lollipop
 
 An upgraded service keeps the metrics carbon has written, and grafana keeps its dashboards, accounts and datasources, migrating its own database as it starts. Graphite-web's database is migrated as the container starts as well, keeping its accounts, saved graphs and dashboards rather than being made again.
 
+## Graphite dashboards
+
+Grafana in a graphite service used to start with a datasource and no dashboards. The image ships dashboards of its own, but nothing loads them, and they graph metrics nothing in a dokku install sends. A graphite service on grafana 13 now has two dashboards in grafana's `Dokku` folder: `Graphite`, which shows carbon and statsd themselves and has data as soon as the service is up, and `StatsD`, which shows the counters, timers and gauges linked apps send, picked out by the first part of each metric's name.
+
+```shell
+# grafana, where the dashboards are
+dokku graphite:nginx-expose lollipop
+```
+
+The dashboards are provisioned from the plugin and written again each time the container is made, so grafana refuses to save a change to one, and a copy saved under another name is kept with grafana's other dashboards. Host metrics need a collector of their own sending to carbon, which nothing in the plugin runs. A service made before has the dashboards the next time its container is made, which is a stop and start rather than a restart, and a service still on grafana 6 has them once it is upgraded.
+
+```shell
+dokku graphite:stop lollipop
+dokku graphite:start lollipop
+```
+
 ## Container log retention
 
 A datastore container wrote its log with nothing to say how large it was allowed to get, so on a host using docker's default `json-file` driver it grew until something else on the machine ran out of room. Dokku has capped its own app containers for years - `dokku logs:set --global max-size 20m` - and a datastore container is a container dokku makes, so it is capped by the same answer now. Where nothing has been set at all, the cap is dokku's own default of `10m`.

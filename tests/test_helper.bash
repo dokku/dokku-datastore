@@ -406,6 +406,24 @@ http_status() {
     -ks -o /dev/null -w '%{http_code}' "$1"
 }
 
+# a request to a graphite service's grafana from a client beside the service,
+# as the admin account the image's own config names
+grafana() {
+  docker container run --rm --network "container:$(service_container)" curlimages/curl:8.16.0 \
+    -fsS -u admin:admin "$@"
+}
+
+# the service is ready once nginx answers, which is before grafana does
+wait_for_grafana() {
+  for _ in $(seq 1 150); do
+    grafana -o /dev/null http://127.0.0.1:80/api/health 2>/dev/null && return 0
+    sleep 2
+  done
+
+  echo "grafana did not answer" >&2
+  return 1
+}
+
 # the mode of a file or folder, as octal permission bits
 assert_mode() {
   local expected="$1" path="$2" mode

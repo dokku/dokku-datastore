@@ -132,6 +132,22 @@ x-dokku:
         the container is kept by a restart, so stop and start the service instead:
         dokku {{.CommandPrefix}}:stop lollipop
         dokku {{.CommandPrefix}}:start lollipop
+    - title: Dashboards
+      body: |
+        grafana starts with two dashboards in its 'Dokku' folder, which is reached once grafana is exposed and logged in to with grafana's own admin account:
+        dokku {{.CommandPrefix}}:nginx-expose lollipop
+        the 'Graphite' dashboard shows carbon and statsd themselves, which have data as soon as the service is up.
+        the 'StatsD' dashboard shows the counters, timers and gauges apps send to statsd, at the 'STATSD_URL' a linked app is handed:
+        dokku {{.CommandPrefix}}:link lollipop playground
+        its 'namespace' picker lists the first part of each metric's name, so an app that prefixes every metric it sends with its own name, such as 'playground.requests', can be picked out from the rest.
+        the dashboards are written again each time the container is made, so grafana refuses to save a change to one. Save a copy under another name to change it, which is kept with grafana's other dashboards.
+        metrics about the host itself need a collector running there that writes carbon's line protocol, which carbon takes on its port once the service is exposed:
+        dokku {{.CommandPrefix}}:expose lollipop 8125 8126 8080 8081 2003
+        a service made before the dashboards were shipped has them the next time its container is made. The container is kept by a restart, so stop and start the service instead:
+        dokku {{.CommandPrefix}}:stop lollipop
+        dokku {{.CommandPrefix}}:start lollipop
+        a service still on grafana 6 has them once it is upgraded:
+        dokku {{.CommandPrefix}}:upgrade lollipop
 
   # no connect, export or import: graphite is a metrics store reached over its
   # own protocols, and the image ships no client and no dump tool. Clone and

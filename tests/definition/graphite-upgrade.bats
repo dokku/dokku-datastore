@@ -31,24 +31,6 @@ setup() {
   fi
 }
 
-# a request to grafana from a client beside the service, as the admin account
-# the image's own config names
-grafana() {
-  docker container run --rm --network "container:$(service_container)" curlimages/curl:8.16.0 \
-    -fsS -u admin:admin "$@"
-}
-
-# the service is ready once nginx answers, which is before grafana does
-wait_for_grafana() {
-  for _ in $(seq 1 150); do
-    grafana -o /dev/null http://127.0.0.1:80/api/health 2>/dev/null && return 0
-    sleep 2
-  done
-
-  echo "grafana did not answer" >&2
-  return 1
-}
-
 @test "($DEFINITION) a bare upgrade moves a grafana 6 service onto the version the definition pins" {
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --image-version
   assert_output "$PREVIOUS_IMAGE_VERSION"
@@ -79,6 +61,21 @@ wait_for_grafana() {
 
   run grafana "http://127.0.0.1:80/api/datasources/name/Local%20Graphite"
   assert_success
+}
+
+@test "($DEFINITION) the upgraded service has the dashboards grafana 6 never read" {
+  # grafana 6 ran from a homepath of its own, so the dashboards mounted for
+  # grafana 13 first appear once the service is upgraded
+  for uid in dokku-graphite dokku-statsd; do
+    # provisioning runs as grafana starts, which can be after it first answers
+    for _ in $(seq 1 30); do
+      run grafana "http://127.0.0.1:80/api/dashboards/uid/$uid"
+      [[ "$status" -eq 0 ]] && break
+      sleep 2
+    done
+    assert_success
+    assert_output --partial '"folderTitle":"Dokku"'
+  done
 }
 
 @test "($DEFINITION) the upgraded service migrates graphite-web's database and keeps its accounts" {

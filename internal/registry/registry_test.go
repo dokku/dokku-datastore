@@ -1,8 +1,10 @@
 package registry
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
+	"gopkg.in/yaml.v3"
 	"strings"
 )
 
@@ -1686,6 +1689,114 @@ func TestGraphiteMountsItsConfig(t *testing.T) {
 	// without -n a rebuild would put back what an operator changed
 	if exec := strings.Join(hook.Exec, " "); !strings.Contains(exec, "cp -n /opt/graphite/conf/") {
 		t.Errorf("expected the image's config to be copied without overwriting anything, got %q", exec)
+	}
+}
+
+// Grafana loads the dashboards a graphite service starts with from its own
+// provisioning directory. The image ships dashboards too, but nothing loads
+// them, so a service the bash plugin made had a datasource and nothing to look
+// at it with.
+func TestGraphiteProvisionsDashboards(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	graphite, ok := loaded.Definition("graphite")
+	if !ok {
+		t.Fatal("expected a graphite definition")
+	}
+
+	// where grafana 13 reads its provisioning from, below the homepath the
+	// image starts it with
+	provider, ok := graphite.Rootfs["usr/share/grafana/conf/provisioning/dashboards/dokku.yaml"]
+	if !ok {
+		t.Fatalf("expected a dashboard provider, got %v", keys(graphite.Rootfs))
+	}
+
+	var config struct {
+		Providers []struct {
+			Folder         string `yaml:"folder"`
+			Type           string `yaml:"type"`
+			AllowUIUpdates bool   `yaml:"allowUiUpdates"`
+			Options        struct {
+				Path string `yaml:"path"`
+			} `yaml:"options"`
+		} `yaml:"providers"`
+	}
+	if err := yaml.Unmarshal(provider, &config); err != nil {
+		t.Fatalf("unable to parse the dashboard provider: %s", err)
+	}
+	if len(config.Providers) != 1 {
+		t.Fatalf("expected one provider, got %d", len(config.Providers))
+	}
+
+	// the files are mounted read only and written again with each container,
+	// so a change saved in grafana could not be kept
+	found := config.Providers[0]
+	if found.Type != "file" || found.Folder != "Dokku" || found.AllowUIUpdates {
+		t.Errorf("expected a file provider into the Dokku folder that refuses edits, got %+v", found)
+	}
+
+	dashboards := map[string]map[string]any{}
+	for name, contents := range graphite.Rootfs {
+		if path.Ext(name) != ".json" {
+			continue
+		}
+
+		if "/"+path.Dir(name) != found.Options.Path {
+			t.Errorf("expected %s to be in the provider's path %s", name, found.Options.Path)
+		}
+
+		var dashboard map[string]any
+		if err := json.Unmarshal(contents, &dashboard); err != nil {
+			t.Fatalf("unable to parse %s: %s", name, err)
+		}
+		dashboards[name] = dashboard
+	}
+
+	if len(dashboards) == 0 {
+		t.Fatal("expected at least one dashboard")
+	}
+
+	uids := map[string]string{}
+	for name, dashboard := range dashboards {
+		uid, _ := dashboard["uid"].(string)
+		if uid == "" {
+			t.Errorf("expected %s to have a fixed uid", name)
+		}
+		if other, ok := uids[uid]; ok {
+			t.Errorf("expected %s and %s to have different uids, both have %s", name, other, uid)
+		}
+		uids[uid] = name
+
+		// the datasource the image adds has a uid of its own on every service,
+		// so a panel names it through a variable rather than by uid
+		templating, _ := dashboard["templating"].(map[string]any)
+		variables, _ := templating["list"].([]any)
+		picked := false
+		for _, raw := range variables {
+			variable, _ := raw.(map[string]any)
+			if variable["name"] == "datasource" && variable["type"] == "datasource" && variable["query"] == "graphite" {
+				picked = true
+			}
+		}
+		if !picked {
+			t.Errorf("expected %s to have a graphite datasource variable", name)
+		}
+
+		panels, _ := dashboard["panels"].([]any)
+		for _, raw := range panels {
+			panel, _ := raw.(map[string]any)
+			if panel["type"] == "row" {
+				continue
+			}
+
+			datasource, _ := panel["datasource"].(map[string]any)
+			if datasource["uid"] != "${datasource}" {
+				t.Errorf("expected panel %q in %s to use the datasource variable, got %v", panel["title"], name, panel["datasource"])
+			}
+		}
 	}
 }
 
