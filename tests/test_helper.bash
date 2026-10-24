@@ -388,13 +388,15 @@ tls_handshake() {
 
 # what a rabbitmq port answers an amqp client's greeting with, in plain text.
 # The broker replies with the properties it starts a connection with, its
-# product name among them
+# product name among them. The frame is read whole, by the size its header
+# gives, since how long it is depends on the broker and the service's name
 amqp_greeting() {
   # shellcheck disable=SC2016
   docker container exec "$(service_container "$2")" bash -c '
     exec 3<>"/dev/tcp/127.0.0.1/$1"
     printf "AMQP\x00\x00\x09\x01" >&3
-    timeout 5 head -c 512 <&3 | tr -cd "[:print:]"
+    read -r a b c d < <(timeout 5 head -c 7 <&3 | od -An -tu1 -j3 -N4)
+    timeout 5 head -c "$(((a << 24) | (b << 16) | (c << 8) | d))" <&3 | tr -cd "[:print:]"
   ' _ "$1"
 }
 
