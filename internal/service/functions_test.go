@@ -1033,6 +1033,7 @@ func TestCommitServiceConfigKeepsTheEnvironmentPrivate(t *testing.T) {
 		Datastore:     redis,
 		Image:         "redis",
 		ImageVersion:  "8.9.0",
+		ServiceMemory: "256",
 		ServiceName:   "lollipop",
 	}); err != nil {
 		t.Fatalf("failed to commit the service config: %v", err)
@@ -1043,6 +1044,7 @@ func TestCommitServiceConfigKeepsTheEnvironmentPrivate(t *testing.T) {
 		files.Env:           PrivateFileMode,
 		files.ConfigOptions: PrivateFileMode,
 		files.Memory:        0644,
+		files.ServiceMemory: 0644,
 	} {
 		info, err := os.Stat(filename)
 		if err != nil {

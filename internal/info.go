@@ -82,6 +82,7 @@ var InfoKeys = []InfoKey{
 	{Name: "restart-policy", Description: "show the restart policy the service container is run with"},
 	{Name: "root-password-fingerprint", Description: "show a sha256 fingerprint of the service root password"},
 	{Name: "service", Description: "show the name of the service"},
+	{Name: "service-memory", Description: "show the memory in megabytes the datastore itself is told to use"},
 	{Name: "service-root", Description: "show the service root directory"},
 	{Name: "shm-size", Description: "show the shared memory size the service container is run with"},
 	{Name: "status", Description: "show the service running status"},
@@ -168,6 +169,7 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	// the way every other value here does
 	mounts, _ := service.ServiceMounts(input.Datastore, input.ServiceName)
 	info["mounts"] = service.MountSpecs(mounts)
+	info[service.ServiceMemoryProperty] = common.ReadFirstLine(serviceFiles.ServiceMemory)
 	info["shm-size"] = common.ReadFirstLine(serviceFiles.ShmSize)
 	// only the volumes the service moved, as it was set. Where the rest are
 	// mounted is the definition's to say, and data-dir and config-dir are where

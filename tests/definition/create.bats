@@ -215,6 +215,33 @@ teardown_file() {
   assert_output "$DEFINITION"
 }
 
+@test "($DEFINITION) the service records the service memory its datastore gives it" {
+  declares_service_memory || skip "$DEFINITION has no service memory"
+
+  # created without --service-memory, so this is the definition's default, or
+  # nothing for a datastore that has none
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --service-memory
+  assert_success
+  assert_output "$(service_memory_default)"
+
+  # apart from the container's memory limit, which is left unlimited, so that a
+  # full cache or heap is not the container being killed
+  run container_inspect "$(service_container)" '{{ .HostConfig.Memory }}'
+  assert_success
+  assert_output "0"
+}
+
+@test "($DEFINITION) a create with a service memory the definition cannot take is refused" {
+  declares_service_memory && skip "$DEFINITION has a service memory"
+
+  # it would be recorded and never reach the datastore. Refused before the pull
+  # and before the service root is made, so this costs the daemon nothing
+  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-nomemory" --image "$IMAGE" --image-version "$IMAGE_VERSION" --service-memory 256
+  assert_failure
+  assert_stderr --partial -- "--service-memory"
+  [[ ! -d "$(service_root "$SERVICE-nomemory")" ]] || fail "a refused create left $(service_root "$SERVICE-nomemory") behind"
+}
+
 @test "($DEFINITION) the database is named after the service with its hyphens replaced" {
   # some datastores refuse a hyphen in a database name, so the one a service
   # records has it replaced, and that is the name every template is handed. The

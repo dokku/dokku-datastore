@@ -46,6 +46,7 @@ type Scope struct {
 	Port           map[string]int
 	Scheme         string
 	Memory         string
+	ServiceMemory  string
 	ShmSize        string
 	InitialNetwork string
 

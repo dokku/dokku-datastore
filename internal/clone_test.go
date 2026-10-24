@@ -28,6 +28,7 @@ func cloneSource() serviceSettings {
 		PostCreateNetworks: []string{"created-one", "created-two"},
 		PostStartNetworks:  []string{"started"},
 		RestartPolicy:      "unless-stopped",
+		ServiceMemory:      "256",
 		ShmSize:            "128m",
 		VolumeTargets:      map[string]string{"data": "/redis-data"},
 		WaitTimeout:        "120",
@@ -49,6 +50,7 @@ func TestCloneFlagOverridesOneSetting(t *testing.T) {
 	timeout := "300"
 	networks := []string{"elsewhere"}
 	memory := 1024
+	serviceMemory := "512"
 	mounts := []service.Mount{{Source: "other", ContainerPath: "/opt/other"}}
 	volumeTargets := map[string]string{"config": "/etc/redis"}
 
@@ -76,6 +78,11 @@ func TestCloneFlagOverridesOneSetting(t *testing.T) {
 			name:     "the memory limit",
 			input:    CloneServiceInput{Memory: &memory},
 			expected: func(s *serviceSettings) { s.Memory = memory },
+		},
+		{
+			name:     "the service memory",
+			input:    CloneServiceInput{ServiceMemory: &serviceMemory},
+			expected: func(s *serviceSettings) { s.ServiceMemory = serviceMemory },
 		},
 		{
 			name:     "the mounts",
@@ -121,6 +128,7 @@ func TestCloneCanClearASetting(t *testing.T) {
 		PostCreateNetworks: &none,
 		PostStartNetworks:  &none,
 		RestartPolicy:      &empty,
+		ServiceMemory:      &empty,
 		ShmSize:            &empty,
 		VolumeTargets:      &unmoved,
 		WaitTimeout:        &empty,
@@ -156,6 +164,7 @@ func TestReadServiceSettings(t *testing.T) {
 		serviceFiles.ConfigOptions: "--appendonly yes",
 		serviceFiles.Env:           "ONE=1\nTWO=2",
 		serviceFiles.Memory:        "512",
+		serviceFiles.ServiceMemory: "256",
 		serviceFiles.ShmSize:       "128m",
 	} {
 		writeInfoFile(t, filename, contents)
@@ -234,5 +243,26 @@ func TestReadServiceSettingsRefusesAnUnreadableMemory(t *testing.T) {
 
 	if _, err := readServiceSettings(datastore, "lollipop"); err == nil {
 		t.Error("expected an unreadable memory limit to be refused")
+	}
+}
+
+// A source made before there was a service memory has no file for it, and is
+// read as having none, which the clone is then made with rather than with the
+// datastore's default: the clone runs as its source does.
+func TestReadServiceSettingsReadsAMissingServiceMemoryAsNone(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withInfoService(t, datastore, "lollipop")
+
+	settings, err := readServiceSettings(datastore, "lollipop")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if settings.ServiceMemory != "" {
+		t.Errorf("expected no service memory, got %q", settings.ServiceMemory)
+	}
+
+	if actual := service.DefaultServiceMemory(service.Datastores["memcached"].Definition, &settings.ServiceMemory); actual != "" {
+		t.Errorf("expected a clone of it to be made without one rather than with the default, got %q", actual)
 	}
 }

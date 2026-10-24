@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"testing"
@@ -2786,5 +2787,91 @@ func TestSecretChangesAreTheSameWhereTheDatastoreIs(t *testing.T) {
 
 	if changeScript("omnisci", "root_password") != changeScript("omnisci", "password") {
 		t.Error("expected omnisci to change both of its passwords the same way")
+	}
+}
+
+// A definition declares a service memory exactly when its templates read one,
+// so a value that is recorded always reaches the datastore and one that would
+// never reach it is refused. Every definition of a datastore declares it the
+// same way, since an upgrade between them keeps the value a service has.
+func TestServiceMemoryIsDeclaredWhereItIsRead(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	reads := regexp.MustCompile(`\{\{[^}]*\.ServiceMemory\b`)
+	for _, name := range loaded.Names() {
+		found, _ := loaded.Definition(name)
+		declared := found.Dokku.ServiceMemory != nil
+		if read := reads.Match(found.Compose); read != declared {
+			t.Errorf("%s: expected reading .ServiceMemory (%t) to match declaring service_memory (%t)", name, read, declared)
+		}
+	}
+
+	for _, plugin := range loaded.Plugins() {
+		var first *definition.ServiceMemory
+		names := loaded.NamesFor(plugin)
+		for index, name := range names {
+			found, _ := loaded.Definition(name)
+			if index == 0 {
+				first = found.Dokku.ServiceMemory
+				continue
+			}
+
+			current := found.Dokku.ServiceMemory
+			if (first == nil) != (current == nil) {
+				t.Errorf("%s: expected service_memory to be declared the way %s declares it", name, names[0])
+				continue
+			}
+
+			if first != nil && (first.Default != current.Default || (first.Change == nil) != (current.Change == nil)) {
+				t.Errorf("%s: expected service_memory %+v to match %s's %+v", name, *current, names[0], *first)
+			}
+		}
+	}
+}
+
+// Memcached's cache is held to the 64 megabytes the bash plugin gave it, now as
+// a value a new service records rather than one its container limit stood in
+// for. Redis and elasticsearch keep their own behaviour until they are given
+// one, and only redis is told a new value while it runs.
+func TestServiceMemoryDefaults(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	tests := []struct {
+		name       string
+		defaultMB  int
+		changeable bool
+	}{
+		{name: "memcached", defaultMB: 64, changeable: false},
+		{name: "redis", defaultMB: 0, changeable: true},
+		{name: "elasticsearch-7", defaultMB: 0, changeable: false},
+		{name: "elasticsearch-8", defaultMB: 0, changeable: false},
+		{name: "elasticsearch-9", defaultMB: 0, changeable: false},
+	}
+
+	for _, test := range tests {
+		found, ok := loaded.Definition(test.name)
+		if !ok {
+			t.Fatalf("expected a %s definition", test.name)
+		}
+
+		memory := found.Dokku.ServiceMemory
+		if memory == nil {
+			t.Errorf("%s: expected a service memory", test.name)
+			continue
+		}
+
+		if memory.Default != test.defaultMB {
+			t.Errorf("%s: expected a default of %d, got %d", test.name, test.defaultMB, memory.Default)
+		}
+
+		if (memory.Change != nil) != test.changeable {
+			t.Errorf("%s: expected declaring a change to be %t", test.name, test.changeable)
+		}
 	}
 }

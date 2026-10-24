@@ -46,6 +46,8 @@ type UpgradeCommand struct {
 	shmSize string
 	// memory is the container memory limit in megabytes
 	memory int
+	// serviceMemory is the memory the datastore is told to use for itself
+	serviceMemory string
 	// logDriver is the docker logging driver to use for the service container
 	logDriver string
 	// logOpt are the docker log options to use for the service container
@@ -128,6 +130,7 @@ func (c *UpgradeCommand) FlagSet() *flag.FlagSet {
 	f.StringSliceVarP(&c.postCreateNetwork, "post-create-network", "P", []string{}, "a comma-separated list of networks to attach the service container to after service creation")
 	f.StringSliceVarP(&c.postStartNetwork, "post-start-network", "S", []string{}, "a comma-separated list of networks to attach the service container to after service start")
 	f.IntVarP(&c.memory, "memory", "m", 0, "container memory limit in megabytes, 0 for unlimited")
+	f.StringVar(&c.serviceMemory, "service-memory", "", "memory in megabytes the datastore itself is told to use, such as a cache size or a heap, empty for the datastore's own")
 	f.StringVarP(&c.shmSize, "shm-size", "s", "", "override shared memory size for the service docker container")
 	f.StringVar(&c.logDriver, "log-driver", "", "the docker logging driver to run the service container with (default: the daemon's own)")
 	f.StringSliceVar(&c.logOpt, "log-opt", []string{}, "a comma-separated list of key=value docker log options for the service container")
@@ -265,6 +268,7 @@ func (c *UpgradeCommand) Run(args []string) int {
 		PostStartNetworks:  changedSlice(flags, "post-start-network", c.postStartNetwork),
 		ShmSize:            changedString(flags, "shm-size", c.shmSize),
 		Memory:             changedInt(flags, "memory", c.memory),
+		ServiceMemory:      changedString(flags, "service-memory", c.serviceMemory),
 		LogDriver:          changedString(flags, "log-driver", c.logDriver),
 		LogOptions:         changedSlice(flags, "log-opt", c.logOpt),
 		RestartPolicy:      changedString(flags, "restart", c.restart),

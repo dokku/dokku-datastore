@@ -1213,3 +1213,90 @@ func TestParseRejectsABrokenSecretChange(t *testing.T) {
 		})
 	}
 }
+
+// A datastore that can be told the memory it uses for itself says so, with
+// what a new service is given and how a running one is told a new value. One
+// that says nothing cannot be told one at all.
+func TestParseReadsTheServiceMemory(t *testing.T) {
+	parsed, err := parseCompose(t, validCompose)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if parsed.Dokku.ServiceMemory != nil {
+		t.Errorf("expected a definition declaring nothing to have no service memory, got %+v", parsed.Dokku.ServiceMemory)
+	}
+
+	parsed, err = parseCompose(t, validCompose+"  service_memory: {}\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if parsed.Dokku.ServiceMemory == nil || parsed.Dokku.ServiceMemory.Default != 0 || parsed.Dokku.ServiceMemory.Change != nil {
+		t.Errorf("expected an empty declaration to have a service memory with no default and no change, got %+v", parsed.Dokku.ServiceMemory)
+	}
+
+	parsed, err = parseCompose(t, validCompose+"  service_memory:\n    default: 64\n    change:\n      exec: [resize, \"{{ .ServiceMemory }}\"]\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	memory := parsed.Dokku.ServiceMemory
+	if memory == nil || memory.Default != 64 {
+		t.Fatalf("expected a default of 64, got %+v", memory)
+	}
+
+	if memory.Change == nil || len(memory.Change.Exec) != 2 || memory.Change.Exec[1] != "{{ .ServiceMemory }}" {
+		t.Errorf("expected the change to be kept as it was declared, got %+v", memory.Change)
+	}
+}
+
+// A default that is not a size, or a change that could not reach the running
+// datastore, is refused when the definition is loaded rather than when a
+// service is created or set.
+func TestParseRejectsABrokenServiceMemory(t *testing.T) {
+	tests := []struct {
+		name     string
+		compose  string
+		expected string
+	}{
+		{
+			name:     "a negative default",
+			compose:  validCompose + "  service_memory:\n    default: -1\n",
+			expected: "not a number of megabytes",
+		},
+		{
+			name:     "a change on the host",
+			compose:  validCompose + "  service_memory:\n    change:\n      mode: host\n      exec: [resize]\n",
+			expected: "changed on the host",
+		},
+		{
+			name:     "a change run offline",
+			compose:  validCompose + "  service_memory:\n    change:\n      mode: offline\n      exec: [resize]\n",
+			expected: "changed offline",
+		},
+		{
+			name:     "a change reading stdin",
+			compose:  validCompose + "  service_memory:\n    change:\n      stdin: true\n      exec: [resize]\n",
+			expected: "reading stdin",
+		},
+		{
+			name:     "a change with no exec",
+			compose:  validCompose + "  service_memory:\n    change:\n      env:\n        SIZE: \"{{ .ServiceMemory }}\"\n",
+			expected: "needs an exec",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := parseCompose(t, test.compose)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+
+			if !strings.Contains(err.Error(), test.expected) {
+				t.Errorf("expected an error mentioning %q, got: %s", test.expected, err)
+			}
+		})
+	}
+}

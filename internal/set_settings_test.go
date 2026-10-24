@@ -88,6 +88,7 @@ func TestSetPropertyWritesTheContainerSettings(t *testing.T) {
 		{key: service.ConfigOptionsProperty, value: "--maxmemory-policy allkeys-lru", filename: files.ConfigOptions, written: "--maxmemory-policy allkeys-lru", cleared: "", mode: service.PrivateFileMode},
 		{key: service.CustomEnvProperty, value: "TZ=UTC;LANG=C.UTF-8", filename: files.Env, written: "TZ=UTC\nLANG=C.UTF-8", cleared: "", mode: service.PrivateFileMode},
 		{key: service.MemoryProperty, value: "512", filename: files.Memory, written: "512", cleared: "0", mode: 0644},
+		{key: service.ServiceMemoryProperty, value: "256", filename: files.ServiceMemory, written: "256", cleared: "", mode: 0644},
 		{key: service.ShmSizeProperty, value: "256m", filename: files.ShmSize, written: "256m", cleared: "", mode: 0644},
 	}
 
@@ -310,7 +311,7 @@ func TestSettablePropertyWarning(t *testing.T) {
 			t.Fatalf("expected %s to be settable", key)
 		}
 
-		if actual := property.Warning("redis", "lollipop"); actual != expected {
+		if actual := property.Warning(service.Datastores["redis"].Definition, "redis", "lollipop"); actual != expected {
 			t.Errorf("expected the %s warning to be %q, got %q", key, expected, actual)
 		}
 	}
@@ -351,6 +352,7 @@ func TestReadPropertyReadsWhatSetPropertyWrote(t *testing.T) {
 		service.ConfigOptionsProperty:   "--maxmemory-policy allkeys-lru",
 		service.CustomEnvProperty:       "TZ=UTC;LANG=C.UTF-8",
 		service.MemoryProperty:          "512",
+		service.ServiceMemoryProperty:   "256",
 		service.ShmSizeProperty:         "256m",
 		service.RestartPolicyProperty:   "unless-stopped",
 		service.LogOptProperty:          "max-size=15m",
@@ -472,9 +474,50 @@ func TestSettablePropertyRequiresRestart(t *testing.T) {
 			t.Fatalf("expected %s to be settable", key)
 		}
 
-		if actual := property.RequiresRestart(); actual != expected {
+		if actual := property.RequiresRestart(service.Datastores["redis"].Definition); actual != expected {
 			t.Errorf("expected %s to require a restart to be %t, got %t", key, expected, actual)
 		}
+	}
+}
+
+// The service memory reaches a running redis on its own, since redis is told
+// it while it runs, and waits for the container to be made again everywhere
+// else, since memcached and elasticsearch only read it when they start.
+func TestServiceMemoryTakesEffectByDatastore(t *testing.T) {
+	property, ok := LookupSettableProperty(service.ServiceMemoryProperty)
+	if !ok {
+		t.Fatalf("expected %s to be settable", service.ServiceMemoryProperty)
+	}
+
+	tests := []struct {
+		datastore string
+		effect    PropertyEffect
+		warning   string
+	}{
+		{datastore: "redis", effect: EffectImmediately, warning: ""},
+		{datastore: "memcached", effect: EffectRebuild, warning: "service-memory takes effect the next time the container is built: run `dokku memcached:stop lollipop` then `dokku memcached:start lollipop`"},
+		{datastore: "elasticsearch", effect: EffectRebuild, warning: "service-memory takes effect the next time the container is built: run `dokku elasticsearch:stop lollipop` then `dokku elasticsearch:start lollipop`"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.datastore, func(t *testing.T) {
+			datastore, ok := service.Datastores[test.datastore]
+			if !ok {
+				t.Fatalf("expected a %s datastore", test.datastore)
+			}
+
+			if actual := property.Effect(datastore.Definition); actual != test.effect {
+				t.Errorf("expected the effect to be %d, got %d", test.effect, actual)
+			}
+
+			if actual := property.RequiresRestart(datastore.Definition); actual != (test.effect != EffectImmediately) {
+				t.Errorf("expected requiring a restart to be %t, got %t", test.effect != EffectImmediately, actual)
+			}
+
+			if actual := property.Warning(datastore.Definition, test.datastore, "lollipop"); actual != test.warning {
+				t.Errorf("expected the warning to be %q, got %q", test.warning, actual)
+			}
+		})
 	}
 }
 
@@ -542,5 +585,23 @@ func TestSetScheduleOverrideRefusesACredential(t *testing.T) {
 		if !refused {
 			t.Errorf("expected %s to be refused on a schedule, got %v", key, err)
 		}
+	}
+}
+
+// A service memory is refused by set for a datastore with no way to be told
+// one, as it is by create, so that nothing is recorded where it would never
+// reach the datastore. Clearing it is not refused, since there is nothing to
+// refuse.
+func TestSetServiceMemoryIsRefusedWhereItCannotBeTold(t *testing.T) {
+	postgres := service.Datastores["postgres"]
+	withInfoService(t, postgres, "lollipop")
+
+	err := ValidateServicePropertyValue(postgres, "lollipop", service.ServiceMemoryProperty, "256")
+	if err == nil || !strings.Contains(err.Error(), "--service-memory") {
+		t.Errorf("expected a service memory to be refused for postgres, got %v", err)
+	}
+
+	if err := ValidateServicePropertyValue(postgres, "lollipop", service.ServiceMemoryProperty, ""); err != nil {
+		t.Errorf("expected clearing it to be accepted, got %s", err)
 	}
 }

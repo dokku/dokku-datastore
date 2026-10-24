@@ -247,9 +247,10 @@ func TestRenderLeavesOutAnEnvironmentVariableThatRendersEmpty(t *testing.T) {
 	}
 }
 
-// Elasticsearch sizes its heap from the container's memory limit, so a service
-// with one is left to do that. One with no limit would take half the host, so
-// its heap is held to 512m.
+// Elasticsearch's heap is the service memory when there is one. Otherwise it
+// sizes its heap from the container's memory limit, so a service with one is
+// left to do that. One with no limit would take half the host, so its heap is
+// held to 512m.
 func TestElasticsearchHeapFollowsTheMemoryLimit(t *testing.T) {
 	loaded, err := registry.Load(registry.LoadInput{})
 	if err != nil {
@@ -257,12 +258,15 @@ func TestElasticsearchHeapFollowsTheMemoryLimit(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		memory   string
-		expected string
+		name          string
+		memory        string
+		serviceMemory string
+		expected      string
 	}{
 		{name: "no limit", memory: "", expected: "-Xms512m -Xmx512m"},
 		{name: "a limit", memory: "512", expected: ""},
+		{name: "a service memory", serviceMemory: "256", expected: "-Xms256m -Xmx256m"},
+		{name: "a service memory and a limit", memory: "1024", serviceMemory: "256", expected: "-Xms256m -Xmx256m"},
 	}
 
 	for _, variant := range []string{"elasticsearch-7", "elasticsearch-8", "elasticsearch-9"} {
@@ -283,6 +287,7 @@ func TestElasticsearchHeapFollowsTheMemoryLimit(t *testing.T) {
 						HostRoot:      "/var/lib/dokku/services/elasticsearch/lollipop",
 						ServiceRoot:   "/var/lib/dokku/services/elasticsearch/lollipop",
 						Memory:        test.memory,
+						ServiceMemory: test.serviceMemory,
 					},
 				})
 				if err != nil {
@@ -363,5 +368,107 @@ func TestServiceVolumesFollowAMovedVolume(t *testing.T) {
 	// only the service is given what the operator mounted
 	if strings.Contains(joined, "/srv/extra") {
 		t.Errorf("expected the operator's mounts left out, got %v", volumes)
+	}
+}
+
+// Memcached's cache is the service memory. A service made before there was one
+// sized its cache by its memory limit and keeps doing so, and one with neither
+// keeps the 64 megabytes the bash plugin gave it rather than being told to
+// hold nothing.
+func TestMemcachedCacheFollowsTheServiceMemory(t *testing.T) {
+	loaded, err := registry.Load(registry.LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	found, ok := loaded.Definition("memcached")
+	if !ok {
+		t.Fatal("expected a memcached definition")
+	}
+
+	tests := []struct {
+		name          string
+		memory        string
+		serviceMemory string
+		expected      string
+	}{
+		{name: "neither", expected: "64"},
+		{name: "a limit", memory: "512", expected: "512"},
+		{name: "a service memory", serviceMemory: "256", expected: "256"},
+		{name: "a service memory and a limit", memory: "512", serviceMemory: "256", expected: "256"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			args, err := ContainerArgs(Input{
+				Definition: found,
+				Scope: definition.Scope{
+					ServiceName:   "lollipop",
+					ContainerName: "dokku.memcached.lollipop",
+					Image:         "memcached",
+					ImageVersion:  "1.6.45",
+					HostRoot:      "/var/lib/dokku/services/memcached/lollipop",
+					ServiceRoot:   "/var/lib/dokku/services/memcached/lollipop",
+					Memory:        test.memory,
+					ServiceMemory: test.serviceMemory,
+				},
+			})
+			if err != nil {
+				t.Fatalf("unable to render: %s", err)
+			}
+
+			expected := []string{"memcached", "-m", test.expected}
+			if strings.Join(args.Command, " ") != strings.Join(expected, " ") {
+				t.Errorf("expected the command %q, got %q", expected, args.Command)
+			}
+		})
+	}
+}
+
+// Redis is only told a maxmemory when the service has a service memory, after
+// its config file so that it wins over a maxmemory line there. Without one the
+// arguments are left out, and redis keeps whatever its config says.
+func TestRedisMaxmemoryFollowsTheServiceMemory(t *testing.T) {
+	loaded, err := registry.Load(registry.LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	found, ok := loaded.Definition("redis")
+	if !ok {
+		t.Fatal("expected a redis definition")
+	}
+
+	tests := []struct {
+		name          string
+		serviceMemory string
+		expected      []string
+	}{
+		{name: "none", expected: []string{"redis-server", "/usr/local/etc/redis/redis.conf", "--bind", "0.0.0.0"}},
+		{name: "a service memory", serviceMemory: "256", expected: []string{"redis-server", "/usr/local/etc/redis/redis.conf", "--bind", "0.0.0.0", "--maxmemory", "256mb"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			args, err := ContainerArgs(Input{
+				Definition: found,
+				Scope: definition.Scope{
+					ServiceName:   "lollipop",
+					ContainerName: "dokku.redis.lollipop",
+					Image:         "redis",
+					ImageVersion:  "8.0.0",
+					HostRoot:      "/var/lib/dokku/services/redis/lollipop",
+					ServiceRoot:   "/var/lib/dokku/services/redis/lollipop",
+					ServiceMemory: test.serviceMemory,
+				},
+			})
+			if err != nil {
+				t.Fatalf("unable to render: %s", err)
+			}
+
+			if strings.Join(args.Command, " ") != strings.Join(test.expected, " ") {
+				t.Errorf("expected the command %q, got %q", test.expected, args.Command)
+			}
+		})
 	}
 }
