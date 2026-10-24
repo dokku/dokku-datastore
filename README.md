@@ -302,6 +302,17 @@ dokku-datastore start redis lollipop
 
 `<PLUGIN>_DISABLE_PULL=true` turns fetching off, and now turns it off for all of them rather than for the service image alone - docker used to pull the rest regardless of what it had been told. A command that needs an image it may not fetch says which `docker image pull` would give it one, and stops before it changes anything: an expose that cannot get the ambassador leaves the service unexposed, and a destroy that cannot get busybox leaves the service whole.
 
+## Graphite on grafana 13
+
+Graphite services are now made on `dokku/docker-grafana-graphite:13.2.4`, which runs grafana 13.2.4, graphite-web 1.2.1-pre2 and carbon 1.1.10 rather than grafana 6.4.4 and graphite 0.9. A service made before keeps running 6.4.4 until it is upgraded, the same as any service keeps the version it recorded.
+
+```shell
+# moves a graphite service onto grafana 13
+dokku graphite:upgrade lollipop
+```
+
+An upgraded service keeps the metrics carbon has written, and grafana keeps its dashboards, accounts and datasources, migrating its own database as it starts. Graphite-web's database is migrated as the container starts as well, keeping its accounts, saved graphs and dashboards rather than being made again.
+
 ## Container log retention
 
 A datastore container wrote its log with nothing to say how large it was allowed to get, so on a host using docker's default `json-file` driver it grew until something else on the machine ran out of room. Dokku has capped its own app containers for years - `dokku logs:set --global max-size 20m` - and a datastore container is a container dokku makes, so it is capped by the same answer now. Where nothing has been set at all, the cap is dokku's own default of `10m`.
