@@ -273,3 +273,47 @@ func TestCreateServiceResolvesTheDefinition(t *testing.T) {
 		})
 	}
 }
+
+// A memory limit or a service memory docker or the datastore would refuse, or a
+// service memory for a datastore that cannot be told one, is refused before the
+// service root is made, for the same reason a log option is.
+func TestCreateServiceRefusesAnUnusableMemory(t *testing.T) {
+	notANumber := "256m"
+	nothing := "0"
+	given := "256"
+
+	tests := []struct {
+		name      string
+		datastore string
+		input     CreateServiceInput
+		expected  string
+	}{
+		{name: "a negative memory limit", datastore: "redis", input: CreateServiceInput{Memory: -1}, expected: `invalid memory value "-1"`},
+		{name: "a service memory that is not a number", datastore: "redis", input: CreateServiceInput{ServiceMemory: &notANumber}, expected: `invalid service-memory value "256m"`},
+		{name: "a service memory of nothing", datastore: "memcached", input: CreateServiceInput{ServiceMemory: &nothing}, expected: `invalid service-memory value "0"`},
+		{name: "a service memory the datastore has no way to take", datastore: "postgres", input: CreateServiceInput{ServiceMemory: &given}, expected: "--service-memory"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			datastore := service.Datastores[test.datastore]
+			withDataRoot(t)
+
+			input := test.input
+			input.Datastore = datastore
+			input.ServiceName = "lollipop"
+			err := CreateService(t.Context(), input)
+			if err == nil {
+				t.Fatal("expected the create to be refused, got no error")
+			}
+
+			if !strings.Contains(err.Error(), test.expected) {
+				t.Errorf("expected the error to mention %q, got %q", test.expected, err)
+			}
+
+			if root := service.Folders(datastore, "lollipop").Root; common.DirectoryExists(root) {
+				t.Errorf("a refused create left %s behind", root)
+			}
+		})
+	}
+}

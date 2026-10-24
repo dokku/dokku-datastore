@@ -73,6 +73,10 @@ type CommitServiceConfigInput struct {
 	// ServiceName is the name of the service to commit the service config for
 	ServiceName string
 
+	// ServiceMemory is the memory the datastore is told to use for itself, in
+	// megabytes, empty to leave it to the datastore
+	ServiceMemory string
+
 	// ShmSize is the shared memory size to commit for the service
 	ShmSize string
 
@@ -134,6 +138,17 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to write memory to %s: %w", serviceFiles.Memory, err)
+	}
+
+	err = common.WriteStringToFile(common.WriteStringToFileInput{
+		Content:   input.ServiceMemory,
+		Filename:  serviceFiles.ServiceMemory,
+		GroupName: hostenv.SystemGroup(),
+		Mode:      0644,
+		Username:  hostenv.SystemUser(),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to write service memory to %s: %w", serviceFiles.ServiceMemory, err)
 	}
 
 	err = common.WriteStringToFile(common.WriteStringToFileInput{

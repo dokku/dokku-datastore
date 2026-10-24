@@ -39,6 +39,9 @@ type CloneCommand struct {
 	rootPassword string
 	// postStartNetwork is the networks to attach the service container to after service start
 	postStartNetwork []string
+	// serviceMemory is the memory the datastore is told to use for itself
+	serviceMemory string
+
 	// shmSize is the shared memory size to use for the service
 	shmSize string
 	// logDriver is the docker logging driver to use for the service container
@@ -126,6 +129,7 @@ func (c *CloneCommand) FlagSet() *flag.FlagSet {
 	f.StringSliceVarP(&c.postCreateNetwork, "post-create-network", "P", []string{}, "a comma-separated list of networks to attach the service container to after service creation")
 	f.StringVarP(&c.rootPassword, "root-password", "r", "", "override the root-level service password, for datastores that have one")
 	f.StringSliceVarP(&c.postStartNetwork, "post-start-network", "S", []string{}, "a comma-separated list of networks to attach the service container to after service start")
+	f.StringVar(&c.serviceMemory, "service-memory", "", "memory in megabytes the datastore itself is told to use, such as a cache size or a heap (default: the source's)")
 	f.StringVarP(&c.shmSize, "shm-size", "s", "", "override shared memory size for the service docker container")
 	f.StringVar(&c.logDriver, "log-driver", "", "the docker logging driver to run the service container with (default: the daemon's own)")
 	f.StringSliceVar(&c.logOpt, "log-opt", []string{}, "a comma-separated list of key=value docker log options for the service container")
@@ -147,6 +151,7 @@ func (c *CloneCommand) AutocompleteFlags() complete.Flags {
 			"--config-options":      complete.PredictAnything,
 			"--custom-env":          complete.PredictAnything,
 			"--memory":              complete.PredictAnything,
+			"--service-memory":      complete.PredictAnything,
 			"--initial-network":     complete.PredictAnything,
 			"--password":            complete.PredictAnything,
 			"--post-create-network": complete.PredictAnything,
@@ -313,6 +318,7 @@ func (c *CloneCommand) Run(args []string) int {
 		PostStartNetworks:  changedSlice(flags, "post-start-network", c.postStartNetwork),
 		RestartPolicy:      changedString(flags, "restart", c.restart),
 		WaitTimeout:        changedString(flags, "wait-timeout", c.waitTimeout),
+		ServiceMemory:      changedString(flags, "service-memory", c.serviceMemory),
 		ShmSize:            changedString(flags, "shm-size", c.shmSize),
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})

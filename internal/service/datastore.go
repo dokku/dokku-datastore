@@ -167,6 +167,31 @@ func (s *Datastore) ChangeSecret(ctx context.Context, serviceName string, name s
 	return nil
 }
 
+// ApplyServiceMemory has a running service take the service memory its file now
+// holds, for a datastore that can be told it while it runs. One that cannot, or
+// a service that is not running, reads the file when its container is next made
+// or started, so there is nothing to tell.
+func (s *Datastore) ApplyServiceMemory(ctx context.Context, serviceName string) error {
+	memory := s.Definition.Dokku.ServiceMemory
+	if memory == nil || memory.Change == nil {
+		return nil
+	}
+
+	if Status(ctx, StatusInput{Datastore: s, ServiceName: serviceName}) != "running" {
+		return nil
+	}
+
+	if err := s.run(ctx, serviceName, definition.ServiceMemoryChangeName, runOptions{
+		Command: memory.Change,
+		Stdout:  os.Stderr,
+		Stderr:  os.Stderr,
+	}); err != nil {
+		return fmt.Errorf("%s was set, but the running service could not take it: %w; it takes effect the next time the container is built", ServiceMemoryProperty, err)
+	}
+
+	return nil
+}
+
 // SecretValue is the value a service's secret holds, as the templates read it,
 // and empty for a secret the definition does not declare.
 func (s *Datastore) SecretValue(serviceName string, name string) string {
@@ -1087,6 +1112,10 @@ func verbAction(name string) string {
 		return "secret change"
 	}
 
+	if name == definition.ServiceMemoryChangeName {
+		return "service memory change"
+	}
+
 	return strings.TrimPrefix(name, "triggers.")
 }
 
@@ -1579,6 +1608,7 @@ func (s *Datastore) scope(serviceName string) definition.Scope {
 		Secret:        secrets,
 		Port:          ports,
 		Memory:        render.MemoryLimit(common.ReadFirstLine(serviceFiles.Memory)),
+		ServiceMemory: common.ReadFirstLine(serviceFiles.ServiceMemory),
 		ShmSize:       common.ReadFirstLine(serviceFiles.ShmSize),
 	}
 }

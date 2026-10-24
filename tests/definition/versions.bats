@@ -189,6 +189,36 @@ setup() {
   assert_output "$DEFINITION"
 }
 
+@test "($DEFINITION) an upgrade changes the service memory and keeps it when not asked" {
+  declares_service_memory || skip "$DEFINITION has no service memory"
+
+  local before
+  before="$("$BIN" info "$PLUGIN" "$SERVICE" --service-memory)"
+
+  run "$BIN" upgrade "$PLUGIN" "$SERVICE" --service-memory 512
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --service-memory
+  assert_success
+  assert_output "512"
+
+  # an upgrade that does not name it leaves it where it is
+  run "$BIN" upgrade "$PLUGIN" "$SERVICE" --restart always
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --service-memory
+  assert_success
+  assert_output "512"
+
+  # and back to what every other check expects of this service
+  run "$BIN" upgrade "$PLUGIN" "$SERVICE" --service-memory "$before"
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --service-memory
+  assert_success
+  assert_output "$before"
+}
+
 @test "($DEFINITION) an upgrade changes the memory limit and keeps it when not asked" {
   # generous, since what is checked is that the limit lands rather than that the
   # datastore runs in little memory

@@ -125,6 +125,14 @@ type DocumentationData struct {
 	// PasswordRestarts is whether changing the password stops and starts the
 	// service, which set is only allowed to do with --allow-restart
 	PasswordRestarts bool
+
+	// ServiceMemory is whether the datastore can be told the memory it uses
+	// for itself, ServiceMemoryDefault what a new service is given, zero for
+	// none, and ServiceMemoryLive whether a running service takes a change
+	// without its container being made again
+	ServiceMemory        bool
+	ServiceMemoryDefault int
+	ServiceMemoryLive    bool
 }
 
 // DocumentedImage is an image and the version a definition pins for it.
@@ -167,6 +175,12 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 	image, imageVersion := documentedImage(properties)
 	volumes := documentedVolumes(input.Datastore)
 
+	serviceMemory := input.Datastore.Definition.Dokku.ServiceMemory
+	serviceMemoryDefault := 0
+	if serviceMemory != nil {
+		serviceMemoryDefault = serviceMemory.Default
+	}
+
 	return DocumentationData{
 		AltAlias:       properties.AltAlias,
 		CommandPrefix:  properties.CommandPrefix,
@@ -194,6 +208,10 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		Password:         documentedSecret(input.Datastore, "password").Changeable(),
 		RootPassword:     documentedSecret(input.Datastore, "root_password").Changeable(),
 		PasswordRestarts: documentedSecret(input.Datastore, "password").RestartsService(),
+
+		ServiceMemory:        serviceMemory != nil,
+		ServiceMemoryDefault: serviceMemoryDefault,
+		ServiceMemoryLive:    serviceMemory != nil && serviceMemory.Change != nil,
 	}
 }
 

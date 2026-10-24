@@ -335,6 +335,27 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		}
 	}
 
+	if memory := definition.Dokku.ServiceMemory; memory != nil {
+		if memory.Default < 0 {
+			return fail("service_memory has default %d, which is not a number of megabytes", memory.Default)
+		}
+
+		// the change is told to the running datastore, so it runs against the
+		// service rather than on the host or in place of it, and nothing is
+		// there to read from stdin
+		if memory.Change != nil && memory.Change.Mode == ModeHost {
+			return fail("service_memory is changed on the host, but a change has to reach the datastore")
+		}
+
+		if memory.Change != nil && memory.Change.Mode == ModeOffline {
+			return fail("service_memory is changed offline, but a change is told to the running datastore, and a stopped one reads it when it starts")
+		}
+
+		if memory.Change != nil && memory.Change.Stdin {
+			return fail("service_memory is changed by a command reading stdin, which nothing writes to")
+		}
+	}
+
 	// the value a secret is changed to only exists while it is being changed,
 	// so anything else naming it would render against nothing
 	notChange := func(name string) bool {
@@ -768,6 +789,10 @@ func allCommands(definition Definition) map[string]Command {
 		if secret.Change != nil {
 			commands[SecretChangeName(name)] = *secret.Change
 		}
+	}
+
+	if definition.Dokku.ServiceMemory != nil && definition.Dokku.ServiceMemory.Change != nil {
+		commands[ServiceMemoryChangeName] = *definition.Dokku.ServiceMemory.Change
 	}
 
 	return commands

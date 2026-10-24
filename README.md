@@ -415,6 +415,32 @@ dokku redis:set lollipop memory 512
 dokku redis:set --allow-restart lollipop memory 512
 ```
 
+## Datastore memory
+
+The memory a datastore itself is told to use, in megabytes, is a setting of its own, apart from the container's memory limit: memcached's cache size, redis's `maxmemory` and the elasticsearch heap. It is settable at `create`, `clone` and `upgrade` with `--service-memory`, changed with the `service-memory` property, cleared by giving no value, and reported by `info --service-memory`. An `upgrade` not passed it keeps what the service has, and a `clone` not passed it takes the source's. A datastore that cannot be told one refuses it.
+
+```shell
+dokku-datastore create memcached lollipop --service-memory 256
+
+# redis takes the new maxmemory while it runs, with no restart
+dokku redis:set lollipop service-memory 512
+
+# memcached and elasticsearch read it when they start, so the container is built again
+dokku memcached:set --allow-restart lollipop service-memory 512
+```
+
+A memcached service is created with 64 megabytes, which is kept for every container the service is given afterwards, and its container is left without a memory limit unless `--memory` is passed. A memcached service created before there was a service memory sizes its cache by its memory limit, or at 64 megabytes without one, until it is given one. Redis and elasticsearch services are created without one, and keep their own behaviour until they are given one: redis takes whatever its `redis.conf` says, and elasticsearch sizes its heap from the memory limit, or holds it to 512 megabytes without one.
+
+When the memory limit is set too, keep the service memory below it, since a datastore that grows past the limit has its container killed. For redis, the service memory is passed after `redis.conf` and so wins over a `maxmemory` line in it, and clearing it on a running service goes back to that line, or to no limit without one. A `--maxmemory` in the config options is passed after the service memory and wins over it whenever the container starts, so set one or the other.
+
+A definition declares the setting with `x-dokku.service_memory`, and reads the value in its templates as `{{ .ServiceMemory }}`, empty when the service has none. Its `default` is what a service is created with when it is not given one, and its `change` is a command run against a running service with the new value, for a datastore that can take one while it runs. Without a `change`, a new value reaches the datastore the next time its container is built.
+
+```yaml
+x-dokku:
+  service_memory:
+    default: 64
+```
+
 ## Changing a service's settings
 
 Every setting a service is created with can be changed with `set` afterwards, other than the ones another command owns: the image, its version and the definition belong to `upgrade`, and the mounts to `mount` and `unmount`. `set` refuses those keys and names the command to use instead. The passwords are set too, and are changed in the datastore as well as on disk, as [Changing a service's password](#changing-a-services-password) describes. The container settings `create` writes into files of their own are set the same way as every other property.
@@ -951,7 +977,7 @@ x-dokku:
 
 A clone was made on the source's image and given its data, but nothing else about the source carried over: every other setting came from the flags passed to `clone`, so a clone made without repeating all of them landed on the defaults rather than on what the source runs with.
 
-A clone now starts from the source's settings - its config options, custom env, memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, mounts, volume targets, backup keyserver, backup mailto, backup storage class, backup timestamp and export and import arguments. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
+A clone now starts from the source's settings - its config options, custom env, memory, service memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, mounts, volume targets, backup keyserver, backup mailto, backup storage class, backup timestamp and export and import arguments. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
 
 ```shell
 # the same settings as lollipop

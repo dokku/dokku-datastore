@@ -267,7 +267,7 @@ func (c *SetCommand) Run(args []string) int {
 
 	// read before anything is written, so that a value set again is told from
 	// a change, and a read that fails leaves the property as it was
-	restart := c.allowRestart && property.RequiresRestart()
+	restart := c.allowRestart && property.RequiresRestart(datastore.Definition)
 	var before string
 	if restart {
 		if before, err = internal.ReadProperty(datastore, serviceName, key); err != nil {
@@ -333,7 +333,7 @@ func (c *SetCommand) Run(args []string) int {
 		logger.Info(fmt.Sprintf("%s is unchanged, so %s was not restarted", key, serviceName))
 	}
 
-	if warning := property.Warning(datastore.Properties().CommandPrefix, serviceName); warning != "" {
+	if warning := property.Warning(datastore.Definition, datastore.Properties().CommandPrefix, serviceName); warning != "" {
 		logger.Warn(internal.WarnInput{Warning: warning})
 	}
 

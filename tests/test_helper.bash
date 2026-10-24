@@ -209,6 +209,27 @@ declares_secret() {
   grep -Eq "^[[:space:]]+env: $1\$" "$DEFINITION_ROOT/docker-compose.yml"
 }
 
+# whether this definition can be told the memory it uses for itself
+declares_service_memory() {
+  grep -Eq '^  service_memory:' "$DEFINITION_ROOT/docker-compose.yml"
+}
+
+# the service memory a new service of this definition is created with, empty
+# for one that is created without one
+service_memory_default() {
+  awk '
+    /^  service_memory:/ { found = 1; next }
+    found && /^  [a-z_]+:/ { exit }
+    found && /^    default:/ { print $2; exit }
+  ' "$DEFINITION_ROOT/docker-compose.yml"
+}
+
+# the maxmemory a running redis service has, in bytes
+redis_maxmemory() {
+  docker container exec -e REDISCLI_AUTH="$(cat "$(service_root)/PASSWORD")" "$(service_container)" \
+    redis-cli --no-auth-warning CONFIG GET maxmemory | tail -n 1
+}
+
 # the password flags this definition takes, each given the value named for it,
 # since a flag for a secret the definition does not have is refused
 password_flags() {

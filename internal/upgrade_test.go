@@ -34,6 +34,7 @@ func TestUpgradeChangesSettings(t *testing.T) {
 		{name: "post start networks", input: UpgradeServiceInput{PostStartNetworks: &list}, expected: true},
 		{name: "shm size", input: UpgradeServiceInput{ShmSize: &value}, expected: true},
 		{name: "memory", input: UpgradeServiceInput{Memory: &memory}, expected: true},
+		{name: "service memory", input: UpgradeServiceInput{ServiceMemory: &value}, expected: true},
 		{name: "log driver", input: UpgradeServiceInput{LogDriver: &driver}, expected: true},
 		{name: "log options", input: UpgradeServiceInput{LogOptions: &options}, expected: true},
 		{name: "restart policy", input: UpgradeServiceInput{RestartPolicy: &policy}, expected: true},
@@ -63,6 +64,10 @@ func TestUpgradeCanClearASetting(t *testing.T) {
 	unlimited := 0
 	if !(UpgradeServiceInput{Memory: &unlimited}).changesSettings() {
 		t.Error("expected clearing the memory limit to count as a change")
+	}
+
+	if !(UpgradeServiceInput{ServiceMemory: &empty}).changesSettings() {
+		t.Error("expected clearing the service memory to count as a change")
 	}
 }
 
@@ -525,5 +530,79 @@ func TestApplyUpgradeSettingsWritesTheMemory(t *testing.T) {
 		if mode := fileMode(t, files.Memory); mode != 0644 {
 			t.Errorf("expected %s to be 644, got %o", files.Memory, mode)
 		}
+	}
+}
+
+// The service memory is read from its file each time a container is made, so
+// an upgrade changes it by writing the file, clears it by writing it empty, and
+// leaves it alone when not asked.
+func TestApplyUpgradeSettingsWritesTheServiceMemory(t *testing.T) {
+	datastore := service.Datastores["memcached"]
+	withDataRoot(t)
+
+	files := service.Files(datastore, "lollipop")
+	if err := os.MkdirAll(service.Folders(datastore, "lollipop").Root, 0775); err != nil {
+		t.Fatalf("failed to create the service root: %s", err)
+	}
+	if err := os.WriteFile(files.ServiceMemory, []byte("64"), 0644); err != nil {
+		t.Fatalf("failed to write %s: %s", files.ServiceMemory, err)
+	}
+
+	readServiceMemory := func() string {
+		t.Helper()
+		contents, err := os.ReadFile(files.ServiceMemory)
+		if err != nil {
+			t.Fatalf("failed to read %s: %s", files.ServiceMemory, err)
+		}
+		return string(contents)
+	}
+
+	if err := applyUpgradeSettings(UpgradeServiceInput{Datastore: datastore, ServiceName: "lollipop"}); err != nil {
+		t.Fatalf("failed to apply the settings: %s", err)
+	}
+	if actual := readServiceMemory(); actual != "64" {
+		t.Errorf("expected the service memory to be kept, got %q", actual)
+	}
+
+	for _, memory := range []string{"256", ""} {
+		if err := applyUpgradeSettings(UpgradeServiceInput{Datastore: datastore, ServiceName: "lollipop", ServiceMemory: &memory}); err != nil {
+			t.Fatalf("failed to apply the settings: %s", err)
+		}
+		if actual := readServiceMemory(); actual != memory {
+			t.Errorf("expected %q, got %q", memory, actual)
+		}
+		if mode := fileMode(t, files.ServiceMemory); mode != 0644 {
+			t.Errorf("expected %s to be 644, got %o", files.ServiceMemory, mode)
+		}
+	}
+}
+
+// A service memory upgrade would only record for nothing to read is refused
+// before anything is touched, as is one that is not a size.
+func TestUpgradeServiceRefusesAnUnusableServiceMemory(t *testing.T) {
+	notANumber := "256m"
+	negative := -1
+
+	tests := []struct {
+		name     string
+		input    UpgradeServiceInput
+		expected string
+	}{
+		{name: "a service memory that is not a number", input: UpgradeServiceInput{ServiceMemory: &notANumber}, expected: `invalid service-memory value "256m"`},
+		{name: "a negative memory limit", input: UpgradeServiceInput{Memory: &negative}, expected: `invalid memory value "-1"`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			withDataRoot(t)
+
+			input := test.input
+			input.Datastore = service.Datastores["memcached"]
+			input.ServiceName = "lollipop"
+			err := UpgradeService(t.Context(), input)
+			if err == nil || !strings.Contains(err.Error(), test.expected) {
+				t.Errorf("expected an error mentioning %q, got %v", test.expected, err)
+			}
+		})
 	}
 }

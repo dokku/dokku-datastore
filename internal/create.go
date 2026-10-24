@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/execx"
@@ -104,6 +105,11 @@ type CreateServiceInput struct {
 	// ServiceName is the name of the service to create
 	ServiceName string
 
+	// ServiceMemory is the memory the datastore is told to use for itself, in
+	// megabytes. Nil takes the datastore's default, and empty leaves it to the
+	// datastore.
+	ServiceMemory *string
+
 	// ShmSize is the shared memory size to use for the service
 	ShmSize string
 
@@ -182,7 +188,21 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return err
 	}
 
+	if err := service.ValidateMemory(strconv.Itoa(input.Memory)); err != nil {
+		return err
+	}
+
 	if err := service.ValidateShmSize(input.ShmSize); err != nil {
+		return err
+	}
+
+	// against the definition the version settled on, which is the one that
+	// says whether there is a service memory to set and what it defaults to
+	serviceMemory := service.DefaultServiceMemory(input.Datastore.Definition, input.ServiceMemory)
+	if err := service.ValidateServiceMemory(serviceMemory); err != nil {
+		return err
+	}
+	if err := service.CheckServiceMemory(input.Datastore.Definition, serviceMemory); err != nil {
 		return err
 	}
 
@@ -305,6 +325,7 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		PostCreateNetworks: input.PostCreateNetworks,
 		PostStartNetworks:  input.PostStartNetworks,
 		RestartPolicy:      input.RestartPolicy,
+		ServiceMemory:      serviceMemory,
 		WaitTimeout:        input.WaitTimeout,
 		Mounts:             input.Mounts,
 		VolumeTargets:      input.VolumeTargets,

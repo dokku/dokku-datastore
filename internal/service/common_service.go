@@ -319,6 +319,10 @@ type ServiceFiles struct {
 	// Port is the port file for the service
 	Port string
 
+	// ServiceMemory is the file holding the memory the datastore is told to
+	// use for itself, empty when it is left to the datastore
+	ServiceMemory string
+
 	// ShmSize is the shared memory size file for the service
 	ShmSize string
 
@@ -361,6 +365,7 @@ func Files(s *Datastore, serviceName string) ServiceFiles {
 		Memory:        filepath.Join(folders.Root, "MEMORY"),
 		Password:      filepath.Join(folders.Root, "PASSWORD"),
 		Port:          filepath.Join(folders.Root, "PORT"),
+		ServiceMemory: filepath.Join(folders.Root, "SERVICE_MEMORY"),
 		ShmSize:       filepath.Join(folders.Root, "SHM_SIZE"),
 		Backend:       filepath.Join(folders.Root, "BACKEND"),
 		Compose:       filepath.Join(folders.Root, "docker-compose.yml"),
