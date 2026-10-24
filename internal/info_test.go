@@ -119,6 +119,7 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		serviceFiles.Image:         "redis",
 		serviceFiles.ImageVersion:  "8.4.2",
 		serviceFiles.Memory:        "512",
+		serviceFiles.ServiceMemory: "256",
 		serviceFiles.ShmSize:       "128m",
 		serviceFiles.ConfigOptions: "--appendonly yes",
 	} {
@@ -173,6 +174,7 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		"memory":            "512",
 		"restart-policy":    "unless-stopped",
 		"service":           "lollipop",
+		"service-memory":    "256",
 		"shm-size":          "128m",
 		"wait-timeout":      "120",
 		"volume-targets":    "data=/redis-data",

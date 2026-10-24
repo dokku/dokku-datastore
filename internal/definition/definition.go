@@ -245,6 +245,12 @@ type Dokku struct {
 	// overrides it.
 	WaitTimeout int `yaml:"wait_timeout"`
 
+	// ServiceMemory declares that the datastore can be told how much memory to
+	// use for itself, such as a cache size or a heap, apart from the limit the
+	// container is held to. Nil for a datastore that cannot, which has the
+	// service-memory setting refused.
+	ServiceMemory *ServiceMemory `yaml:"service_memory"`
+
 	// Wait names the port to probe with the dokku/wait sidecar, for images with
 	// no tool a compose healthcheck could use. Ignored when Healthcheck is set.
 	Wait string `yaml:"wait"`
@@ -370,6 +376,26 @@ const NewSecretField = ".NewSecret"
 func SecretChangeName(secret string) string {
 	return "secrets." + secret + ".change"
 }
+
+// ServiceMemory is how a datastore is told the memory it uses for itself. The
+// value reaches templates as {{ .ServiceMemory }}, in megabytes, and empty when
+// the service has none.
+type ServiceMemory struct {
+	// Default is what a service is created with when it is not given one, in
+	// megabytes. Zero leaves a new service without one, so the datastore keeps
+	// its own behaviour.
+	Default int `yaml:"default"`
+
+	// Change has the running datastore take a new value, rendered with it as
+	// {{ .ServiceMemory }}, so that a change takes effect without the container
+	// being made again. Without one a change waits for the next rebuild.
+	Change *Command `yaml:"change"`
+}
+
+// ServiceMemoryChangeName is how the service memory's change command is
+// addressed where commands are named, as in the checks a definition is parsed
+// with.
+const ServiceMemoryChangeName = "service_memory.change"
 
 // Command is one operation against a service.
 type Command struct {

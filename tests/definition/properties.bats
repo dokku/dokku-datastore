@@ -427,6 +427,110 @@ skip_unless_log_is_capped() {
   assert_output "0"
 }
 
+@test "($DEFINITION) the service memory reaches the container it is rebuilt with" {
+  declares_service_memory || skip "$DEFINITION has no service memory"
+
+  local before
+  before="$("$BIN" info "$PLUGIN" "$SERVICE" --service-memory)"
+
+  # what elasticsearch is held to without a limit, so the heap is one it is
+  # known to start in
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" service-memory 512
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --service-memory
+  assert_success
+  assert_output "512"
+
+  run rebuild_service
+  assert_success
+
+  case "$PLUGIN" in
+  memcached)
+    run container_inspect "$(service_container)" '{{ join .Config.Cmd " " }}'
+    assert_success
+    assert_output --partial -- "-m 512"
+    ;;
+  redis)
+    run container_inspect "$(service_container)" '{{ join .Config.Cmd " " }}'
+    assert_success
+    assert_output --partial -- "--maxmemory 512mb"
+    ;;
+  elasticsearch)
+    run container_inspect "$(service_container)" '{{ range .Config.Env }}{{ println . }}{{ end }}'
+    assert_success
+    assert_line "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ;;
+  *)
+    fail "nothing says where $PLUGIN's service memory reaches its container"
+    ;;
+  esac
+
+  # and back to what every other check expects of this service
+  run "$BIN" set "$PLUGIN" "$SERVICE" service-memory "$before"
+  assert_success
+  run rebuild_service
+  assert_success
+}
+
+@test "($DEFINITION) a service memory reaches a running redis without a rebuild" {
+  [[ "$PLUGIN" == redis ]] || skip "only redis is told a service memory while it runs"
+
+  local id
+  id="$(service_id)"
+
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" service-memory 256
+  assert_success
+  refute_stderr --partial "takes effect the next time the container is built"
+
+  run redis_maxmemory
+  assert_success
+  assert_output "$((256 * 1024 * 1024))"
+
+  # told rather than rebuilt
+  run service_id
+  assert_success
+  assert_output "$id"
+
+  # cleared, it goes back to what the config file says, which is nothing
+  run "$BIN" set "$PLUGIN" "$SERVICE" service-memory
+  assert_success
+
+  run redis_maxmemory
+  assert_success
+  assert_output "0"
+
+  # a stopped service has nothing to tell, and takes the value when it starts
+  run "$BIN" stop "$PLUGIN" "$SERVICE"
+  assert_success
+  run "$BIN" set "$PLUGIN" "$SERVICE" service-memory 128
+  assert_success
+  run "$BIN" start "$PLUGIN" "$SERVICE"
+  assert_success
+
+  run redis_maxmemory
+  assert_success
+  assert_output "$((128 * 1024 * 1024))"
+
+  # and back to what every other check expects of this service
+  run "$BIN" set "$PLUGIN" "$SERVICE" service-memory
+  assert_success
+  run rebuild_service
+  assert_success
+}
+
+@test "($DEFINITION) a service memory the definition cannot take is refused by set" {
+  declares_service_memory && skip "$DEFINITION has a service memory"
+
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" service-memory 256
+  assert_failure
+  assert_stderr --partial -- "--service-memory"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --service-memory
+  assert_success
+  assert_output ""
+}
+
 @test "($DEFINITION) the config options are set, read back and unset" {
   # not rebuilt with, since what the process accepts is the datastore's own. The
   # value follows -- so that set does not read it as a flag of its own

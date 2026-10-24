@@ -299,6 +299,7 @@ func readmeUsage(input ReadmeInput) ([]string, error) {
 	sections = append(sections, readmeExposedDsn(input.Data)...)
 	sections = append(sections, readmeExtraArgs(input.Data)...)
 	sections = append(sections, readmeWaitTimeout(input.Data)...)
+	sections = append(sections, readmeServiceMemory(input.Data)...)
 	sections = append(sections, readmeVolumeTargets(input.Data)...)
 	sections = append(sections, readmeReservedNames(input.Data)...)
 
@@ -436,6 +437,11 @@ func readmeSettableProperties(data DocumentationData) []string {
 			effect = "once `set` restarts the service, with `--allow-restart`"
 		}
 
+		// told to a running service where the datastore can take it that way
+		if property.Name == service.ServiceMemoryProperty && data.ServiceMemoryLive {
+			effect = effects[EffectImmediately]
+		}
+
 		table = append(table, fmt.Sprintf("| `%s` | %s | %s |", property.Name, property.Description, effect))
 	}
 
@@ -490,6 +496,8 @@ func documentsProperty(property SettableProperty, data DocumentationData) bool {
 		return data.Password
 	case property.Name == "root-password":
 		return data.RootPassword
+	case property.Name == service.ServiceMemoryProperty:
+		return data.ServiceMemory
 	}
 
 	return true
@@ -604,6 +612,33 @@ func readmeWaitTimeout(data DocumentationData) []string {
 		fmt.Sprintf("To wait longer for every %s service on the host, set the `%s_WAIT_TIMEOUT` environment variable to a number of seconds. "+
 			"To wait longer for a single service, set its `wait-timeout` property with `dokku %s:set` or pass `--wait-timeout` to `create`, `clone` or `upgrade`. "+
 			"The service's own setting is used first, then the environment variable, then the datastore's default.", data.CommandPrefix, data.PluginVariable, data.CommandPrefix),
+	}
+}
+
+// readmeServiceMemory explains the memory a datastore is told to use for
+// itself, for a datastore that can be told it
+func readmeServiceMemory(data DocumentationData) []string {
+	if !data.ServiceMemory {
+		return nil
+	}
+
+	given := fmt.Sprintf("A service is created without one unless `--service-memory` is passed, which leaves the size to %s.", data.Title)
+	if data.ServiceMemoryDefault > 0 {
+		given = fmt.Sprintf("A service is created with %d megabytes unless `--service-memory` is passed, and that value is kept for every container the service is given afterwards.", data.ServiceMemoryDefault)
+	}
+
+	takes := fmt.Sprintf("A change reaches the container the next time one is built, so use `dokku %s:stop` and then `dokku %s:start`, or pass `--allow-restart` to `set`.", data.CommandPrefix, data.CommandPrefix)
+	if data.ServiceMemoryLive {
+		takes = "A change is told to a running service at once, without its container being built again, and a stopped service takes it when it is next started."
+	}
+
+	return []string{
+		"### Datastore memory",
+		fmt.Sprintf("The memory %s itself is told to use, in megabytes, is the service's `service-memory`. "+
+			"It is set with `--service-memory` when a service is created or upgraded, changed with `dokku %s:set lollipop service-memory <megabytes>`, cleared by giving no value, and reported by `dokku %s:info lollipop --service-memory`. ", data.Title, data.CommandPrefix, data.CommandPrefix) +
+			given + " " + takes,
+		"It is separate from the container's `memory` limit, which is unlimited unless it is set. " +
+			"When both are set, keep the service memory below the limit, since a datastore that grows past the limit has its container killed.",
 	}
 }
 

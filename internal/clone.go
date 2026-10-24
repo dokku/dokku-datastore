@@ -51,6 +51,10 @@ type CloneServiceInput struct {
 	// Memory limits the memory of the new container
 	Memory *int
 
+	// ServiceMemory is the memory the new service's datastore is told to use
+	// for itself
+	ServiceMemory *string
+
 	// InitialNetwork is the network the new container is attached to on create
 	InitialNetwork *string
 
@@ -109,6 +113,7 @@ type serviceSettings struct {
 	PostCreateNetworks []string
 	PostStartNetworks  []string
 	RestartPolicy      string
+	ServiceMemory      string
 	ShmSize            string
 	VolumeTargets      map[string]string
 	WaitTimeout        string
@@ -160,6 +165,7 @@ func readServiceSettings(datastore *service.Datastore, serviceName string) (serv
 		PostCreateNetworks: splitList(service.PostCreateNetwork(datastore, serviceName)),
 		PostStartNetworks:  splitList(service.PostStartNetwork(datastore, serviceName)),
 		RestartPolicy:      service.ServiceRestartPolicy(datastore, serviceName),
+		ServiceMemory:      common.ReadFirstLine(serviceFiles.ServiceMemory),
 		ShmSize:            common.ReadFirstLine(serviceFiles.ShmSize),
 		VolumeTargets:      volumeTargets,
 		WaitTimeout:        service.ServiceWaitTimeout(datastore, serviceName),
@@ -181,6 +187,7 @@ func (s serviceSettings) withOverrides(input CloneServiceInput) serviceSettings 
 		{value: &s.InitialNetwork, override: input.InitialNetwork},
 		{value: &s.LogDriver, override: input.LogDriver},
 		{value: &s.RestartPolicy, override: input.RestartPolicy},
+		{value: &s.ServiceMemory, override: input.ServiceMemory},
 		{value: &s.ShmSize, override: input.ShmSize},
 		{value: &s.WaitTimeout, override: input.WaitTimeout},
 	}
@@ -271,7 +278,9 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 
 	// placed on the definition the source is pinned to rather than the one its
 	// image resolves to, which differ for a service created with --definition
-	// or one pinned before its image had definitions of its own
+	// or one pinned before its image had definitions of its own. The service
+	// memory is always given, so that a source without one is cloned without
+	// one rather than handed the datastore's default
 	if err := CreateService(ctx, CreateServiceInput{
 		ConfigOptions:      settings.ConfigOptions,
 		CustomEnv:          settings.CustomEnv,
@@ -290,6 +299,7 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 		RestartPolicy:      settings.RestartPolicy,
 		RootPassword:       input.RootPassword,
 		ServiceName:        input.NewServiceName,
+		ServiceMemory:      &settings.ServiceMemory,
 		ShmSize:            settings.ShmSize,
 		VolumeTargets:      settings.VolumeTargets,
 		WaitTimeout:        settings.WaitTimeout,

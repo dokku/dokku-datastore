@@ -41,6 +41,10 @@ type UpgradeServiceInput struct {
 	// Memory is the container memory limit in megabytes, zero for unlimited
 	Memory *int
 
+	// ServiceMemory is the memory the datastore is told to use for itself, in
+	// megabytes, empty to leave it to the datastore
+	ServiceMemory *string
+
 	// LogDriver is the docker logging driver the service container is run with
 	LogDriver *string
 
@@ -101,6 +105,7 @@ func (i UpgradeServiceInput) changesSettings() bool {
 		i.PostStartNetworks != nil ||
 		i.ShmSize != nil ||
 		i.Memory != nil ||
+		i.ServiceMemory != nil ||
 		i.LogDriver != nil ||
 		i.LogOptions != nil ||
 		i.RestartPolicy != nil ||
@@ -174,6 +179,16 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	}
 	if input.ShmSize != nil {
 		if err := service.ValidateShmSize(*input.ShmSize); err != nil {
+			return err
+		}
+	}
+	if input.Memory != nil {
+		if err := service.ValidateMemory(strconv.Itoa(*input.Memory)); err != nil {
+			return err
+		}
+	}
+	if input.ServiceMemory != nil {
+		if err := service.ValidateServiceMemory(*input.ServiceMemory); err != nil {
 			return err
 		}
 	}
@@ -264,6 +279,14 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	// container left to go back to
 	if err := checkUpgradeMounts(ctx, input, target); err != nil {
 		return err
+	}
+
+	// and against that definition too, since it is the one that has to say
+	// whether there is a service memory to set
+	if input.ServiceMemory != nil {
+		if err := service.CheckServiceMemory(target.Definition, *input.ServiceMemory); err != nil {
+			return err
+		}
 	}
 
 	// and for the same reason again: a migration that cannot be undone, or that
@@ -456,6 +479,7 @@ func applyUpgradeSettings(input UpgradeServiceInput) error {
 		{filename: serviceFiles.ConfigOptions, value: input.ConfigOptions, mode: service.PrivateFileMode},
 		{filename: serviceFiles.ShmSize, value: input.ShmSize, mode: 0644},
 		{filename: serviceFiles.Memory, value: memory, mode: 0644},
+		{filename: serviceFiles.ServiceMemory, value: input.ServiceMemory, mode: 0644},
 	}
 	for _, file := range files {
 		if file.value == nil {

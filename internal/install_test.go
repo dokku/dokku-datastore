@@ -180,7 +180,7 @@ func TestRestrictServiceSecretsTightensWhatOlderPluginsLeftOpen(t *testing.T) {
 		files.ConfigOptions,
 		files.Password,
 	}
-	for _, filename := range append(private, files.Memory) {
+	for _, filename := range append(private, files.Memory, files.ServiceMemory) {
 		if err := os.WriteFile(filename, []byte("value"), 0644); err != nil {
 			t.Fatalf("failed to write %s: %s", filename, err)
 		}
@@ -205,9 +205,11 @@ func TestRestrictServiceSecretsTightensWhatOlderPluginsLeftOpen(t *testing.T) {
 		}
 	}
 
-	// nothing secret is in it, and other tooling may read it
-	if mode := fileMode(t, files.Memory); mode != 0644 {
-		t.Errorf("expected %s to be left at 644, got %o", files.Memory, mode)
+	// nothing secret is in them, and other tooling may read them
+	for _, filename := range []string{files.Memory, files.ServiceMemory} {
+		if mode := fileMode(t, filename); mode != 0644 {
+			t.Errorf("expected %s to be left at 644, got %o", filename, mode)
+		}
 	}
 }
 

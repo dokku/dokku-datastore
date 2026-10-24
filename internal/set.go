@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku-datastore/internal/verb"
 	"github.com/dokku/dokku/plugins/common"
@@ -42,6 +43,11 @@ type SettableProperty struct {
 
 	// TakesEffect is when a change reaches the service
 	TakesEffect PropertyEffect
+
+	// effectFor is when a change reaches a service of a particular datastore,
+	// for a property that one datastore takes while it runs and another only
+	// once its container is made again. TakesEffect is used without one.
+	effectFor func(d definition.Definition) PropertyEffect
 
 	// Sensitive is a credential, whose value is never printed back
 	Sensitive bool
@@ -97,10 +103,20 @@ func (p SettableProperty) ReportedBy() string {
 	return p.Name
 }
 
+// Effect is when a change to the property reaches a service of the datastore
+// the definition describes
+func (p SettableProperty) Effect(d definition.Definition) PropertyEffect {
+	if p.effectFor != nil {
+		return p.effectFor(d)
+	}
+
+	return p.TakesEffect
+}
+
 // Warning is what the set command warns of once the property is set, for one
 // that does not reach the service on its own, and empty for one that does
-func (p SettableProperty) Warning(commandPrefix string, serviceName string) string {
-	switch p.TakesEffect {
+func (p SettableProperty) Warning(d definition.Definition, commandPrefix string, serviceName string) string {
+	switch p.Effect(d) {
 	case EffectRebuild:
 		return fmt.Sprintf("%s takes effect the next time the container is built: run `dokku %s:stop %s` then `dokku %s:start %s`", p.Name, commandPrefix, serviceName, commandPrefix, serviceName)
 	case EffectReexpose:
@@ -112,8 +128,8 @@ func (p SettableProperty) Warning(commandPrefix string, serviceName string) stri
 
 // RequiresRestart is whether a change to the property only reaches the service
 // once it is restarted or reexposed
-func (p SettableProperty) RequiresRestart() bool {
-	return p.TakesEffect != EffectImmediately
+func (p SettableProperty) RequiresRestart(d definition.Definition) bool {
+	return p.Effect(d) != EffectImmediately
 }
 
 // SettableProperties are the properties a service exposes through the set
@@ -373,6 +389,30 @@ var SettableProperties = []SettableProperty{
 		}),
 	},
 	{
+		Name:        service.ServiceMemoryProperty,
+		Description: "the memory in megabytes the datastore itself is told to use, such as a cache size or a heap, empty for its own default",
+		TakesEffect: EffectRebuild,
+		// a datastore that can be told while it runs is, and the rest read it
+		// when the container is made
+		effectFor: func(d definition.Definition) PropertyEffect {
+			if d.Dokku.ServiceMemory != nil && d.Dokku.ServiceMemory.Change != nil {
+				return EffectImmediately
+			}
+			return EffectRebuild
+		},
+		validate: service.ValidateServiceMemory,
+		validateService: func(s *service.Datastore, serviceName string, value string) error {
+			return service.CheckServiceMemory(s.Definition, value)
+		},
+		read: serviceFileReader(func(files service.ServiceFiles) string { return files.ServiceMemory }),
+		write: serviceFileWriter(func(files service.ServiceFiles) string { return files.ServiceMemory }, 0644, func(value string) string {
+			return value
+		}),
+		apply: func(ctx context.Context, s *service.Datastore, serviceName string) error {
+			return s.ApplyServiceMemory(ctx, serviceName)
+		},
+	},
+	{
 		Name:        service.ShmSizeProperty,
 		Description: "the shared memory size of the container, such as `64m`",
 		TakesEffect: EffectRebuild,
@@ -580,7 +620,7 @@ type RestartForPropertyInput struct {
 // reconciles the ports and reexpose refuses a stopped service. A service that
 // is not exposed takes it up on its next expose.
 func RestartForProperty(ctx context.Context, input RestartForPropertyInput) error {
-	switch input.Property.TakesEffect {
+	switch input.Property.Effect(input.Datastore.Definition) {
 	case EffectRebuild:
 		return RecreateServiceContainer(ctx, RecreateServiceContainerInput{
 			Datastore:   input.Datastore,

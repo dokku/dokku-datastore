@@ -347,7 +347,7 @@ func (c *CloneCommand) Documentation() string {
 	return `you can clone an existing service to a new one
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2
 the new service starts from the settings of the one it copies: its config options,
-custom env, memory, shm size, networks, log driver, log options, restart policy,
+custom env, memory, service memory, shm size, networks, log driver, log options, restart policy,
 mounts, volume targets, backup keyserver, backup storage class and backup timestamp. A flag passed to clone overrides that one setting, and a
 flag passed empty clears it
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --restart no --custom-env ""
@@ -437,6 +437,10 @@ dokku {{.CommandPrefix}}:create lollipop --restart unless-stopped
 the service is waited on until it answers, for as long as the datastore's own default,
 which a slow host may raise for every service with {{.PluginVariable}}_WAIT_TIMEOUT or a service may raise for itself.
 dokku {{.CommandPrefix}}:create lollipop --wait-timeout 120
+{{- if .ServiceMemory}}
+the memory the datastore itself is told to use, in megabytes, is {{if .ServiceMemoryDefault}}{{.ServiceMemoryDefault}} unless it is given, and is kept apart from the container's memory limit.{{else}}left to the datastore unless it is given, and is kept apart from the container's memory limit.{{end}}
+dokku {{.CommandPrefix}}:create lollipop --service-memory 256
+{{- end}}
 the config options are handed to the process the container runs, not to docker, so
 a host path or docker volume is mounted with --volume, which may be repeated.
 dokku {{.CommandPrefix}}:create lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro
@@ -1035,6 +1039,10 @@ unset the post-create-network value
 dokku {{.CommandPrefix}}:set lollipop post-create-network
 limit the container to 512 megabytes of memory, or go back to no limit with 0
 dokku {{.CommandPrefix}}:set lollipop memory 512
+{{- if .ServiceMemory}}
+tell the datastore itself to use 256 megabytes, or go back to its own default by giving no value
+dokku {{.CommandPrefix}}:set lollipop service-memory 256
+{{- end}}
 give the container a shared memory size of its own
 dokku {{.CommandPrefix}}:set lollipop shm-size 256m
 start the container with semi-colon delimited environment variables of your own
@@ -1132,7 +1140,10 @@ dokku {{.CommandPrefix}}:set lollipop volume-targets {{.VolumeKey}}=/srv/{{.Comm
 go back to mounting every volume where the definition does
 dokku {{.CommandPrefix}}:set lollipop volume-targets
 {{- end}}
-> NOTE: a network, a log setting, a restart policy, a volume target, the config options, the custom environment, the memory limit or the shared memory size reaches the container the next time one is built, and set warns that it does. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.
+> NOTE: a network, a log setting, a restart policy, a volume target, the config options, the custom environment, the memory limit{{if and .ServiceMemory (not .ServiceMemoryLive)}}, the service memory{{end}} or the shared memory size reaches the container the next time one is built, and set warns that it does. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.
+{{- if .ServiceMemoryLive}}
+> NOTE: a service memory is told to a running service at once, without its container being built again.
+{{- end}}
 > NOTE: a port-bind-address or port-source-range reaches an exposed service with {{.CommandPrefix}}:reexpose, which replaces the container publishing its ports and leaves the service container running.
 > NOTE: an expose-mode, or a port-bind-address for a service exposed directly, reaches an exposed service with {{.CommandPrefix}}:reexpose, which stops and starts a running service after asking. It also reaches the service the next time it is restarted, or stopped and started.`
 }
@@ -1329,7 +1340,11 @@ A service keeps the volume targets it has unless --volume-target is passed, whic
 dokku {{.CommandPrefix}}:upgrade lollipop --volume-target ""
 {{- end}}
 A service keeps its memory limit unless --memory is passed, and --memory 0 removes it.
-dokku {{.CommandPrefix}}:upgrade lollipop --memory 512`
+dokku {{.CommandPrefix}}:upgrade lollipop --memory 512
+{{- if .ServiceMemory}}
+A service keeps its service memory unless --service-memory is passed, and --service-memory "" leaves it to the datastore.
+dokku {{.CommandPrefix}}:upgrade lollipop --service-memory 256
+{{- end}}`
 }
 
 // Group is the readme usage section the command is documented under

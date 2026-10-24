@@ -294,10 +294,14 @@ func TestReadmeSettableProperties(t *testing.T) {
 				"The `password` and `root-password` keys are changed in the datastore",
 				"so the service has to be running",
 			},
+			absent: []string{"| `service-memory` |"},
 		},
 		"redis": {
-			present: []string{"| `backup-bucket` |", "| `volume-targets` |", "| `password` |", "The `password` key is changed in the datastore"},
-			absent:  []string{"| `export-args` |", "| `import-args` |", "| `root-password` |"},
+			present: []string{
+				"| `backup-bucket` |", "| `volume-targets` |", "| `password` |", "The `password` key is changed in the datastore",
+				"| `service-memory` | the memory in megabytes the datastore itself is told to use, such as a cache size or a heap, empty for its own default | immediately |",
+			},
+			absent: []string{"| `export-args` |", "| `import-args` |", "| `root-password` |"},
 		},
 		"nats": {
 			present: []string{
@@ -306,8 +310,11 @@ func TestReadmeSettableProperties(t *testing.T) {
 			},
 		},
 		"memcached": {
-			present: []string{"| `shm-size` |"},
-			absent:  []string{"| `backup-secret-access-key` |", "| `backup-keyserver` |", "| `password` |", "| `root-password` |", "key is changed in the datastore"},
+			present: []string{
+				"| `shm-size` |",
+				"| `service-memory` | the memory in megabytes the datastore itself is told to use, such as a cache size or a heap, empty for its own default | after `memcached:stop` and `memcached:start` |",
+			},
+			absent: []string{"| `backup-secret-access-key` |", "| `backup-keyserver` |", "| `password` |", "| `root-password` |", "key is changed in the datastore"},
 		},
 	}
 
@@ -511,6 +518,55 @@ func TestReadmeVolumeTargets(t *testing.T) {
 			// a blank line inside a table ends it
 			if test.present && !strings.Contains(readme, "| Definition | Volume | Mounted at |\n| --- | --- | --- |\n| ") {
 				t.Error("expected the table rows to follow its header directly")
+			}
+		})
+	}
+}
+
+// The section is only written for a datastore that can be told the memory it
+// uses for itself, names the default a new service is given where there is
+// one, and says whether a change reaches a running service on its own.
+func TestReadmeServiceMemory(t *testing.T) {
+	t.Setenv("DOKKU_NO_COLOR", "1")
+	clearImageEnv(t)
+
+	tests := map[string]struct {
+		present []string
+		absent  []string
+	}{
+		"memcached": {
+			present: []string{"### Datastore memory", "A service is created with 64 megabytes", "use `dokku memcached:stop` and then `dokku memcached:start`"},
+			absent:  []string{"told to a running service at once"},
+		},
+		"redis": {
+			present: []string{"### Datastore memory", "A service is created without one", "told to a running service at once"},
+			absent:  []string{"A service is created with 64 megabytes"},
+		},
+		"mysql": {
+			absent: []string{"### Datastore memory", "--service-memory 256", "service-memory 256"},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			readme, err := Readme(ReadmeInput{
+				Commands: helpTestCommands(),
+				Data:     NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores[name]}),
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			for _, expected := range test.present {
+				if !strings.Contains(readme, expected) {
+					t.Errorf("expected the readme to contain %q", expected)
+				}
+			}
+
+			for _, unexpected := range test.absent {
+				if strings.Contains(readme, unexpected) {
+					t.Errorf("expected the readme not to contain %q", unexpected)
+				}
 			}
 		})
 	}

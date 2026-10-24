@@ -18,7 +18,7 @@ func TestSetPropertyRejectsUnknownKeys(t *testing.T) {
 		t.Fatal("expected an error for an unknown key, got none")
 	}
 
-	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, backup-object-name, backup-timestamp, backup-mailto, backup-access-key-id, backup-secret-access-key, backup-default-region, backup-signature-version, backup-endpoint-url, backup-encryption-passphrase, backup-public-key-id, backup-bucket, backup-use-iam, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, port-source-range, expose-host, expose-mode, export-args, import-args, volume-targets, config-options, custom-env, memory, shm-size, password, root-password"
+	expected := "Invalid key specified, valid keys include: initial-network, post-create-network, post-start-network, backup-keyserver, backup-storage-class, backup-object-name, backup-timestamp, backup-mailto, backup-access-key-id, backup-secret-access-key, backup-default-region, backup-signature-version, backup-endpoint-url, backup-encryption-passphrase, backup-public-key-id, backup-bucket, backup-use-iam, log-driver, log-opt, restart-policy, wait-timeout, port-bind-address, port-source-range, expose-host, expose-mode, export-args, import-args, volume-targets, config-options, custom-env, memory, service-memory, shm-size, password, root-password"
 	if err.Error() != expected {
 		t.Errorf("expected %q, got %q", expected, err)
 	}
@@ -36,7 +36,7 @@ func TestSettableProperties(t *testing.T) {
 	// and imports are run with, where the definition's volumes are mounted,
 	// every setting create writes into a file of its own, every backup
 	// setting the backup commands store, and the passwords
-	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "backup-object-name", "backup-timestamp", "backup-mailto", "backup-access-key-id", "backup-secret-access-key", "backup-default-region", "backup-signature-version", "backup-endpoint-url", "backup-encryption-passphrase", "backup-public-key-id", "backup-bucket", "backup-use-iam", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "port-source-range", "expose-host", "expose-mode", "export-args", "import-args", "volume-targets", "config-options", "custom-env", "memory", "shm-size", "password", "root-password"}
+	expected := []string{"initial-network", "post-create-network", "post-start-network", "backup-keyserver", "backup-storage-class", "backup-object-name", "backup-timestamp", "backup-mailto", "backup-access-key-id", "backup-secret-access-key", "backup-default-region", "backup-signature-version", "backup-endpoint-url", "backup-encryption-passphrase", "backup-public-key-id", "backup-bucket", "backup-use-iam", "log-driver", "log-opt", "restart-policy", "wait-timeout", "port-bind-address", "port-source-range", "expose-host", "expose-mode", "export-args", "import-args", "volume-targets", "config-options", "custom-env", "memory", "service-memory", "shm-size", "password", "root-password"}
 	if strings.Join(SettablePropertyNames(), ",") != strings.Join(expected, ",") {
 		t.Errorf("expected %v, got %v", expected, SettablePropertyNames())
 	}
@@ -255,6 +255,18 @@ func TestSetPropertyRejectsAnUnusableValue(t *testing.T) {
 			key:      service.MemoryProperty,
 			value:    "-1",
 			expected: `invalid memory value "-1"`,
+		},
+		{
+			name:     "a service memory that is not a number",
+			key:      service.ServiceMemoryProperty,
+			value:    "256m",
+			expected: `invalid service-memory value "256m"`,
+		},
+		{
+			name:     "a service memory of nothing",
+			key:      service.ServiceMemoryProperty,
+			value:    "0",
+			expected: `invalid service-memory value "0"`,
 		},
 		{
 			name:     "a shared memory size docker cannot read",
