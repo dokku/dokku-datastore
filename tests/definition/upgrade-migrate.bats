@@ -9,15 +9,8 @@ setup_file() {
   datastore_setup_file
 
   # the definition one major up, where this one has one that migrates the data
-  # of a service moved onto it. Each postgres major moves to the next, and each
-  # pg17 flavor to its pg18 counterpart
-  NEXT_DEFINITION=""
-  if [[ "$DEFINITION" =~ ^(.*[^0-9])([0-9]+)$ ]]; then
-    NEXT_DEFINITION="${BASH_REMATCH[1]}$((BASH_REMATCH[2] + 1))"
-  fi
-  if [[ -n "$NEXT_DEFINITION" ]] && [[ ! -d "$REPO_ROOT/internal/registry/definitions/$NEXT_DEFINITION" ]]; then
-    NEXT_DEFINITION=""
-  fi
+  # of a service moved onto it
+  NEXT_DEFINITION="$(next_definition)"
   if [[ -n "$NEXT_DEFINITION" ]] && ! grep -q '^    migrate: true' "$REPO_ROOT/internal/registry/definitions/$NEXT_DEFINITION/docker-compose.yml" 2>/dev/null; then
     NEXT_DEFINITION=""
   fi

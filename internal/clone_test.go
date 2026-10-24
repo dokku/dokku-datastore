@@ -1,7 +1,9 @@
 package internal
 
 import (
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/service"
@@ -264,5 +266,156 @@ func TestReadServiceSettingsReadsAMissingServiceMemoryAsNone(t *testing.T) {
 
 	if actual := service.DefaultServiceMemory(service.Datastores["memcached"].Definition, &settings.ServiceMemory); actual != "" {
 		t.Errorf("expected a clone of it to be made without one rather than with the default, got %q", actual)
+	}
+}
+
+func TestCloneImage(t *testing.T) {
+	postgres17 := service.Datastores["postgres"].ForImage("", "17.0")
+	definition17 := postgres17.Definition
+	if definition17.Name != "postgres-17" {
+		t.Fatalf("expected the postgres-17 definition, got %s", definition17.Name)
+	}
+
+	recorded := service.RecordedImage{Image: "postgres", ImageVersion: "17.0"}
+
+	tests := []struct {
+		name         string
+		recorded     service.RecordedImage
+		image        string
+		imageVersion string
+		expected     service.RecordedImage
+		expectedErr  bool
+	}{
+		{
+			name:     "no flags keep the source's image",
+			recorded: recorded,
+			expected: recorded,
+		},
+		{
+			name:         "a version given keeps the source's image",
+			recorded:     recorded,
+			imageVersion: "17.6",
+			expected:     service.RecordedImage{Image: "postgres", ImageVersion: "17.6"},
+		},
+		{
+			name:     "the source's image named again keeps its version",
+			recorded: recorded,
+			image:    "postgres",
+			expected: recorded,
+		},
+		{
+			name:     "the definition's image without a version takes the one it ships",
+			recorded: service.RecordedImage{Image: "myorg/postgres", ImageVersion: "custom-3"},
+			image:    "postgres",
+			expected: service.RecordedImage{Image: "postgres", ImageVersion: definition17.DefaultImageVersion},
+		},
+		{
+			// the version belongs to the repository that published it, so the
+			// source's is no more applicable to another image than the
+			// definition's is
+			name:        "another image without a version is refused",
+			recorded:    recorded,
+			image:       "myorg/postgres",
+			expectedErr: true,
+		},
+		{
+			name:         "another image with a version runs it",
+			recorded:     recorded,
+			image:        "myorg/postgres",
+			imageVersion: "custom-3",
+			expected:     service.RecordedImage{Image: "myorg/postgres", ImageVersion: "custom-3"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual, err := cloneImage(definition17, test.recorded, test.image, test.imageVersion)
+			if test.expectedErr {
+				if !errors.Is(err, service.ErrNoImageVersion) {
+					t.Fatalf("expected ErrNoImageVersion, got %v", err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+
+			if actual != test.expected {
+				t.Errorf("expected %+v, got %+v", test.expected, actual)
+			}
+		})
+	}
+}
+
+// A clone is placed on the definition its source is pinned to, so an image that
+// would run on another one is refused rather than handed data it cannot read.
+func TestCheckCloneDefinition(t *testing.T) {
+	postgres := service.Datastores["postgres"]
+
+	tests := []struct {
+		name        string
+		pinned      *service.Datastore
+		recorded    service.RecordedImage
+		clone       service.RecordedImage
+		expectedErr bool
+	}{
+		{
+			name:     "the source's image is allowed",
+			pinned:   postgres.ForImage("", "17.0"),
+			recorded: service.RecordedImage{Image: "postgres", ImageVersion: "17.0"},
+			clone:    service.RecordedImage{Image: "postgres", ImageVersion: "17.0"},
+		},
+		{
+			name:     "inside a major is allowed",
+			pinned:   postgres.ForImage("", "17.0"),
+			recorded: service.RecordedImage{Image: "postgres", ImageVersion: "17.0"},
+			clone:    service.RecordedImage{Image: "postgres", ImageVersion: "17.11"},
+		},
+		{
+			name:        "across a major is refused",
+			pinned:      postgres.ForImage("", "17.0"),
+			recorded:    service.RecordedImage{Image: "postgres", ImageVersion: "17.0"},
+			clone:       service.RecordedImage{Image: "postgres", ImageVersion: "18.6"},
+			expectedErr: true,
+		},
+		{
+			name:        "onto a flavor is refused",
+			pinned:      postgres.ForImage("", "17.0"),
+			recorded:    service.RecordedImage{Image: "postgres", ImageVersion: "17.0"},
+			clone:       service.RecordedImage{Image: "pgvector/pgvector", ImageVersion: "0.8.6-pg17"},
+			expectedErr: true,
+		},
+		{
+			// created with pgvector/pgvector:pg17 before pgvector had
+			// definitions, which placed it on postgres-18 and its data with it
+			name:     "a pin older than its flavor is allowed",
+			pinned:   postgres.ForImage("", "18.4"),
+			recorded: service.RecordedImage{Image: "pgvector/pgvector", ImageVersion: "pg17"},
+			clone:    service.RecordedImage{Image: "pgvector/pgvector", ImageVersion: "0.8.6-pg17"},
+		},
+		{
+			// a tag that does not carry its major resolves to the newest
+			// definition, which is not the one this source was placed on
+			name:     "a source placed by name on a custom tag is allowed",
+			pinned:   postgres.ForImage("", "17.0"),
+			recorded: service.RecordedImage{Image: "myorg/postgres", ImageVersion: "custom-3"},
+			clone:    service.RecordedImage{Image: "myorg/postgres", ImageVersion: "custom-4"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := checkCloneDefinition(test.pinned, "db", test.recorded, test.clone)
+			if test.expectedErr && err == nil {
+				t.Fatal("expected the clone to be refused")
+			}
+			if !test.expectedErr && err != nil {
+				t.Fatalf("expected the clone to be allowed, got %v", err)
+			}
+			if err != nil && !strings.Contains(err.Error(), "upgrade db onto it first") {
+				t.Errorf("expected the refusal to point at upgrade, got %v", err)
+			}
+		})
 	}
 }

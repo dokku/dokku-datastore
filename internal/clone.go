@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 )
@@ -28,6 +29,15 @@ type CloneServiceInput struct {
 
 	// Datastore is the datastore both services belong to
 	Datastore *service.Datastore
+
+	// Image is the image the new service runs, empty for the source's. Plain
+	// rather than a pointer like the settings, since a service always has an
+	// image and there is no clearing one
+	Image string
+
+	// ImageVersion is the image version the new service runs, empty for the
+	// source's
+	ImageVersion string
 
 	// Logger reports progress
 	Logger Ui
@@ -236,15 +246,63 @@ func splitList(value string) []string {
 	return strings.Split(value, ",")
 }
 
-// CloneService creates a new service on the same image as an existing one and
-// copies the data across
+// cloneImage is the image a clone runs: the source's, with the image and the
+// version it was given laid over it.
+//
+// A version left out stays the source's while the image does, and otherwise is
+// decided the way upgrade decides it: the definition's own image falls back on
+// the version the definition ships, and any other image has none to fall back
+// on, since a version belongs to the repository that published it.
+//
+// Pure, so which image a clone lands on is pinned by a test rather than by a
+// docker daemon.
+func cloneImage(d definition.Definition, recorded service.RecordedImage, image string, imageVersion string) (service.RecordedImage, error) {
+	if image == "" {
+		image = recorded.Image
+	}
+
+	if imageVersion == "" && image == recorded.Image {
+		imageVersion = recorded.ImageVersion
+	}
+
+	imageVersion, err := upgradeVersion(d, recorded, image, imageVersion)
+	if err != nil {
+		return service.RecordedImage{}, err
+	}
+
+	return service.RecordedImage{Image: image, ImageVersion: imageVersion}, nil
+}
+
+// checkCloneDefinition refuses a clone onto an image that resolves to another
+// definition than the one its source is pinned to.
+//
+// A clone is placed on the source's definition, so one onto a different major
+// version or flavor would mount its data where the wrong definition keeps it.
+// Moving a service across definitions is what upgrade is for, since it is the
+// one that knows how to carry the data across. Decided the way upgrade decides
+// it, so that a source pinned to a definition its image does not resolve to
+// keeps its pin on the clone as well.
+//
+// Pure, so which clones are refused is pinned by a test rather than by a docker
+// daemon.
+func checkCloneDefinition(s *service.Datastore, serviceName string, recorded service.RecordedImage, clone service.RecordedImage) error {
+	target := upgradeTarget(s, nil, recorded, clone.Image, clone.ImageVersion)
+	if target.DefinitionName() == s.DefinitionName() {
+		return nil
+	}
+
+	return fmt.Errorf("unable to clone %s onto %s, which runs on the %s definition rather than the %s definition %s runs; upgrade %s onto it first, then clone it",
+		serviceName, clone.Tagged(), target.DefinitionName(), s.DefinitionName(), serviceName, serviceName)
+}
+
+// CloneService creates a new service on the image of an existing one, or on
+// another image of the same definition, and copies the data across
 func CloneService(ctx context.Context, input CloneServiceInput) error {
-	// the clone runs on whatever image the source service is on, so that the
-	// copied data is never handed to a different version than it came from.
-	// Taken from the source's record rather than from its container, which is
-	// what every other command is placed by; a source that never recorded one
-	// has it written down here from the container it is running, since a clone
-	// already requires the source to be up.
+	// the clone runs on whatever image the source service is on unless it was
+	// given another. Taken from the source's record rather than from its
+	// container, which is what every other command is placed by; a source that
+	// never recorded one has it written down here from the container it is
+	// running, since a clone already requires the source to be up.
 	recorded, err := service.RecoverRecordedImage(ctx, service.RecoverRecordedImageInput{
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
@@ -256,8 +314,19 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 		return fmt.Errorf("unable to determine the image %s runs", input.ServiceName)
 	}
 
-	sourceImage := recorded.Tagged()
-	image, imageVersion := recorded.Image, recorded.ImageVersion
+	cloned, err := cloneImage(input.Datastore.Definition, recorded, input.Image, input.ImageVersion)
+	if err != nil {
+		return fmt.Errorf("unable to clone %s: %w", input.ServiceName, err)
+	}
+
+	// before anything is announced or made, so that a clone handed an image of
+	// another definition never gets as far as a service of its own
+	if err := checkCloneDefinition(input.Datastore, input.ServiceName, recorded, cloned); err != nil {
+		return err
+	}
+
+	taggedImage := cloned.Tagged()
+	image, imageVersion := cloned.Image, cloned.ImageVersion
 
 	// create refuses it too, but checked here as well so that a refused clone is
 	// never announced as though it had started. Against the definition the
@@ -274,7 +343,7 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 	}
 	settings := sourceSettings.withOverrides(input)
 
-	input.Logger.Header2(fmt.Sprintf("Cloning %s to %s @ %s", input.ServiceName, input.NewServiceName, sourceImage)) //nolint:errcheck
+	input.Logger.Header2(fmt.Sprintf("Cloning %s to %s @ %s", input.ServiceName, input.NewServiceName, taggedImage)) //nolint:errcheck
 
 	// placed on the definition the source is pinned to rather than the one its
 	// image resolves to, which differ for a service created with --definition

@@ -188,6 +188,24 @@ default_definition() {
   done | sort -V | tail -n 1
 }
 
+# the definition one major up from this one, empty where the plugin ships none.
+# Each postgres major is followed by the next, and each pg17 flavor by its pg18
+# counterpart
+next_definition() {
+  local next=""
+  if [[ "$DEFINITION" =~ ^(.*[^0-9])([0-9]+)$ ]]; then
+    next="${BASH_REMATCH[1]}$((BASH_REMATCH[2] + 1))"
+  fi
+  if [[ -n "$next" ]] && [[ -d "$REPO_ROOT/internal/registry/definitions/$next" ]]; then
+    echo "$next"
+  fi
+}
+
+# the image and version a definition pins, as <image>:<version>
+definition_image() {
+  awk '/^FROM / { print $2; exit }' "$REPO_ROOT/internal/registry/definitions/$1/Dockerfile"
+}
+
 # this definition's image under a name and tag no definition ships, the way a
 # build of one's own is, so that only --definition can place it. Tagged from the
 # pinned image, which every file's setup has already fetched, rather than pulled

@@ -144,7 +144,7 @@ If a service names a definition the plugin no longer ships, commands that would 
 
 `upgrade` across a major version moves the service onto the other definition, which moves where its data is mounted along with it. That is the upgrade a major version asks for rather than something to work around, but it is not a tag change and it is not reversible by pointing the version back. A bare `upgrade` never crosses one: with no version named it moves to the newest tag the service's own major version ships, and leaves the data where it is.
 
-`upgrade --definition` moves the service onto the named definition, with the image and version it ships unless `--image` and `--image-version` say otherwise. That moves where its data is mounted in the same way, even when the image stays the same. A volume the service moved with `volume-targets` stays where it was moved to on the new definition, and an upgrade onto a definition that does not mount that volume is refused before the old container is taken away. `<VARIABLE>_DEFINITION` is only read by `create`. `clone` places the new service on the definition the source is pinned to, rather than on the one the source's image resolves to.
+`upgrade --definition` moves the service onto the named definition, with the image and version it ships unless `--image` and `--image-version` say otherwise. That moves where its data is mounted in the same way, even when the image stays the same. A volume the service moved with `volume-targets` stays where it was moved to on the new definition, and an upgrade onto a definition that does not mount that volume is refused before the old container is taken away. `<VARIABLE>_DEFINITION` is only read by `create`. `clone` places the new service on the definition the source is pinned to, rather than on the one the source's image resolves to. A `clone` given an `--image` or `--image-version` that would move it onto another definition is refused, since the data would be mounted where that definition does not keep it; upgrade the source onto it first, then clone it.
 
 ### Migrating data between definitions
 
@@ -985,6 +985,13 @@ dokku-datastore clone redis lollipop lollipop-2
 
 # the same settings as lollipop, except these two
 dokku-datastore clone redis lollipop lollipop-3 --restart no --custom-env ""
+```
+
+A clone runs the source's image and image version unless `--image` or `--image-version` say otherwise. These two are the exception to a flag passed empty clearing a setting, since a service always runs an image, so an empty one keeps the source's. An `--image-version` alone keeps the source's image. An `--image` alone takes the version the definition ships when it is the definition's own image, and is otherwise refused until `--image-version` names one, the same as on `upgrade`. An image or version that would run on another definition than the one the source is pinned to, such as another major version or flavor, is refused before anything is made: upgrade the source onto it first, then clone it.
+
+```shell
+# the same settings as lollipop, on another image version
+dokku-datastore clone redis lollipop lollipop-4 --image-version 8.8.0
 ```
 
 The `<VARIABLE>_CONFIG_OPTIONS` and `<VARIABLE>_CUSTOM_ENV` environment variables are not read by `clone`. They fill in a new service, and the source already says what its clone should have. The networks are copied as well, since a container joins a network under its own service name and a clone next to its source does not clash with it.

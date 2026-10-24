@@ -27,6 +27,11 @@ type CloneCommand struct {
 	configOptions string
 	// customEnv is the custom environment variables to use for the service
 	customEnv string
+	// image is the image to run the new service on, instead of the source's
+	image string
+	// imageVersion is the image version to run the new service on, instead of
+	// the source's
+	imageVersion string
 	// memory is the memory limit to use for the service
 	memory int
 	// initialNetwork is the initial network to use for the service
@@ -79,7 +84,8 @@ func (c *CloneCommand) Help() string {
 func (c *CloneCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Clones a redis service named test onto a service named copy": fmt.Sprintf("%s %s redis test copy", appName, c.Name()),
+		"Clones a redis service named test onto a service named copy":  fmt.Sprintf("%s %s redis test copy", appName, c.Name()),
+		"Clones a redis service named test onto another image version": fmt.Sprintf("%s %s redis test copy --image-version 8.8.0", appName, c.Name()),
 	}
 }
 
@@ -123,6 +129,8 @@ func (c *CloneCommand) FlagSet() *flag.FlagSet {
 	c.GlobalFlags(f)
 	f.StringVarP(&c.configOptions, "config-options", "c", "", "extra arguments for the process the service container runs, not docker flags; use mount for mounts")
 	f.StringVarP(&c.customEnv, "custom-env", "C", "", "semi-colon delimited environment variables to start the service with")
+	f.StringVarP(&c.image, "image", "i", "", "the image name to start the service with (default: the source's)")
+	f.StringVarP(&c.imageVersion, "image-version", "I", "", "the image version to start the service with (default: the source's)")
 	f.IntVarP(&c.memory, "memory", "m", 0, "container memory limit in megabytes (default: unlimited)")
 	f.StringVarP(&c.initialNetwork, "initial-network", "N", "", "the initial network to attach the service to")
 	f.StringVarP(&c.password, "password", "p", "", "override the user-level service password, for datastores that have one")
@@ -150,6 +158,8 @@ func (c *CloneCommand) AutocompleteFlags() complete.Flags {
 		complete.Flags{
 			"--config-options":      complete.PredictAnything,
 			"--custom-env":          complete.PredictAnything,
+			"--image":               complete.PredictAnything,
+			"--image-version":       complete.PredictAnything,
 			"--memory":              complete.PredictAnything,
 			"--service-memory":      complete.PredictAnything,
 			"--initial-network":     complete.PredictAnything,
@@ -296,6 +306,8 @@ func (c *CloneCommand) Run(args []string) int {
 
 	if err := internal.CloneService(ctx, internal.CloneServiceInput{
 		Datastore:      datastore,
+		Image:          c.image,
+		ImageVersion:   c.imageVersion,
 		Logger:         logger,
 		NewServiceName: newServiceName,
 		Password:       c.password,
