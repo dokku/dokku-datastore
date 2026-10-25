@@ -46,8 +46,7 @@ wait_for_dashboards() {
 # the uid of the datasource the image adds once grafana is up, which differs on
 # every service and is why the dashboards pick it with a variable
 datasource_uid() {
-  grafana "http://127.0.0.1:80/api/datasources/name/Local%20Graphite" |
-    grep -o '"uid":"[^"]*"' | head -n 1 | cut -d '"' -f 4
+  wait_for_datasource | grep -o '"uid":"[^"]*"' | head -n 1 | cut -d '"' -f 4
 }
 
 @test "($DEFINITION) grafana serves the provisioned dashboards" {
@@ -66,15 +65,8 @@ datasource_uid() {
 }
 
 @test "($DEFINITION) a metric sent to statsd is found through the datasource the dashboards use" {
-  run wait_for_grafana
-  assert_success
-
-  # the datasource is added after grafana answers, so it is waited on too
-  local uid=""
-  for _ in $(seq 1 30); do
-    uid="$(datasource_uid)" && [[ -n "$uid" ]] && break
-    sleep 2
-  done
+  local uid
+  uid="$(datasource_uid)"
   [[ -n "$uid" ]] || fail "expected grafana to have the Local Graphite datasource"
 
   # statsd flushes every ten seconds, and the counter is sent again until it
