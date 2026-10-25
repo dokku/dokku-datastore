@@ -7,6 +7,8 @@ COPY="$SERVICE-copy"
 OVERRIDE="$SERVICE-override"
 ARGS="$SERVICE-args"
 CUSTOM="$SERVICE-custom"
+RETAGGED="$SERVICE-retagged"
+OTHER_VERSION="other-version"
 MOUNT_TARGET="/opt/dokku-mount"
 
 setup_file() {
@@ -27,8 +29,9 @@ setup_file() {
 }
 
 teardown_file() {
-  datastore_teardown_file "$COPY" "$OVERRIDE" "$ARGS" "$CUSTOM-copy" "$CUSTOM" "$SERVICE"
+  datastore_teardown_file "$COPY" "$OVERRIDE" "$ARGS" "$CUSTOM-copy" "$CUSTOM" "$RETAGGED-copy" "$RETAGGED" "$SERVICE-next" "$SERVICE"
   untag_custom_image
+  untag_custom_image "$OTHER_VERSION"
 }
 
 # a clone copies the data through an export and an import, so a datastore
@@ -200,4 +203,60 @@ clone_or_skip() {
     run "$BIN" set "$PLUGIN" "$SERVICE" "$key"
     assert_success
   done
+}
+
+@test "($DEFINITION) a clone given an image version runs on it" {
+  # placed by name, so that the custom tags resolve to this run's definition
+  # whatever they say, the way they would for a build of one's own
+  tag_custom_image
+  tag_custom_image "$OTHER_VERSION"
+  run "$BIN" create "$PLUGIN" "$RETAGGED" --definition "$DEFINITION" --image "$CUSTOM_IMAGE" --image-version "$CUSTOM_IMAGE_VERSION"
+  assert_success
+
+  run "$BIN" clone "$PLUGIN" "$RETAGGED" "$RETAGGED-copy" --image-version "$OTHER_VERSION"
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement clone"
+  fi
+  assert_success
+  assert_output --partial "@ $CUSTOM_IMAGE:$OTHER_VERSION"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$RETAGGED-copy" --image
+  assert_success
+  assert_output "$CUSTOM_IMAGE"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$RETAGGED-copy" --image-version
+  assert_success
+  assert_output "$OTHER_VERSION"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$RETAGGED-copy" --definition
+  assert_success
+  assert_output "$DEFINITION"
+
+  run container_inspect "$(service_container "$RETAGGED-copy")" '{{ .Config.Image }}'
+  assert_success
+  assert_output "$CUSTOM_IMAGE:$OTHER_VERSION"
+
+  # and the source is left on what it ran
+  run --separate-stderr "$BIN" info "$PLUGIN" "$RETAGGED" --image-version
+  assert_success
+  assert_output "$CUSTOM_IMAGE_VERSION"
+}
+
+@test "($DEFINITION) a clone onto another definition is refused" {
+  local next tagged
+  next="$(next_definition)"
+  [[ -n "$next" ]] || skip "$DEFINITION has no next major"
+  tagged="$(definition_image "$next")"
+
+  # the clone would be placed on this definition with the next one's image,
+  # which keeps its data elsewhere. Moving across is what upgrade is for
+  run --separate-stderr "$BIN" clone "$PLUGIN" "$SERVICE" "$SERVICE-next" --image "${tagged%:*}" --image-version "${tagged##*:}"
+  if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
+    skip "$PLUGIN does not implement clone"
+  fi
+  assert_failure
+  assert_stderr --partial "which runs on the $next definition rather than the $DEFINITION definition"
+  assert_stderr --partial "upgrade $SERVICE onto it first"
+  refute_output --partial "Cloning"
+  [[ ! -d "$(service_root "$SERVICE-next")" ]] || fail "a refused clone left $(service_root "$SERVICE-next") behind"
 }

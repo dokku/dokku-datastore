@@ -351,6 +351,12 @@ custom env, memory, service memory, shm size, networks, log driver, log options,
 mounts, volume targets, backup keyserver, backup storage class and backup timestamp. A flag passed to clone overrides that one setting, and a
 flag passed empty clears it
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --restart no --custom-env ""
+the new service runs the image and image version of the one it copies unless --image or
+--image-version say otherwise. These cannot be cleared, and an --image other than the one
+the definition ships needs an --image-version as well. An image that would run on another
+definition than the source's, such as another major version, is refused; upgrade the source
+onto it first
+dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --image-version <version>
 the password, exposed ports, links and backup credentials, schedule, encryption and object name
 are not copied. The clone's passwords are generated unless they are given.
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --password <password>`
