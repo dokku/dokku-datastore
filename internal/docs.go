@@ -79,6 +79,14 @@ type DocumentationData struct {
 	// cannot is never documented as having backup settings
 	Backups bool
 
+	// JDBC is whether an app can be linked to the datastore with --jdbc, so
+	// that one with no jdbc driver is never documented as taking the flag.
+	// JDBCURL and JDBCUsername are what such a link sets, for the lollipop
+	// service the examples use.
+	JDBC         bool
+	JDBCURL      string
+	JDBCUsername string
+
 	// ReservedNames are the service names create and clone refuse, because the
 	// database a service is named after would be one the datastore keeps
 	ReservedNames []string
@@ -181,6 +189,8 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		serviceMemoryDefault = serviceMemory.Default
 	}
 
+	jdbcURL, jdbcUsername := documentedJDBC(input.Datastore)
+
 	return DocumentationData{
 		AltAlias:       properties.AltAlias,
 		CommandPrefix:  properties.CommandPrefix,
@@ -196,6 +206,9 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		ImportArgs:     input.Datastore.AcceptsExtraArgs("import"),
 		AllDatabases:   input.Datastore.ExportsAllDatabases(),
 		Backups:        service.Implements(input.Datastore, "backup"),
+		JDBC:           input.Datastore.SupportsJDBC(),
+		JDBCURL:        jdbcURL,
+		JDBCUsername:   jdbcUsername,
 		ReservedNames:  input.Datastore.Definition.Dokku.ReservedNames,
 		Sections:       input.Datastore.Documentation(),
 		Flavors:        documentedFlavors(input.Datastore),
@@ -219,6 +232,39 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 // newest definition declares it, and empty for one it does not have
 func documentedSecret(datastore *service.Datastore, name string) definition.Secret {
 	return datastore.Definition.Dokku.Secrets[name]
+}
+
+// documentedJDBC is the jdbc url and username a link made with --jdbc sets for
+// the lollipop service the examples use, rendered from the definition so that
+// the documentation names the driver and account the link really does. Both
+// are empty for a datastore with no jdbc driver.
+func documentedJDBC(datastore *service.Datastore) (string, string) {
+	jdbc := datastore.Definition.Dokku.JDBC
+	if jdbc == nil {
+		return "", ""
+	}
+
+	scope := definition.Scope{
+		Host:     fmt.Sprintf("dokku-%s-lollipop", datastore.Properties().CommandPrefix),
+		Database: "lollipop",
+		Secret:   map[string]string{"password": "SOME_PASSWORD"},
+		Port:     map[string]int{},
+	}
+	for _, port := range datastore.Definition.Service.Ports {
+		scope.Port[port.Name] = port.Target
+	}
+
+	url, err := definition.Render(jdbc.URL, scope)
+	if err != nil {
+		return "", ""
+	}
+
+	username, err := definition.Render(jdbc.Username, scope)
+	if err != nil {
+		return "", ""
+	}
+
+	return url, username
 }
 
 // documentedMigrates is whether any of a datastore's definitions migrates the

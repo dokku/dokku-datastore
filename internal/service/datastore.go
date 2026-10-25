@@ -1449,6 +1449,50 @@ func (s *Datastore) URL(serviceName string, schemeOverride string) string {
 	return url
 }
 
+// JDBCValues are what an app linked with --jdbc receives alongside the url
+type JDBCValues struct {
+	// URL is the jdbc url
+	URL string
+
+	// Username is the account the url names
+	Username string
+
+	// Password is the account's password
+	Password string
+}
+
+// SupportsJDBC is whether an app can be linked to the datastore with --jdbc
+func (s *Datastore) SupportsJDBC() bool {
+	return s.Definition.Dokku.JDBC != nil
+}
+
+// JDBC returns what an app linked with --jdbc receives, and false when the
+// datastore has no jdbc driver or any of it fails to render. An empty value is
+// never returned, since every value contains the empty string and a key
+// matched by one would claim whatever the app holds.
+func (s *Datastore) JDBC(serviceName string) (JDBCValues, bool) {
+	jdbc := s.Definition.Dokku.JDBC
+	if jdbc == nil {
+		return JDBCValues{}, false
+	}
+
+	scope := s.scope(serviceName)
+	rendered := make([]string, 0, 3)
+	for _, body := range []string{jdbc.URL, jdbc.Username, jdbc.Password} {
+		value, err := definition.Render(body, scope)
+		if err != nil || value == "" {
+			return JDBCValues{}, false
+		}
+		rendered = append(rendered, value)
+	}
+
+	return JDBCValues{
+		URL:      rendered[0],
+		Username: rendered[1],
+		Password: rendered[2],
+	}, true
+}
+
 // ExposedURL returns the url a client off the host reaches the service at
 // through its exposed ports, empty when it is not exposed or there is no host
 // to name.

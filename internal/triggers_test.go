@@ -17,9 +17,16 @@ import (
 func linkedServices(t *testing.T, links map[string][]string) *service.Datastore {
 	t.Helper()
 
+	return linkedServicesOf(t, service.Datastores["redis"], links)
+}
+
+// linkedServicesOf is linkedServices for a datastore other than redis, such as
+// one with a jdbc driver
+func linkedServicesOf(t *testing.T, datastore *service.Datastore, links map[string][]string) *service.Datastore {
+	t.Helper()
+
 	withDataRoot(t)
 
-	datastore := service.Datastores["redis"]
 	for serviceName, apps := range links {
 		if err := os.MkdirAll(service.Folders(datastore, serviceName).Root, 0755); err != nil {
 			t.Fatalf("failed to create the service root: %s", err)
@@ -164,6 +171,35 @@ func TestARenameLeavesOnlyTheNewName(t *testing.T) {
 	assertLinkedApps(t, datastore, "lollipop", []string{"renamed-app"})
 	assertRecordedKeys(t, datastore, "lollipop", "renamed-app", []string{"MB_DB_CONNECTION_URI"})
 	assertRecordedKeys(t, datastore, "lollipop", "my-app", nil)
+}
+
+// The jdbc keys are recorded apart from the url's, and follow a rename the same
+// way, so that unlinking the renamed app still unsets them
+func TestARenameCarriesTheJDBCKeys(t *testing.T) {
+	datastore := linkedServices(t, map[string][]string{"lollipop": {"my-app"}})
+	input := triggerInput(datastore)
+	jdbcKeys := []string{"JDBC_REDIS_PASSWORD", "JDBC_REDIS_URL", "JDBC_REDIS_USERNAME"}
+	if err := service.SetLinkConfigKeys(datastore, "lollipop", "my-app", []string{"REDIS_URL"}); err != nil {
+		t.Fatalf("failed to record the keys: %s", err)
+	}
+	if err := service.SetLinkJDBCConfigKeys(datastore, "lollipop", "my-app", jdbcKeys); err != nil {
+		t.Fatalf("failed to record the jdbc keys: %s", err)
+	}
+
+	if err := CopyAppLinks(t.Context(), input, "my-app", "renamed-app"); err != nil {
+		t.Fatalf("failed to copy the app links: %s", err)
+	}
+
+	if err := RemoveAppLinks(t.Context(), input, "my-app"); err != nil {
+		t.Fatalf("failed to remove the app links: %s", err)
+	}
+
+	if actual := service.LinkJDBCConfigKeys(datastore, "lollipop", "renamed-app"); !slices.Equal(actual, jdbcKeys) {
+		t.Errorf("expected the renamed app to record %v, got %v", jdbcKeys, actual)
+	}
+	if actual := service.LinkJDBCConfigKeys(datastore, "lollipop", "my-app"); actual != nil {
+		t.Errorf("expected the old name to record nothing, got %v", actual)
+	}
 }
 
 // A link made before the keys were recorded has none to copy, and copying

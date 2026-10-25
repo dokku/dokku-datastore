@@ -775,7 +775,31 @@ dokku config:set playground {{.PluginVariable}}_DATABASE_SCHEME={{.Scheme}}2
 dokku {{.CommandPrefix}}:link lollipop playground
 this will cause {{.DefaultAlias}}_URL to be set as:
 
-    {{.Scheme}}2://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}`
+    {{.Scheme}}2://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}
+{{- if .JDBC}}
+
+a java app whose jdbc driver cannot read {{.DefaultAlias}}_URL can also be given a jdbc
+url and the credentials it names with the '--jdbc' flag:
+dokku {{.CommandPrefix}}:link lollipop playground --jdbc
+this will set the following on the linked application alongside {{.DefaultAlias}}_URL:
+
+    JDBC_{{.DefaultAlias}}_URL={{.JDBCURL}}
+    JDBC_{{.DefaultAlias}}_USERNAME={{.JDBCUsername}}
+    JDBC_{{.DefaultAlias}}_PASSWORD=SOME_PASSWORD
+
+the jdbc variables are named after the one holding the url, whether it was named
+with the '--alias' or the '--env-var' flag:
+dokku {{.CommandPrefix}}:link lollipop playground --jdbc --env-var MB_DB_CONNECTION_URI
+this will set the following on the linked application alongside MB_DB_CONNECTION_URI:
+
+    JDBC_MB_DB_CONNECTION_URI={{.JDBCURL}}
+    JDBC_MB_DB_CONNECTION_URI_USERNAME={{.JDBCUsername}}
+    JDBC_MB_DB_CONNECTION_URI_PASSWORD=SOME_PASSWORD
+
+a name already set on the app is refused, and a querystring is appended to the
+jdbc url as well. an app that is already linked has to be unlinked and linked
+again to be given the jdbc variables.
+{{- end}}`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1278,7 +1302,11 @@ an app is still linked after its {{.DefaultAlias}}_URL is changed to point
 elsewhere, and is unlinked the same way. the variable it now holds is not
 the service's, so it is left alone, nothing is unset, the app is not
 restarted, and a warning says so. a variable link set that has only had its
-scheme or querystring changed still points at the service, and is unset.`
+scheme or querystring changed still points at the service, and is unset.
+{{- if .JDBC}}
+the jdbc variables a link made with '--jdbc' set are unset along with it, bar
+any that has since been changed to point elsewhere.
+{{- end}}`
 }
 
 // Group is the readme usage section the command is documented under

@@ -238,6 +238,11 @@ type Dokku struct {
 	// than a set of flags because the plugins use seven different url shapes.
 	DSN string `yaml:"dsn"`
 
+	// JDBC is what an app linked with --jdbc receives alongside the dsn, for a
+	// java driver that cannot read it. Nil for a datastore with no jdbc driver,
+	// which has the flag refused.
+	JDBC *JDBC `yaml:"jdbc"`
+
 	// WaitTimeout bounds the readiness probe, in seconds. A datastore that takes
 	// longer than the probe's own default to answer says so, rather than being
 	// reported as never having started. It is the datastore's default: a
@@ -390,6 +395,21 @@ type ServiceMemory struct {
 	// {{ .ServiceMemory }}, so that a change takes effect without the container
 	// being made again. Without one a change waits for the next rebuild.
 	Change *Command `yaml:"change"`
+}
+
+// JDBC are the templates an app linked with --jdbc receives. Each is a
+// template, like the dsn, rendered against the service's scope.
+type JDBC struct {
+	// URL is the jdbc url. The drivers take no credentials in the userinfo, so
+	// they go in its querystring.
+	URL string `yaml:"url"`
+
+	// Username is the account the url names, for a framework that reads it
+	// apart from the url.
+	Username string `yaml:"username"`
+
+	// Password is the account's password, for the same reason.
+	Password string `yaml:"password"`
 }
 
 // ServiceMemoryChangeName is how the service memory's change command is

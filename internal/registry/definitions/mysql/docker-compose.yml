@@ -54,6 +54,13 @@ x-dokku:
 
   dsn: "{{ .Scheme }}://mysql:{{ .Secret.password }}@{{ .Host }}:{{ .Port.native }}/{{ .Database }}"
 
+  # handed over alongside the dsn by link --jdbc, for java drivers that cannot
+  # read it. They take no credentials in the userinfo, so they go in the query
+  jdbc:
+    url: "jdbc:mysql://{{ .Host }}:{{ .Port.native }}/{{ .Database }}?user=mysql&password={{ urlescape .Secret.password }}"
+    username: mysql
+    password: "{{ .Secret.password }}"
+
   # the image ships a client, but it answers before the server is accepting
   # connections during the entrypoint's own setup, so readiness stays on the
   # port probe every datastore uses

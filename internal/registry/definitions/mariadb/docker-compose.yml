@@ -53,6 +53,14 @@ x-dokku:
   alt_alias: DOKKU_MARIADB
 
   dsn: "{{ .Scheme }}://mariadb:{{ .Secret.password }}@{{ .Host }}:{{ .Port.native }}/{{ .Database }}"
+
+  # handed over alongside the dsn by link --jdbc, for java drivers that cannot
+  # read it. They take no credentials in the userinfo, so they go in the query
+  jdbc:
+    url: "jdbc:mariadb://{{ .Host }}:{{ .Port.native }}/{{ .Database }}?user=mariadb&password={{ urlescape .Secret.password }}"
+    username: mariadb
+    password: "{{ .Secret.password }}"
+
   wait: native
 
   secrets:

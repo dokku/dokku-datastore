@@ -259,3 +259,63 @@ func TestUpdateLinkedAppURLs(t *testing.T) {
 		})
 	}
 }
+
+// The jdbc values a link made with --jdbc set are pointed at the new password
+// along with the url, keeping a querystring the app added to the jdbc url, in
+// the same config:set
+func TestUpdateLinkedAppURLsWithJDBC(t *testing.T) {
+	postgres := service.Datastores["postgres"]
+	withSecretService(t, postgres, "lollipop", "old", []string{"my-app"})
+
+	before := postgres.URL("lollipop", "")
+	beforeJDBC, ok := postgres.JDBC("lollipop")
+	if !ok {
+		t.Fatal("expected the jdbc values to render")
+	}
+
+	calls := fakeDokku(t, map[string]string{
+		"DATABASE_URL":           before,
+		"JDBC_DATABASE_URL":      beforeJDBC.URL + "&sslmode=require",
+		"JDBC_DATABASE_USERNAME": beforeJDBC.Username,
+		"JDBC_DATABASE_PASSWORD": beforeJDBC.Password,
+	})
+	if err := service.SetLinkConfigKeys(postgres, "lollipop", "my-app", []string{"DATABASE_URL"}); err != nil {
+		t.Fatalf("failed to record the link keys: %s", err)
+	}
+	if err := service.SetLinkJDBCConfigKeys(postgres, "lollipop", "my-app", []string{"JDBC_DATABASE_PASSWORD", "JDBC_DATABASE_URL", "JDBC_DATABASE_USERNAME"}); err != nil {
+		t.Fatalf("failed to record the jdbc keys: %s", err)
+	}
+
+	input := ChangeServiceSecretInput{
+		Datastore:   postgres,
+		ServiceName: "lollipop",
+		Property:    secretProperty(t, "password"),
+		Value:       "new",
+		NoRestart:   true,
+		Logger:      Ui{Ui: cli.NewMockUi()},
+	}
+
+	linked, err := linkedAppURLs(context.Background(), postgres, "lollipop", input.Logger)
+	if err != nil {
+		t.Fatalf("expected the linked apps to be read, got %q", err)
+	}
+
+	writeInfoFile(t, postgres.SecretFile("lollipop", postgres.Definition.Dokku.Secrets["password"]), "new")
+	if err := updateLinkedAppURLs(context.Background(), input, linked); err != nil {
+		t.Fatalf("expected the linked apps to be updated, got %q", err)
+	}
+
+	after := postgres.URL("lollipop", "")
+	afterJDBC, _ := postgres.JDBC("lollipop")
+	if afterJDBC.URL == beforeJDBC.URL {
+		t.Fatalf("expected the jdbc url to change with the password, got %q", afterJDBC.URL)
+	}
+
+	// the username is left out, since the password does not change it
+	expected := []string{
+		"config:set --no-restart my-app DATABASE_URL=" + after + " JDBC_DATABASE_PASSWORD=new JDBC_DATABASE_URL=" + afterJDBC.URL + "&sslmode=require",
+	}
+	if actual := recordedCalls(t, calls); !slices.Equal(actual, expected) {
+		t.Errorf("expected %q, got %q", expected, actual)
+	}
+}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"os"
 	"os/user"
@@ -468,6 +469,43 @@ func TestExposedURLKeepsTheCredentials(t *testing.T) {
 	expected := strings.Replace(internal, DNSHostname(postgres, "lollipop")+":5432", "db.example.com:33201", 1)
 	if exposed != expected {
 		t.Errorf("expected the exposed dsn to be %q, got %q", expected, exposed)
+	}
+}
+
+// The jdbc values point where the url a linked app is handed does, with the
+// same credentials, and a datastore with no jdbc driver has none
+func TestJDBC(t *testing.T) {
+	postgres := Datastores["postgres"]
+	serviceRoot := withServiceRoot(t, postgres, "lollipop")
+	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
+
+	for filename, contents := range map[string]string{
+		"PASSWORD":      "se&cret",
+		"DATABASE_NAME": "lollipop_db",
+	} {
+		if err := os.WriteFile(filepath.Join(serviceRoot, filename), []byte(contents), 0600); err != nil {
+			t.Fatalf("failed to write %s: %v", filename, err)
+		}
+	}
+
+	actual, ok := postgres.JDBC("lollipop")
+	if !ok {
+		t.Fatal("expected jdbc values")
+	}
+
+	expected := JDBCValues{
+		URL:      fmt.Sprintf("jdbc:postgresql://%s:5432/lollipop_db?user=postgres&password=se%%26cret", DNSHostname(postgres, "lollipop")),
+		Username: "postgres",
+		Password: "se&cret",
+	}
+	if actual != expected {
+		t.Errorf("expected %+v, got %+v", expected, actual)
+	}
+
+	redis := Datastores["redis"]
+	withServiceRoot(t, redis, "lollipop")
+	if actual, ok := redis.JDBC("lollipop"); ok {
+		t.Errorf("expected no jdbc values for redis, got %+v", actual)
 	}
 }
 

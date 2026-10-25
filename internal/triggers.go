@@ -53,6 +53,13 @@ func CopyAppLinks(ctx context.Context, input TriggerInput, oldAppName string, ne
 				return err
 			}
 		}
+
+		// the jdbc values are copied along with the rest of the config
+		if keys := service.LinkJDBCConfigKeys(input.Datastore, serviceName, oldAppName); len(keys) > 0 {
+			if err := recordLinkJDBCConfigKeys(input.Logger, input.Datastore, serviceName, newAppName, keys); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

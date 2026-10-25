@@ -921,3 +921,409 @@ func TestLinkServiceReplacesACorruptRecord(t *testing.T) {
 		t.Errorf("expected a warning about the replaced record, got %q", ui.ErrorWriter.String())
 	}
 }
+
+// jdbcServices is linkedServices for postgres, whose services hand over jdbc
+// values, with a password for those values to name
+func jdbcServices(t *testing.T, links map[string][]string) *service.Datastore {
+	t.Helper()
+
+	datastore := linkedServicesOf(t, service.Datastores["postgres"], links)
+	for serviceName := range links {
+		if err := os.WriteFile(filepath.Join(service.Folders(datastore, serviceName).Root, "PASSWORD"), []byte("hunter2"), 0600); err != nil {
+			t.Fatalf("failed to write the password: %s", err)
+		}
+	}
+
+	return datastore
+}
+
+// renderedJDBC returns the jdbc values of the lollipop service
+func renderedJDBC(t *testing.T, datastore *service.Datastore) service.JDBCValues {
+	t.Helper()
+
+	values, ok := datastore.JDBC("lollipop")
+	if !ok {
+		t.Fatal("expected the jdbc values to render")
+	}
+
+	return values
+}
+
+func TestJDBCConfigKeys(t *testing.T) {
+	tests := []struct {
+		key      string
+		expected JDBCKeys
+	}{
+		{
+			key:      "DATABASE_URL",
+			expected: JDBCKeys{URL: "JDBC_DATABASE_URL", Username: "JDBC_DATABASE_USERNAME", Password: "JDBC_DATABASE_PASSWORD"},
+		},
+		{
+			key:      "DOKKU_POSTGRES_AQUA_URL",
+			expected: JDBCKeys{URL: "JDBC_DOKKU_POSTGRES_AQUA_URL", Username: "JDBC_DOKKU_POSTGRES_AQUA_USERNAME", Password: "JDBC_DOKKU_POSTGRES_AQUA_PASSWORD"},
+		},
+		{
+			// an env var with no _URL suffix is named after in full
+			key:      "MB_DB_CONNECTION_URI",
+			expected: JDBCKeys{URL: "JDBC_MB_DB_CONNECTION_URI", Username: "JDBC_MB_DB_CONNECTION_URI_USERNAME", Password: "JDBC_MB_DB_CONNECTION_URI_PASSWORD"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.key, func(t *testing.T) {
+			if actual := JDBCConfigKeys(test.key); actual != test.expected {
+				t.Errorf("expected %+v, got %+v", test.expected, actual)
+			}
+		})
+	}
+}
+
+func TestLinkedJDBCConfigKeys(t *testing.T) {
+	values := service.JDBCValues{
+		URL:      "jdbc:postgresql://dokku-postgres-lollipop:5432/lollipop?user=postgres&password=hunter2",
+		Username: "postgres",
+		Password: "hunter2",
+	}
+	recorded := []string{"JDBC_DATABASE_PASSWORD", "JDBC_DATABASE_URL", "JDBC_DATABASE_USERNAME"}
+
+	tests := []struct {
+		name        string
+		environment map[string]string
+		recorded    []string
+		values      service.JDBCValues
+		expected    []string
+	}{
+		{
+			name: "every recorded key holding its value",
+			environment: map[string]string{
+				"JDBC_DATABASE_URL":      values.URL,
+				"JDBC_DATABASE_USERNAME": values.Username,
+				"JDBC_DATABASE_PASSWORD": values.Password,
+			},
+			recorded: recorded,
+			values:   values,
+			expected: recorded,
+		},
+		{
+			name:        "a url with a querystring added",
+			environment: map[string]string{"JDBC_DATABASE_URL": values.URL + "&sslmode=require"},
+			recorded:    recorded,
+			values:      values,
+			expected:    []string{"JDBC_DATABASE_URL"},
+		},
+		{
+			name:        "a url pointed elsewhere",
+			environment: map[string]string{"JDBC_DATABASE_URL": "jdbc:postgresql://elsewhere:5432/db"},
+			recorded:    recorded,
+			values:      values,
+			expected:    []string{},
+		},
+		{
+			name:        "a key holding the url that was never recorded",
+			environment: map[string]string{"JDBC_DATABASE_URL": values.URL},
+			values:      values,
+			expected:    []string{},
+		},
+		{
+			name:        "values that failed to render match nothing",
+			environment: map[string]string{"JDBC_DATABASE_URL": values.URL},
+			recorded:    recorded,
+			expected:    []string{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if actual := LinkedJDBCConfigKeys(test.environment, test.recorded, test.values); !slices.Equal(actual, test.expected) {
+				t.Errorf("expected %v, got %v", test.expected, actual)
+			}
+		})
+	}
+}
+
+// A link made with --jdbc sets the jdbc values beside the url, named after
+// the variable the url is set as, in the one config:set
+func TestLinkServiceWithJDBC(t *testing.T) {
+	tests := []struct {
+		name             string
+		alias            string
+		envVar           string
+		querystring      string
+		config           map[string]string
+		expectedError    string
+		expectedSet      func(serviceURL string, jdbc service.JDBCValues) string
+		expectedRecorded []string
+		expectedJDBC     []string
+	}{
+		{
+			name:   "the default alias",
+			config: map[string]string{},
+			expectedSet: func(serviceURL string, jdbc service.JDBCValues) string {
+				return "config:set --no-restart my-app DATABASE_URL=" + serviceURL + " JDBC_DATABASE_PASSWORD=" + jdbc.Password + " JDBC_DATABASE_URL=" + jdbc.URL + " JDBC_DATABASE_USERNAME=" + jdbc.Username
+			},
+			expectedRecorded: []string{"DATABASE_URL"},
+			expectedJDBC:     []string{"JDBC_DATABASE_PASSWORD", "JDBC_DATABASE_URL", "JDBC_DATABASE_USERNAME"},
+		},
+		{
+			name:   "the default alias in use",
+			config: map[string]string{"DATABASE_URL": "postgres://other@elsewhere:5432/db"},
+			expectedSet: func(serviceURL string, jdbc service.JDBCValues) string {
+				return "config:set --no-restart my-app DOKKU_POSTGRES_AQUA_URL=" + serviceURL + " JDBC_DOKKU_POSTGRES_AQUA_PASSWORD=" + jdbc.Password + " JDBC_DOKKU_POSTGRES_AQUA_URL=" + jdbc.URL + " JDBC_DOKKU_POSTGRES_AQUA_USERNAME=" + jdbc.Username
+			},
+			expectedRecorded: []string{"DOKKU_POSTGRES_AQUA_URL"},
+			expectedJDBC:     []string{"JDBC_DOKKU_POSTGRES_AQUA_PASSWORD", "JDBC_DOKKU_POSTGRES_AQUA_URL", "JDBC_DOKKU_POSTGRES_AQUA_USERNAME"},
+		},
+		{
+			name:   "an alias",
+			alias:  "BLUE_DATABASE",
+			config: map[string]string{},
+			expectedSet: func(serviceURL string, jdbc service.JDBCValues) string {
+				return "config:set --no-restart my-app BLUE_DATABASE_URL=" + serviceURL + " JDBC_BLUE_DATABASE_PASSWORD=" + jdbc.Password + " JDBC_BLUE_DATABASE_URL=" + jdbc.URL + " JDBC_BLUE_DATABASE_USERNAME=" + jdbc.Username
+			},
+			expectedRecorded: []string{"BLUE_DATABASE_URL"},
+			expectedJDBC:     []string{"JDBC_BLUE_DATABASE_PASSWORD", "JDBC_BLUE_DATABASE_URL", "JDBC_BLUE_DATABASE_USERNAME"},
+		},
+		{
+			name:   "an env var",
+			envVar: "MB_DB_CONNECTION_URI",
+			config: map[string]string{},
+			expectedSet: func(serviceURL string, jdbc service.JDBCValues) string {
+				return "config:set --no-restart my-app JDBC_MB_DB_CONNECTION_URI=" + jdbc.URL + " JDBC_MB_DB_CONNECTION_URI_PASSWORD=" + jdbc.Password + " JDBC_MB_DB_CONNECTION_URI_USERNAME=" + jdbc.Username + " MB_DB_CONNECTION_URI=" + serviceURL
+			},
+			expectedRecorded: []string{"MB_DB_CONNECTION_URI"},
+			expectedJDBC:     []string{"JDBC_MB_DB_CONNECTION_URI", "JDBC_MB_DB_CONNECTION_URI_PASSWORD", "JDBC_MB_DB_CONNECTION_URI_USERNAME"},
+		},
+		{
+			// the jdbc url already has a querystring, which carries its
+			// credentials, so the one passed follows it
+			name:        "a querystring",
+			querystring: "sslmode=require",
+			config:      map[string]string{},
+			expectedSet: func(serviceURL string, jdbc service.JDBCValues) string {
+				return "config:set --no-restart my-app DATABASE_URL=" + serviceURL + "?sslmode=require JDBC_DATABASE_PASSWORD=" + jdbc.Password + " JDBC_DATABASE_URL=" + jdbc.URL + "&sslmode=require JDBC_DATABASE_USERNAME=" + jdbc.Username
+			},
+			expectedRecorded: []string{"DATABASE_URL"},
+			expectedJDBC:     []string{"JDBC_DATABASE_PASSWORD", "JDBC_DATABASE_URL", "JDBC_DATABASE_USERNAME"},
+		},
+		{
+			name:          "a jdbc variable already in use",
+			config:        map[string]string{"JDBC_DATABASE_USERNAME": "someone"},
+			expectedError: "Specified jdbc env var JDBC_DATABASE_USERNAME already in use",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			datastore := jdbcServices(t, map[string][]string{"lollipop": {}})
+			serviceURL := datastore.URL("lollipop", "")
+			jdbc := renderedJDBC(t, datastore)
+
+			calls := fakeDokku(t, test.config)
+			ui := cli.NewMockUi()
+
+			err := LinkService(t.Context(), LinkServiceInput{
+				Alias:       test.alias,
+				AppName:     "my-app",
+				Datastore:   datastore,
+				EnvVar:      test.envVar,
+				JDBC:        true,
+				Logger:      Ui{Ui: ui},
+				NoRestart:   true,
+				Querystring: test.querystring,
+				ServiceName: "lollipop",
+			})
+
+			if test.expectedError != "" {
+				if err == nil || err.Error() != test.expectedError {
+					t.Fatalf("expected %q, got %v", test.expectedError, err)
+				}
+
+				// refused before anything was changed
+				if actual := recordedCalls(t, calls); len(actual) != 0 {
+					t.Errorf("expected no calls, got %q", actual)
+				}
+				if actual := service.LinkedApps(t.Context(), service.LinkedAppsInput{Datastore: datastore, ServiceName: "lollipop"}); len(actual) != 0 {
+					t.Errorf("expected no links, got %v", actual)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("expected no error, got %s", err)
+			}
+
+			option := fmt.Sprintf("--link %s:%s", service.ContainerName(datastore, "lollipop"), service.DNSHostname(datastore, "lollipop"))
+			expectedCalls := []string{
+				"docker-options:add my-app build,deploy,run " + option,
+				test.expectedSet(serviceURL, jdbc),
+			}
+			if actual := recordedCalls(t, calls); !slices.Equal(actual, expectedCalls) {
+				t.Errorf("expected the calls %q, got %q", expectedCalls, actual)
+			}
+
+			if actual := service.LinkConfigKeys(datastore, "lollipop", "my-app"); !slices.Equal(actual, test.expectedRecorded) {
+				t.Errorf("expected the recorded keys %v, got %v", test.expectedRecorded, actual)
+			}
+
+			if actual := service.LinkJDBCConfigKeys(datastore, "lollipop", "my-app"); !slices.Equal(actual, test.expectedJDBC) {
+				t.Errorf("expected the recorded jdbc keys %v, got %v", test.expectedJDBC, actual)
+			}
+		})
+	}
+}
+
+// A datastore with no jdbc driver refuses --jdbc before anything is changed
+func TestLinkServiceWithJDBCOnADatastoreWithoutIt(t *testing.T) {
+	datastore := linkedServices(t, map[string][]string{"lollipop": {}})
+	calls := fakeDokku(t, map[string]string{})
+
+	err := LinkService(t.Context(), LinkServiceInput{
+		AppName:     "my-app",
+		Datastore:   datastore,
+		JDBC:        true,
+		Logger:      Ui{Ui: cli.NewMockUi()},
+		NoRestart:   true,
+		ServiceName: "lollipop",
+	})
+	if err == nil || err.Error() != "Redis does not support jdbc urls" {
+		t.Fatalf("expected the flag to be refused, got %v", err)
+	}
+
+	if actual, err := os.ReadFile(calls); err == nil {
+		t.Errorf("expected dokku not to be asked anything, got %q", actual)
+	}
+}
+
+// An app whose config already holds the url is given the rest of the link but
+// its config is left as it is, so no jdbc values are set for it
+func TestLinkServiceWithJDBCAndTheURLAlreadySet(t *testing.T) {
+	datastore := jdbcServices(t, map[string][]string{"lollipop": {}})
+	calls := fakeDokku(t, map[string]string{"DATABASE_URL": datastore.URL("lollipop", "")})
+
+	if err := LinkService(t.Context(), LinkServiceInput{
+		AppName:     "my-app",
+		Datastore:   datastore,
+		JDBC:        true,
+		Logger:      Ui{Ui: cli.NewMockUi()},
+		NoRestart:   true,
+		ServiceName: "lollipop",
+	}); err != nil {
+		t.Fatalf("expected no error, got %s", err)
+	}
+
+	option := fmt.Sprintf("--link %s:%s", service.ContainerName(datastore, "lollipop"), service.DNSHostname(datastore, "lollipop"))
+	expectedCalls := []string{"docker-options:add my-app build,deploy,run " + option}
+	if actual := recordedCalls(t, calls); !slices.Equal(actual, expectedCalls) {
+		t.Errorf("expected the calls %q, got %q", expectedCalls, actual)
+	}
+
+	if actual := service.LinkJDBCConfigKeys(datastore, "lollipop", "my-app"); actual != nil {
+		t.Errorf("expected no jdbc keys recorded, got %v", actual)
+	}
+}
+
+// Unlinking unsets the jdbc values a link made with --jdbc set, along with the
+// url and in the same config:unset, bar any pointed at something else
+func TestUnlinkServiceWithJDBC(t *testing.T) {
+	jdbcKeys := []string{"JDBC_DATABASE_PASSWORD", "JDBC_DATABASE_URL", "JDBC_DATABASE_USERNAME"}
+
+	tests := []struct {
+		name          string
+		config        func(serviceURL string, jdbc service.JDBCValues) map[string]string
+		expectedUnset string
+		expectedWarn  bool
+	}{
+		{
+			name: "every jdbc value still in place",
+			config: func(serviceURL string, jdbc service.JDBCValues) map[string]string {
+				return map[string]string{
+					"DATABASE_URL":           serviceURL,
+					"JDBC_DATABASE_URL":      jdbc.URL + "&sslmode=require",
+					"JDBC_DATABASE_USERNAME": jdbc.Username,
+					"JDBC_DATABASE_PASSWORD": jdbc.Password,
+				}
+			},
+			expectedUnset: "config:unset --no-restart my-app DATABASE_URL JDBC_DATABASE_PASSWORD JDBC_DATABASE_URL JDBC_DATABASE_USERNAME",
+		},
+		{
+			name: "the jdbc url pointed elsewhere",
+			config: func(serviceURL string, jdbc service.JDBCValues) map[string]string {
+				return map[string]string{
+					"DATABASE_URL":           serviceURL,
+					"JDBC_DATABASE_URL":      "jdbc:postgresql://elsewhere:5432/db",
+					"JDBC_DATABASE_USERNAME": jdbc.Username,
+					"JDBC_DATABASE_PASSWORD": jdbc.Password,
+				}
+			},
+			expectedUnset: "config:unset --no-restart my-app DATABASE_URL JDBC_DATABASE_PASSWORD JDBC_DATABASE_USERNAME",
+		},
+		{
+			// the jdbc values still name the service though the url does not,
+			// so they are unset and the app has something to restart for
+			name: "the url pointed elsewhere",
+			config: func(serviceURL string, jdbc service.JDBCValues) map[string]string {
+				return map[string]string{
+					"DATABASE_URL":           "postgres://other@elsewhere:5432/db",
+					"JDBC_DATABASE_URL":      jdbc.URL,
+					"JDBC_DATABASE_USERNAME": jdbc.Username,
+					"JDBC_DATABASE_PASSWORD": jdbc.Password,
+				}
+			},
+			expectedUnset: "config:unset --no-restart my-app JDBC_DATABASE_PASSWORD JDBC_DATABASE_URL JDBC_DATABASE_USERNAME",
+		},
+		{
+			name: "nothing left pointing at the service",
+			config: func(serviceURL string, jdbc service.JDBCValues) map[string]string {
+				return map[string]string{"DATABASE_URL": "postgres://other@elsewhere:5432/db"}
+			},
+			expectedWarn: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			datastore := jdbcServices(t, map[string][]string{"lollipop": {"my-app"}})
+			recordKeys(t, datastore, []string{"DATABASE_URL"})
+			if err := service.SetLinkJDBCConfigKeys(datastore, "lollipop", "my-app", jdbcKeys); err != nil {
+				t.Fatalf("failed to record the jdbc keys: %s", err)
+			}
+
+			dokkuRoot := t.TempDir()
+			t.Setenv("DOKKU_ROOT", dokkuRoot)
+			if err := os.MkdirAll(filepath.Join(dokkuRoot, "my-app"), 0755); err != nil {
+				t.Fatalf("failed to create the app root: %s", err)
+			}
+
+			calls := fakeDokku(t, test.config(datastore.URL("lollipop", ""), renderedJDBC(t, datastore)))
+			ui := cli.NewMockUi()
+
+			if err := UnlinkService(t.Context(), UnlinkServiceInput{
+				AppName:     "my-app",
+				Datastore:   datastore,
+				Logger:      Ui{Ui: ui},
+				NoRestart:   true,
+				ServiceName: "lollipop",
+			}); err != nil {
+				t.Fatalf("expected no error, got %s", err)
+			}
+
+			option := fmt.Sprintf("--link %s:%s", service.ContainerName(datastore, "lollipop"), service.DNSHostname(datastore, "lollipop"))
+			expectedCalls := []string{"docker-options:remove my-app build,deploy,run " + option}
+			if test.expectedUnset != "" {
+				expectedCalls = append(expectedCalls, test.expectedUnset)
+			}
+			if actual := recordedCalls(t, calls); !slices.Equal(actual, expectedCalls) {
+				t.Errorf("expected the calls %q, got %q", expectedCalls, actual)
+			}
+
+			if actual := service.LinkJDBCConfigKeys(datastore, "lollipop", "my-app"); actual != nil {
+				t.Errorf("expected the jdbc record to go with the link, got %v", actual)
+			}
+
+			warned := strings.Contains(ui.ErrorWriter.String(), "none was unset")
+			if warned != test.expectedWarn {
+				t.Errorf("expected a warning to be %t, got the output %q", test.expectedWarn, ui.ErrorWriter.String())
+			}
+		})
+	}
+}

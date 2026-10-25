@@ -122,6 +122,28 @@ func TestParseRejects(t *testing.T) {
 			expected: "x-dokku.dsn is required",
 		},
 		{
+			name:     "a jdbc block with no url",
+			compose:  validCompose + "  jdbc:\n    username: thing\n    password: secret\n",
+			expected: "x-dokku.jdbc.url is required",
+		},
+		{
+			name:     "a jdbc block with no username",
+			compose:  validCompose + "  jdbc:\n    url: \"jdbc:thing://{{ .Host }}\"\n    password: secret\n",
+			expected: "x-dokku.jdbc.username is required",
+		},
+		{
+			name:     "a jdbc block with no password",
+			compose:  validCompose + "  jdbc:\n    url: \"jdbc:thing://{{ .Host }}\"\n    username: thing\n",
+			expected: "x-dokku.jdbc.password is required",
+		},
+		{
+			// checked like the dsn, so a jdbc url cannot name a path that was
+			// never mounted
+			name:     "a jdbc url naming the target of a volume that does not exist",
+			compose:  validCompose + "  jdbc:\n    url: \"jdbc:thing://{{ .Host }}/{{ .Target.logs }}\"\n    username: thing\n    password: secret\n",
+			expected: `names the target of the volume "logs", which is not declared`,
+		},
+		{
 			name:     "a nameless port",
 			compose:  strings.Replace(validCompose, "      - name: native", "      - name: \"\"", 1),
 			expected: "every port needs a name",
@@ -351,6 +373,33 @@ func TestParseRejects(t *testing.T) {
 				t.Errorf("expected an error mentioning %q, got: %s", test.expected, err)
 			}
 		})
+	}
+}
+
+// A datastore with a jdbc driver declares the jdbc url and credentials. One
+// that says nothing has none.
+func TestParseReadsJDBC(t *testing.T) {
+	parsed, err := parseCompose(t, validCompose)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if parsed.Dokku.JDBC != nil {
+		t.Errorf("expected no jdbc, got %+v", parsed.Dokku.JDBC)
+	}
+
+	parsed, err = parseCompose(t, validCompose+"  jdbc:\n    url: \"jdbc:thing://{{ .Host }}:{{ .Port.native }}\"\n    username: thing\n    password: \"{{ .Secret.password }}\"\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	expected := JDBC{
+		URL:      "jdbc:thing://{{ .Host }}:{{ .Port.native }}",
+		Username: "thing",
+		Password: "{{ .Secret.password }}",
+	}
+	if parsed.Dokku.JDBC == nil || *parsed.Dokku.JDBC != expected {
+		t.Errorf("expected %+v, got %+v", expected, parsed.Dokku.JDBC)
 	}
 }
 

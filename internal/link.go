@@ -193,6 +193,103 @@ func LinkedConfigKeys(environment map[string]string, recorded []string, serviceU
 	return slices.Compact(keys)
 }
 
+// LinkedJDBCConfigKeys returns the recorded jdbc config keys on an app that
+// still hold the service's jdbc values, sorted so the output is stable.
+//
+// Only recorded keys count, since every one of them was set by a link made
+// with --jdbc, which records them. A url key counts while it still holds the
+// jdbc url, whatever querystring it has been given, and a username or password
+// key while it still holds the value it was set to. A key pointed at something
+// else no longer belongs to the link, and is left alone.
+func LinkedJDBCConfigKeys(environment map[string]string, recorded []string, values service.JDBCValues) []string {
+	keys := []string{}
+
+	// every value contains the empty string, as ConfigKeysForURL guards against
+	if values.URL == "" || values.Username == "" || values.Password == "" {
+		return keys
+	}
+
+	for _, key := range recorded {
+		value, ok := environment[key]
+		if !ok {
+			continue
+		}
+
+		if strings.Contains(value, values.URL) || value == values.Username || value == values.Password {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+
+	return slices.Compact(keys)
+}
+
+// linkedJDBCKeys returns the jdbc config keys on an app that belong to its link
+// to a service, none when the datastore has no jdbc values to find them by
+func linkedJDBCKeys(s *service.Datastore, serviceName string, appName string, environment map[string]string) []string {
+	values, ok := s.JDBC(serviceName)
+	if !ok {
+		return []string{}
+	}
+
+	return LinkedJDBCConfigKeys(environment, service.LinkJDBCConfigKeys(s, serviceName, appName), values)
+}
+
+// JDBCKeys are the config keys a link made with --jdbc sets the jdbc values as
+type JDBCKeys struct {
+	// URL holds the jdbc url
+	URL string
+
+	// Username holds the account the url names
+	Username string
+
+	// Password holds the account's password
+	Password string
+}
+
+// JDBCConfigKeys returns the config keys the jdbc values are set as beside a
+// key holding the service url. The url is that key prefixed with JDBC_, and
+// the username and password are named after it without its _URL suffix, so
+// DATABASE_URL is joined by JDBC_DATABASE_URL, JDBC_DATABASE_USERNAME and
+// JDBC_DATABASE_PASSWORD, as a java buildpack expects.
+func JDBCConfigKeys(key string) JDBCKeys {
+	base := strings.TrimSuffix(key, "_URL")
+
+	return JDBCKeys{
+		URL:      "JDBC_" + key,
+		Username: "JDBC_" + base + "_USERNAME",
+		Password: "JDBC_" + base + "_PASSWORD",
+	}
+}
+
+// List returns the keys, in a stable order
+func (k JDBCKeys) List() []string {
+	return []string{k.Password, k.URL, k.Username}
+}
+
+// Entries returns the config entries setting the jdbc values on the keys
+func (k JDBCKeys) Entries(values service.JDBCValues) map[string]string {
+	return map[string]string{
+		k.URL:      values.URL,
+		k.Username: values.Username,
+		k.Password: values.Password,
+	}
+}
+
+// withQuerystring appends a querystring to a url, after the one it already has
+// if it has one, as a jdbc url carrying its credentials does
+func withQuerystring(u string, querystring string) string {
+	if querystring == "" {
+		return u
+	}
+
+	if strings.Contains(u, "?") {
+		return fmt.Sprintf("%s&%s", u, querystring)
+	}
+
+	return fmt.Sprintf("%s?%s", u, querystring)
+}
+
 // AlternateAlias returns the first alternate alias that is not already in use on
 // the app, or an empty string when every alias is taken
 func AlternateAlias(s *service.Datastore, environment map[string]string) string {
@@ -221,6 +318,10 @@ type LinkServiceInput struct {
 	// as, used in place of an alias and not suffixed with _URL
 	EnvVar string
 
+	// JDBC is whether to also expose the jdbc url, username and password, for a
+	// java driver that cannot read the service url
+	JDBC bool
+
 	// Logger reports progress
 	Logger Ui
 
@@ -242,6 +343,19 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 
 	if input.EnvVar != "" && !envVarPattern.MatchString(input.EnvVar) {
 		return fmt.Errorf("Invalid env var %s", input.EnvVar) //nolint:staticcheck // matches the other link errors
+	}
+
+	jdbc := service.JDBCValues{}
+	if input.JDBC {
+		if !input.Datastore.SupportsJDBC() {
+			return fmt.Errorf("%s does not support jdbc urls", input.Datastore.Title())
+		}
+
+		values, ok := input.Datastore.JDBC(input.ServiceName)
+		if !ok {
+			return fmt.Errorf("unable to render the jdbc url for service %s", input.ServiceName)
+		}
+		jdbc = values
 	}
 
 	environment, err := AppEnvironment(ctx, input.AppName)
@@ -274,8 +388,8 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 
 	// an app whose config already holds the url, set by hand or left over from
 	// a links file that lost its name, is missing everything but the config.
-	// That config is left as it is, so the alias, env var and querystring do not
-	// apply and nothing changes that would restart the app.
+	// That config is left as it is, so the alias, env var, querystring and jdbc
+	// values do not apply and nothing changes that would restart the app.
 	if len(linkedKeys) > 0 {
 		if err := addLink(ctx, input.Datastore, input.ServiceName, input.AppName); err != nil {
 			return err
@@ -297,8 +411,24 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 		return err
 	}
 
-	if input.Querystring != "" {
-		serviceURL = fmt.Sprintf("%s?%s", serviceURL, input.Querystring)
+	entries := map[string]string{
+		key: withQuerystring(serviceURL, input.Querystring),
+	}
+
+	// the jdbc values are set beside the url, under names that follow from it,
+	// so a name already in use is refused as an alias or env var would be
+	jdbcKeys := []string{}
+	if input.JDBC {
+		keys := JDBCConfigKeys(key)
+		for _, jdbcKey := range keys.List() {
+			if _, ok := environment[jdbcKey]; ok {
+				return fmt.Errorf("Specified jdbc env var %s already in use", jdbcKey) //nolint:staticcheck // matches the other link errors
+			}
+		}
+
+		jdbc.URL = withQuerystring(jdbc.URL, input.Querystring)
+		maps.Copy(entries, keys.Entries(jdbc))
+		jdbcKeys = keys.List()
 	}
 
 	if err := addLink(ctx, input.Datastore, input.ServiceName, input.AppName); err != nil {
@@ -311,9 +441,13 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 		return err
 	}
 
-	if err := SetAppConfig(ctx, input.AppName, map[string]string{
-		key: serviceURL,
-	}, !input.NoRestart); err != nil {
+	// recorded even when there are none, which forgets any a lost link left
+	if err := recordLinkJDBCConfigKeys(input.Logger, input.Datastore, input.ServiceName, input.AppName, jdbcKeys); err != nil {
+		return err
+	}
+
+	// set together, so the app restarts once for all of them
+	if err := SetAppConfig(ctx, input.AppName, entries, !input.NoRestart); err != nil {
 		return err
 	}
 
@@ -392,6 +526,7 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 
 	serviceURL := input.Datastore.URL(input.ServiceName, SchemeForApp(input.Datastore, environment))
 	linkedKeys := LinkedConfigKeys(environment, service.LinkConfigKeys(input.Datastore, input.ServiceName, input.AppName), serviceURL)
+	jdbcKeys := linkedJDBCKeys(input.Datastore, input.ServiceName, input.AppName, environment)
 
 	// the links file is what destroy, linked and links read, so it is what
 	// decides whether the app is linked. An app whose url was repointed at
@@ -428,13 +563,15 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 		return err
 	}
 
-	if len(linkedKeys) == 0 {
+	// unset together, so the app restarts once for all of them
+	unset := append(slices.Clone(linkedKeys), jdbcKeys...)
+	if len(unset) == 0 {
 		// nothing to unset means nothing to restart for, so the running app
 		// keeps its container link until it is next restarted or deployed
 		input.Logger.Warn(WarnInput{
 			Warning: fmt.Sprintf("No config on app %s points at service %s, so none was unset. The app keeps its container link until it is restarted", input.AppName, input.ServiceName),
 		})
-	} else if err := UnsetAppConfig(ctx, input.AppName, linkedKeys, !input.NoRestart); err != nil {
+	} else if err := UnsetAppConfig(ctx, input.AppName, unset, !input.NoRestart); err != nil {
 		return err
 	}
 
@@ -444,26 +581,42 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 // recordLinkConfigKeys records the config keys holding the service url on an
 // app, warning when a corrupt record had to be replaced to do so
 func recordLinkConfigKeys(logger Ui, s *service.Datastore, serviceName string, appName string, keys []string) error {
-	return warnOnCorruptLinkConfigKeys(logger, serviceName, service.SetLinkConfigKeys(s, serviceName, appName, keys))
+	return warnOnCorruptLinkConfigKeys(logger, serviceName, service.LinkConfigKeysProperty, service.SetLinkConfigKeys(s, serviceName, appName, keys))
 }
 
-// forgetLinkConfigKeys forgets the config keys recorded for an app, warning
+// recordLinkJDBCConfigKeys records the config keys holding the jdbc values on
+// an app, warning when a corrupt record had to be replaced to do so
+func recordLinkJDBCConfigKeys(logger Ui, s *service.Datastore, serviceName string, appName string, keys []string) error {
+	return warnOnCorruptLinkConfigKeys(logger, serviceName, service.LinkJDBCConfigKeysProperty, service.SetLinkJDBCConfigKeys(s, serviceName, appName, keys))
+}
+
+// forgetLinkConfigKeys forgets every config key recorded for an app, warning
 // when a corrupt record had to be replaced to do so
 func forgetLinkConfigKeys(logger Ui, s *service.Datastore, serviceName string, appName string) error {
-	return warnOnCorruptLinkConfigKeys(logger, serviceName, service.RemoveLinkConfigKeys(s, serviceName, appName))
+	if err := warnOnCorruptLinkConfigKeys(logger, serviceName, service.LinkConfigKeysProperty, service.RemoveLinkConfigKeys(s, serviceName, appName)); err != nil {
+		return err
+	}
+
+	return warnOnCorruptLinkConfigKeys(logger, serviceName, service.LinkJDBCConfigKeysProperty, service.RemoveLinkJDBCConfigKeys(s, serviceName, appName))
 }
 
 // warnOnCorruptLinkConfigKeys turns the report of a corrupt record that was
 // replaced into a warning, since the write itself succeeded. The other apps
-// linked to the service lose their record, and are found by their exact url
-// as links made before the keys were recorded are.
-func warnOnCorruptLinkConfigKeys(logger Ui, serviceName string, err error) error {
+// linked to the service lose their record: their url is found by its exact
+// value as links made before the keys were recorded are, while their jdbc
+// values have nothing else to be found by, and are left in place by unlink.
+func warnOnCorruptLinkConfigKeys(logger Ui, serviceName string, property string, err error) error {
 	if !errors.Is(err, service.ErrCorruptLinkConfigKeys) {
 		return err
 	}
 
+	consequence := "so those apps are found by their exact url until they are linked or promoted again"
+	if property == service.LinkJDBCConfigKeysProperty {
+		consequence = "so unlinking those apps leaves their jdbc config in place"
+	}
+
 	logger.Warn(WarnInput{
-		Warning: fmt.Sprintf("The %s property of service %s could not be parsed, and was replaced. The config keys it recorded for other linked apps were lost, so those apps are found by their exact url until they are linked or promoted again", service.LinkConfigKeysProperty, serviceName),
+		Warning: fmt.Sprintf("The %s property of service %s could not be parsed, and was replaced. The config keys it recorded for other linked apps were lost, %s", property, serviceName, consequence),
 	})
 
 	return nil
