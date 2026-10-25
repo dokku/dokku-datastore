@@ -465,6 +465,20 @@ wait_for_grafana() {
   return 1
 }
 
+# the datasource the image adds, as grafana describes it. The image adds it
+# after grafana answers, on every start, so it is waited on rather than looked
+# up once
+wait_for_datasource() {
+  wait_for_grafana || return 1
+  for _ in $(seq 1 30); do
+    grafana "http://127.0.0.1:80/api/datasources/name/Local%20Graphite" 2>/dev/null && return 0
+    sleep 2
+  done
+
+  echo "grafana did not add the Local Graphite datasource" >&2
+  return 1
+}
+
 # the mode of a file or folder, as octal permission bits
 assert_mode() {
   local expected="$1" path="$2" mode

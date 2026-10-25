@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # A graphite service made on the image's grafana 6 release is upgraded onto the
 # version the definition pins and keeps what it had: the metrics carbon wrote,
-# grafana's dashboards and datasource, and graphite-web's database, which the
+# grafana's dashboards and the datasource made on grafana 6, and graphite-web's
+# database, which the
 # newer graphite-web migrates rather than starts over.
 
 load ../test_helper
@@ -19,6 +20,15 @@ setup_file() {
   "$(probe_path)" write "$SERVICE"
   grafana -X POST -H 'Content-Type: application/json' http://127.0.0.1:80/api/dashboards/db \
     --data-binary '{"overwrite":true,"dashboard":{"title":"Upgrade Probe","panels":[{"id":1,"type":"graph","title":"value","targets":[{"refId":"A","target":"probe.value"}]}]}}'
+
+  # the image adds the datasource on every start, so the one grafana 6 has is
+  # marked to tell it from one added again after the upgrade. Grafana 6 gives
+  # a datasource no uid to tell them apart by
+  local datasource id
+  datasource="$(wait_for_datasource)"
+  id="$(echo "$datasource" | grep -o '"id":[0-9]*' | head -n 1 | cut -d ':' -f 2)"
+  grafana -X PUT -H 'Content-Type: application/json' "http://127.0.0.1:80/api/datasources/$id" \
+    --data-binary '{"name":"Local Graphite","type":"graphite","url":"http://localhost:8000","access":"proxy","isDefault":true,"jsonData":{"upgradeProbe":true}}'
 }
 
 teardown_file() {
@@ -59,8 +69,9 @@ setup() {
   assert_success
   assert_output --partial '"title":"Upgrade Probe"'
 
-  run grafana "http://127.0.0.1:80/api/datasources/name/Local%20Graphite"
+  run wait_for_datasource
   assert_success
+  assert_output --partial '"upgradeProbe":true'
 }
 
 @test "($DEFINITION) the upgraded service has the dashboards grafana 6 never read" {
