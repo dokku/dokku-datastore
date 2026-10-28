@@ -20,7 +20,7 @@ setup_file() {
   # service whose passwords came from the flags
   local flags
   mapfile -t flags < <(password_flags "$GIVEN_PASSWORD" "$GIVEN_ROOT_PASSWORD")
-  "$BIN" create "$PLUGIN" "$SERVICE" --image "$IMAGE" --image-version "$IMAGE_VERSION" "${flags[@]}"
+  "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE" --image "$IMAGE" --image-version "$IMAGE_VERSION" "${flags[@]}"
 }
 
 teardown_file() {
@@ -38,7 +38,7 @@ teardown_file() {
   # tag nobody ever built, and the create then failed saying that image could not
   # be had. Nothing reaches docker here: the refusal lands before the pull and
   # before the service root is made, so this costs the daemon nothing
-  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-noversion" --image example.invalid/not-the-definition-image
+  run --separate-stderr "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE-noversion" --image example.invalid/not-the-definition-image
   assert_failure
   assert_stderr --partial -- "--image-version"
   assert_stderr --partial "example.invalid/not-the-definition-image"
@@ -48,17 +48,32 @@ teardown_file() {
 @test "($DEFINITION) a create naming a definition the datastore does not have is refused" {
   # rather than placed on whatever its image would resolve to. Refused before the
   # pull and before the service root is made, so this costs the daemon nothing
-  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-nodefinition" --definition not-a-definition
+  run --separate-stderr "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE-nodefinition" --definition not-a-definition
   assert_failure
   assert_stderr --partial "is not a $PLUGIN definition"
   assert_stderr --partial "$DEFINITION"
   [[ ! -d "$(service_root "$SERVICE-nodefinition")" ]] || fail "a refused create left $(service_root "$SERVICE-nodefinition") behind"
 }
 
+@test "($DEFINITION) a create is made with the backend it was given" {
+  run cat "$(service_root)/BACKEND"
+  assert_success
+  assert_output "$BACKEND"
+}
+
+@test "($DEFINITION) a create naming an unknown backend is refused" {
+  # refused before the pull and before the service root is made, rather than
+  # made with docker because the name was not one it knew
+  run --separate-stderr "$BIN" create --backend podman "$PLUGIN" "$SERVICE-nobackend" --image "$IMAGE" --image-version "$IMAGE_VERSION"
+  assert_failure
+  assert_stderr --partial 'invalid backend "podman", must be docker or compose'
+  [[ ! -d "$(service_root "$SERVICE-nobackend")" ]] || fail "a refused create left $(service_root "$SERVICE-nobackend") behind"
+}
+
 @test "($DEFINITION) a create naming an invalid service is refused with the characters it may use" {
   # the dash is accepted, so the message has to say so, or someone with a
   # refused name is told a name like this file's own service is not allowed
-  run --separate-stderr "$BIN" create "$PLUGIN" "not.valid" --image "$IMAGE" --image-version "$IMAGE_VERSION"
+  run --separate-stderr "$BIN" create --backend "$BACKEND" "$PLUGIN" "not.valid" --image "$IMAGE" --image-version "$IMAGE_VERSION"
   assert_failure
   assert_stderr --partial "Valid characters are: [A-Za-z0-9_-]+"
   [[ ! -d "$(service_root "not.valid")" ]] || fail "a refused create left $(service_root "not.valid") behind"
@@ -72,7 +87,7 @@ teardown_file() {
   # the database is named after the service, so the app would be handed one the
   # datastore keeps for itself. Refused before the pull and before the service
   # root is made, so this costs the daemon nothing
-  run --separate-stderr "$BIN" create "$PLUGIN" "$reserved" --image "$IMAGE" --image-version "$IMAGE_VERSION"
+  run --separate-stderr "$BIN" create --backend "$BACKEND" "$PLUGIN" "$reserved" --image "$IMAGE" --image-version "$IMAGE_VERSION"
   assert_failure
   assert_stderr --partial "service name $reserved is reserved"
   [[ ! -d "$(service_root "$reserved")" ]] || fail "a refused create left $(service_root "$reserved") behind"
@@ -84,7 +99,7 @@ teardown_file() {
   # docker would otherwise create it, empty and owned by root, and the service
   # would start on that. Refused before the pull and before the service root is
   # made, so this costs the daemon nothing
-  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-nomount" --image "$IMAGE" --image-version "$IMAGE_VERSION" --volume "$DOKKU_LIB_ROOT/not-there:/opt/dokku-mount"
+  run --separate-stderr "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE-nomount" --image "$IMAGE" --image-version "$IMAGE_VERSION" --volume "$DOKKU_LIB_ROOT/not-there:/opt/dokku-mount"
   assert_failure
   assert_stderr --partial "does not exist"
   [[ ! -d "$(service_root "$SERVICE-nomount")" ]] || fail "a refused create left $(service_root "$SERVICE-nomount") behind"
@@ -95,7 +110,7 @@ teardown_file() {
 
   # the flag would otherwise be dropped and the service started on a password
   # nobody was told. Refused before the pull, so this costs the daemon nothing
-  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-noroot" --image "$IMAGE" --image-version "$IMAGE_VERSION" --root-password "$GIVEN_ROOT_PASSWORD"
+  run --separate-stderr "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE-noroot" --image "$IMAGE" --image-version "$IMAGE_VERSION" --root-password "$GIVEN_ROOT_PASSWORD"
   assert_failure
   assert_stderr --partial -- "--root-password"
   [[ ! -d "$(service_root "$SERVICE-noroot")" ]] || fail "a refused create left $(service_root "$SERVICE-noroot") behind"
@@ -104,7 +119,7 @@ teardown_file() {
 @test "($DEFINITION) a create with a password the definition has no secret for is refused" {
   declares_secret SERVICE_PASSWORD && skip "$DEFINITION has a password"
 
-  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-nopassword" --image "$IMAGE" --image-version "$IMAGE_VERSION" --password "$GIVEN_PASSWORD"
+  run --separate-stderr "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE-nopassword" --image "$IMAGE" --image-version "$IMAGE_VERSION" --password "$GIVEN_PASSWORD"
   assert_failure
   assert_stderr --partial -- "--password"
   [[ ! -d "$(service_root "$SERVICE-nopassword")" ]] || fail "a refused create left $(service_root "$SERVICE-nopassword") behind"
@@ -195,7 +210,7 @@ teardown_file() {
   # left behind by a run that never reached its teardown
   docker network inspect "$network" >/dev/null 2>/dev/null || docker network create "$network" >/dev/null
 
-  run "$BIN" create "$PLUGIN" "$SERVICE-network" --image "$IMAGE" --image-version "$IMAGE_VERSION" --initial-network "$network"
+  run "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE-network" --image "$IMAGE" --image-version "$IMAGE_VERSION" --initial-network "$network"
   assert_success
 
   expected="$(container_inspect "$(service_container "$SERVICE-network")" "{{ (index .NetworkSettings.Networks \"$network\").IPAddress }}")"
@@ -236,7 +251,7 @@ teardown_file() {
 
   # it would be recorded and never reach the datastore. Refused before the pull
   # and before the service root is made, so this costs the daemon nothing
-  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-nomemory" --image "$IMAGE" --image-version "$IMAGE_VERSION" --service-memory 256
+  run --separate-stderr "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE-nomemory" --image "$IMAGE" --image-version "$IMAGE_VERSION" --service-memory 256
   assert_failure
   assert_stderr --partial -- "--service-memory"
   [[ ! -d "$(service_root "$SERVICE-nomemory")" ]] || fail "a refused create left $(service_root "$SERVICE-nomemory") behind"
@@ -319,7 +334,7 @@ teardown_file() {
   expected="$(default_definition)"
   [[ -n "$expected" ]] || fail "expected $PLUGIN to have a definition of its own"
 
-  run "$BIN" create "$PLUGIN" "$SERVICE-unpinned"
+  run "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE-unpinned"
   assert_success
 
   run cat "$(service_root "$SERVICE-unpinned")/DEFINITION"
@@ -341,7 +356,7 @@ teardown_file() {
 @test "($DEFINITION) a create naming its definition runs the image and version it pins" {
   # with no image flags at all, which for a datastore split by major version
   # would otherwise land on its newest definition rather than this one
-  run "$BIN" create "$PLUGIN" "$SERVICE-named" --definition "$DEFINITION"
+  run "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE-named" --definition "$DEFINITION"
   assert_success
 
   run cat "$(service_root "$SERVICE-named")/DEFINITION"
@@ -366,7 +381,7 @@ teardown_file() {
   # for an older major mounts the data somewhere its image does not keep it
   tag_custom_image
 
-  run "$BIN" create "$PLUGIN" "$SERVICE-custom" --definition "$DEFINITION" --image "$CUSTOM_IMAGE" --image-version "$CUSTOM_IMAGE_VERSION"
+  run "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE-custom" --definition "$DEFINITION" --image "$CUSTOM_IMAGE" --image-version "$CUSTOM_IMAGE_VERSION"
   assert_success
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE-custom" --definition
@@ -388,7 +403,7 @@ teardown_file() {
 @test "($DEFINITION) a create asked for json prints one json document" {
   # what it says on the way, and what the triggers it fires print, go to
   # stderr, so that stdout can be handed straight to a json reader
-  run --separate-stderr "$BIN" create "$PLUGIN" "$SERVICE-json" --image "$IMAGE" --image-version "$IMAGE_VERSION" --format json
+  run --separate-stderr "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE-json" --image "$IMAGE" --image-version "$IMAGE_VERSION" --format json
   assert_success
 
   run jq -e --slurp 'length == 1' <<<"$output"

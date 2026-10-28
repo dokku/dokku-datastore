@@ -10,8 +10,8 @@ import (
 )
 
 // WaitTimeoutProperty is how long, in seconds, the readiness probe waits for a
-// service to answer before giving up on it. Empty leaves it to the host, then
-// to the definition, then to the probe's own default.
+// service to answer before giving up on it. Empty leaves it to the global
+// property, then to the definition, then to the probe's own default.
 //
 // Read at the moment the probe runs rather than when a container is made, so a
 // change lands on the next start without the container being rebuilt.
@@ -45,13 +45,22 @@ func ServiceWaitTimeout(s *Datastore, serviceName string) string {
 // WaitTimeout is the timeout, in seconds, a service's readiness probe is run
 // with, zero leaving it to the probe's own default.
 //
-// The most specific answer wins: the service's own property, then the host's
-// variable for the datastore, then the definition's default. A malformed value
-// is an error rather than skipped, since skipping it would wait for a time the
-// operator never asked for and fail the same way the setting was meant to fix.
+// The most specific answer wins: the service's own property, then the global
+// property for the datastore, then the host's variable for it, then the
+// definition's default. A malformed value is an error rather than skipped, since
+// skipping it would wait for a time the operator never asked for and fail the
+// same way the setting was meant to fix.
+//
+// The variable is the global property's predecessor. It is still honored where
+// it reaches the binary, which it does not on a host whose sudo drops the
+// caller's environment.
 func WaitTimeout(s *Datastore, serviceName string) (int, error) {
 	if value := ServiceWaitTimeout(s, serviceName); value != "" {
 		return parseWaitTimeout(value, fmt.Sprintf("the %s property", WaitTimeoutProperty))
+	}
+
+	if value := strings.TrimSpace(GlobalProperty(s, WaitTimeoutProperty)); value != "" {
+		return parseWaitTimeout(value, fmt.Sprintf("the global %s property", WaitTimeoutProperty))
 	}
 
 	variable := s.Properties().WaitTimeoutVariable

@@ -78,18 +78,22 @@ func TestNewDocumentationData(t *testing.T) {
 	}
 }
 
-func TestNewDocumentationDataPrefersTheEnvironment(t *testing.T) {
+// The readme documents the image the definition pins whatever the environment
+// it was generated in says, since an exported image does not reach the binary
+// on a host whose sudo drops the caller's environment
+func TestNewDocumentationDataIgnoresTheEnvironment(t *testing.T) {
 	clearImageEnv(t)
 	t.Setenv("REDIS_IMAGE", "valkey/valkey")
 	t.Setenv("REDIS_IMAGE_VERSION", "9.9.9")
 
-	data := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["redis"]})
-	if data.Image != "valkey/valkey" {
-		t.Errorf("expected the image from the environment, got %q", data.Image)
+	redis := service.Datastores["redis"]
+	data := NewDocumentationData(DocumentationDataInput{Datastore: redis})
+	if expected := redis.Properties().DefaultImage; data.Image != expected {
+		t.Errorf("expected the definition's image %q, got %q", expected, data.Image)
 	}
 
-	if data.ImageVersion != "9.9.9" {
-		t.Errorf("expected the image version from the environment, got %q", data.ImageVersion)
+	if expected := redis.Properties().DefaultImageVersion; data.ImageVersion != expected {
+		t.Errorf("expected the definition's image version %q, got %q", expected, data.ImageVersion)
 	}
 }
 

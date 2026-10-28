@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/backend"
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
@@ -349,8 +350,10 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 	// image resolves to, which differ for a service created with --definition
 	// or one pinned before its image had definitions of its own. The service
 	// memory is always given, so that a source without one is cloned without
-	// one rather than handed the datastore's default
+	// one rather than handed the datastore's default. It is made with the
+	// backend the source was, so a clone is addressed the way its source is
 	if err := CreateService(ctx, CreateServiceInput{
+		Backend:            backend.Select(backend.SelectInput{Recorded: input.Datastore.RecordedBackend(input.ServiceName)}),
 		ConfigOptions:      settings.ConfigOptions,
 		CustomEnv:          settings.CustomEnv,
 		Datastore:          input.Datastore,

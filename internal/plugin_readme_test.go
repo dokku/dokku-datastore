@@ -101,8 +101,8 @@ func TestReadme(t *testing.T) {
 		{name: "a flag", expected: "- `-u|--use-iam`: use the IAM profile associated with the current server"},
 		{name: "prose from the documentation", expected: "Backup the `lollipop` service to the `my-s3-bucket` bucket on `AWS`:"},
 		{name: "a command from the documentation", expected: "```shell\ndokku redis:backup lollipop my-s3-bucket --use-iam\n```"},
-		{name: "the docker pull section", expected: "`REDIS_DISABLE_PULL` environment variable"},
-		{name: "the wait timeout section", expected: "`REDIS_WAIT_TIMEOUT` environment variable"},
+		{name: "the docker pull section", expected: "`dokku redis:set --global disable-pull true`"},
+		{name: "the wait timeout section", expected: "`dokku redis:set --global wait-timeout 120`"},
 		{name: "the wait timeout property", expected: "`wait-timeout` property with `dokku redis:set`"},
 		{name: "the expose limits section", expected: "### Limiting where and to whom a service is exposed"},
 		{name: "the expose limits apply without a restart", expected: "Either reaches a running service with `dokku redis:reexpose`"},
@@ -491,7 +491,7 @@ func TestReadmeVolumeTargets(t *testing.T) {
 		expected []string
 	}{
 		{name: "memcached", present: false},
-		{name: "redis", present: true, expected: []string{"| redis | data | `/data` |", "| redis | config | `/usr/local/etc/redis` |", "`REDIS_VOLUME_TARGETS`"}},
+		{name: "redis", present: true, expected: []string{"| redis | data | `/data` |", "| redis | config | `/usr/local/etc/redis` |", "pass `--volume-target` to `create`, `clone` or `upgrade`."}},
 		{name: "postgres", present: true, expected: []string{"| postgres-14 | data | `/var/lib/postgresql/data` |", "| postgres-17 | data | `/var/lib/postgresql/data` |", "| postgres-18 | data | `/var/lib/postgresql` |"}},
 	}
 

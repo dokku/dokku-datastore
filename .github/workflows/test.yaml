@@ -75,7 +75,7 @@ jobs:
         env:
           BATS_LIB_PATH: ${{ steps.setup-bats.outputs.lib-path }}
           DEFINITION: ${{ matrix.definition }}
-          DOKKU_DATASTORE_BACKEND: ${{ matrix.backend }}
+          BACKEND: ${{ matrix.backend }}
 
   backend-agreement:
     name: "backend-agreement (${{ matrix.definition }})"

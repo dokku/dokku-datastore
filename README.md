@@ -23,7 +23,7 @@ go build -o dokku-datastore .
 DEFINITION=redis bats tests/definition
 
 # or through the compose backend
-DEFINITION=redis DOKKU_DATASTORE_BACKEND=compose bats tests/definition
+DEFINITION=redis BACKEND=compose bats tests/definition
 
 # the same definition through both backends, compared as docker sees it
 DEFINITION=redis bats tests/backends.bats
@@ -130,7 +130,7 @@ A service pinned to the wrong definition that install leaves alone, such as one 
 dokku-datastore upgrade postgres db --definition postgres-15 --no-migrate
 ```
 
-The definition can also be named outright with `--definition`, or with `<VARIABLE>_DEFINITION` - `POSTGRES_DEFINITION` for postgres - when the flag is not given. It is for an image whose tags do not carry the major version: `--image myorg/postgres --image-version custom-3` resolves to nothing in particular and so lands on the newest definition, which for a build of postgres 17 is the wrong data directory. The named definition supplies the image and version it ships, and `--image` and `--image-version` are laid over them. A definition that belongs to another datastore is refused.
+The definition can also be named outright with `--definition`. It is for an image whose tags do not carry the major version: `--image myorg/postgres --image-version custom-3` resolves to nothing in particular and so lands on the newest definition, which for a build of postgres 17 is the wrong data directory. The named definition supplies the image and version it ships, and `--image` and `--image-version` are laid over them. A definition that belongs to another datastore is refused.
 
 ```shell
 # creates a service on the postgres-17 definition, at the image and version it pins
@@ -144,7 +144,7 @@ If a service names a definition the plugin no longer ships, commands that would 
 
 `upgrade` across a major version moves the service onto the other definition, which moves where its data is mounted along with it. That is the upgrade a major version asks for rather than something to work around, but it is not a tag change and it is not reversible by pointing the version back. A bare `upgrade` never crosses one: with no version named it moves to the newest tag the service's own major version ships, and leaves the data where it is.
 
-`upgrade --definition` moves the service onto the named definition, with the image and version it ships unless `--image` and `--image-version` say otherwise. That moves where its data is mounted in the same way, even when the image stays the same. A volume the service moved with `volume-targets` stays where it was moved to on the new definition, and an upgrade onto a definition that does not mount that volume is refused before the old container is taken away. `<VARIABLE>_DEFINITION` is only read by `create`. `clone` places the new service on the definition the source is pinned to, rather than on the one the source's image resolves to. A `clone` given an `--image` or `--image-version` that would move it onto another definition is refused, since the data would be mounted where that definition does not keep it; upgrade the source onto it first, then clone it.
+`upgrade --definition` moves the service onto the named definition, with the image and version it ships unless `--image` and `--image-version` say otherwise. That moves where its data is mounted in the same way, even when the image stays the same. A volume the service moved with `volume-targets` stays where it was moved to on the new definition, and an upgrade onto a definition that does not mount that volume is refused before the old container is taken away. `clone` places the new service on the definition the source is pinned to, rather than on the one the source's image resolves to. A `clone` given an `--image` or `--image-version` that would move it onto another definition is refused, since the data would be mounted where that definition does not keep it; upgrade the source onto it first, then clone it.
 
 ### Migrating data between definitions
 
@@ -286,8 +286,6 @@ A service that records only a version still takes the definition's image, becaus
 
 A reference is cut on its tag rather than on its first colon, so an image held in a private registry keeps the port that registry answers on: `registry.example.com:5000/redis:8.10` is that repository at `8.10` and not the host `registry.example.com` at a version of `5000/redis:8.10`.
 
-`<VARIABLE>_IMAGE` and `<VARIABLE>_IMAGE_VERSION` - `REDIS_IMAGE` for redis - name the same two things for a host that would rather not pass them on every create. These are the names the plugin readme documents, and now the names `create` reads; the bash plugins derived an internal `PLUGIN_IMAGE` from them, and that pair is still read, after them, for a host carried over.
-
 ## The images a plugin needs
 
 A service's own image is not the only one a datastore plugin runs. Four more are pinned by the plugin itself - an ambassador to publish a service's ports, a probe to wait until it answers, busybox to take its data back off it, and the tool that ships a dump to s3 - and a definition may name one of its own on a command, which is how couchdb dumps with a tool its image does not have.
@@ -300,7 +298,7 @@ docker system prune --all
 dokku-datastore start redis lollipop
 ```
 
-`<PLUGIN>_DISABLE_PULL=true` turns fetching off, and now turns it off for all of them rather than for the service image alone - docker used to pull the rest regardless of what it had been told. A command that needs an image it may not fetch says which `docker image pull` would give it one, and stops before it changes anything: an expose that cannot get the ambassador leaves the service unexposed, and a destroy that cannot get busybox leaves the service whole.
+`dokku redis:set --global disable-pull true` turns fetching off, and turns it off for all of them rather than for the service image alone - docker used to pull the rest regardless of what it had been told. A command that needs an image it may not fetch says which `docker image pull` would give it one, and stops before it changes anything: an expose that cannot get the ambassador leaves the service unexposed, and a destroy that cannot get busybox leaves the service whole.
 
 ## Graphite on grafana 13
 
@@ -393,13 +391,13 @@ dokku redis:set lollipop wait-timeout 120
 dokku redis:set lollipop wait-timeout
 ```
 
-It is settable at `create`, `clone` and `upgrade` as well, with `--wait-timeout`, and `create` itself is waited on for that long. A `clone` not passed it takes the source's. A host that is slow for every service of a datastore sets `<VARIABLE>_WAIT_TIMEOUT` instead, `REDIS_WAIT_TIMEOUT` for redis.
+It is settable at `create`, `clone` and `upgrade` as well, with `--wait-timeout`, and `create` itself is waited on for that long. A `clone` not passed it takes the source's. A host that is slow for every service of a datastore sets the global `wait-timeout` property instead, with `dokku redis:set --global wait-timeout 120`.
 
 ```shell
 dokku-datastore create postgres lollipop --wait-timeout 120
 ```
 
-The service's own setting is used first, then the environment variable, then the definition's `x-dokku.wait_timeout`, and otherwise the probe's default. The value must be a whole number of seconds greater than zero, and anything else is refused, including a malformed environment variable. `info` reports what the service set, empty when nothing was. Unlike the container settings above, a change takes effect the next time the service is waited on, with no rebuild. The wait header names the timeout when one is in effect.
+The service's own setting is used first, then the global property, then the definition's `x-dokku.wait_timeout`, and otherwise the probe's default. The value must be a whole number of seconds greater than zero, and anything else is refused, including a malformed global property. `info` reports what the service set, empty when nothing was. Unlike the container settings above, a change takes effect the next time the service is waited on, with no rebuild. The wait header names the timeout when one is in effect.
 
 ## Container memory limit
 
@@ -473,6 +471,29 @@ dokku redis:set lollipop backup-use-iam true
 
 The generated readme of each plugin lists every key under Service properties, with when a change to it takes effect.
 
+## Settings for every service of a datastore
+
+Ubuntu 25.10 ships sudo-rs, which does not pass arbitrary environment variables through to the processes it starts, so an environment variable exported before a `dokku` command no longer reaches the plugin. The plugin readme and help no longer document setting any, and name the flag that does the same thing instead, such as `--image`, `--image-version`, `--definition`, `--custom-env`, `--config-options` and `--volume-target` on `create`.
+
+The two settings that applied to every service of a datastore and had no flag are global properties now, set with `set --global`, which takes no service name.
+
+```shell
+# never pull an image, for every redis service
+dokku redis:set --global disable-pull true
+
+# wait up to two minutes for every redis service that does not set its own wait-timeout
+dokku redis:set --global wait-timeout 120
+
+# and back to the default
+dokku redis:set --global wait-timeout
+```
+
+The backend a service is created with, which `DOKKU_DATASTORE_BACKEND` chose, is now given with `--backend` on `create`, and a `clone` is made with the backend of its source.
+
+```shell
+dokku-datastore create redis lollipop --backend compose
+```
+
 ## Mounted host paths and volumes
 
 `--config-options` is handed to the process a service container runs, not to docker, so a docker flag passed through it reaches the datastore's own command line. A `--volume` given that way broke the container's entrypoint and left the service unable to start, and there was no other way to mount anything into a service. A service may now be given mounts of its own with `mount` and `unmount`, which take what `dokku storage:mount` and `dokku storage:unmount` take for a host path or a docker volume.
@@ -540,7 +561,7 @@ dokku redis:set lollipop volume-targets "data=/srv/redis config=/etc/redis"
 dokku postgres:set lollipop volume-targets
 ```
 
-They may be given at `create`, `clone` and `upgrade` as well, with `--volume-target`, repeated for each, and `create` reads `<VARIABLE>_VOLUME_TARGETS` - `POSTGRES_VOLUME_TARGETS` for postgres - when the flag is not given. A `clone` not passed it takes the source's, and `--volume-target ""` puts every volume back. `info --volume-targets` reports only the volumes a service moved, sorted and space separated, and is empty for one that moved none. A change reaches a container the next time one is built: `restart` keeps the container it has, so a service already running takes a `stop` and then a `start`.
+They may be given at `create`, `clone` and `upgrade` as well, with `--volume-target`, repeated for each. A `clone` not passed it takes the source's, and `--volume-target ""` puts every volume back. `info --volume-targets` reports only the volumes a service moved, sorted and space separated, and is empty for one that moved none. A change reaches a container the next time one is built: `restart` keeps the container it has, so a service already running takes a `stop` and then a `start`.
 
 ```shell
 dokku-datastore create redis lollipop --volume-target data=/srv/redis
@@ -931,7 +952,7 @@ Only the databases a datastore uses for itself are reserved. A default database 
 
 ## Service passwords
 
-The passwords a definition declares under `secrets` are generated when a service is created, unless `--password` or `--root-password` gives one. Each flag sets the secret whose `env` is `SERVICE_PASSWORD` or `SERVICE_ROOT_PASSWORD`, and that environment variable is read when the flag is not given.
+The passwords a definition declares under `secrets` are generated when a service is created, unless `--password` or `--root-password` gives one. Each flag sets the secret whose `env` is `SERVICE_PASSWORD` or `SERVICE_ROOT_PASSWORD`.
 
 ```shell
 dokku-datastore create mysql lollipop --password <password> --root-password <root-password>
@@ -994,7 +1015,7 @@ A clone runs the source's image and image version unless `--image` or `--image-v
 dokku-datastore clone redis lollipop lollipop-4 --image-version 8.8.0
 ```
 
-The `<VARIABLE>_CONFIG_OPTIONS` and `<VARIABLE>_CUSTOM_ENV` environment variables are not read by `clone`. They fill in a new service, and the source already says what its clone should have. The networks are copied as well, since a container joins a network under its own service name and a clone next to its source does not clash with it.
+The networks are copied as well, since a container joins a network under its own service name and a clone next to its source does not clash with it.
 
 The password, the exposed ports and the `port-bind-address`, `port-source-range` and `expose-host` that go with them, the app links and the backup credentials, schedule, encryption and object name are not copied. The password is generated for each service unless `--password` or `--root-password` gives one, an exposed port would clash with the source's on the host, links belong to the apps, a copied backup schedule would ship a second set of backups to the source's bucket, and a copied object name would have those backups replace the source's.
 

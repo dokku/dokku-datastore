@@ -405,9 +405,9 @@ func readmeExtraDocumentation(pluginDir string, name string) (string, error) {
 func readmeDockerPull(data DocumentationData) []string {
 	return []string{
 		"### Disabling `docker image pull` calls",
-		fmt.Sprintf("If you wish to disable the `docker image pull` calls that the plugin triggers, you may set the `%s_DISABLE_PULL` "+
-			"environment variable to `true`. Once disabled, you will need to pull the service image you wish to deploy as shown in the "+
-			"`stderr` output.", strings.ToUpper(data.CommandPrefix)),
+		fmt.Sprintf("If you wish to disable the `docker image pull` calls that the plugin triggers, you may set the `disable-pull` "+
+			"global property to `true` with `dokku %s:set --global disable-pull true`. Once disabled, you will need to pull the service image you wish to deploy as shown in the "+
+			"`stderr` output.", data.CommandPrefix),
 		"Please ensure the proper images are in place when `docker image pull` is disabled.",
 	}
 }
@@ -592,8 +592,8 @@ func readmeVolumeTargets(data DocumentationData) []string {
 	return []string{
 		"### Moving where a service's volumes are mounted",
 		fmt.Sprintf("Each volume a service mounts is named by the directory it lives in under the service's own directory, and is mounted where the datastore's definition says. "+
-			"To mount one somewhere else in the container, for an image that keeps its data at another path, set the service's `volume-targets` property with `dokku %s:set`, pass `--volume-target` to `create`, `clone` or `upgrade`, or set the `%s_VOLUME_TARGETS` environment variable before `create`. "+
-			"Each is written as `<volume>=<container-path>`, several separated by spaces, and `dokku %s:info lollipop --volume-targets` shows the ones a service moved.", data.CommandPrefix, data.PluginVariable, data.CommandPrefix),
+			"To mount one somewhere else in the container, for an image that keeps its data at another path, set the service's `volume-targets` property with `dokku %s:set`, or pass `--volume-target` to `create`, `clone` or `upgrade`. "+
+			"Each is written as `<volume>=<container-path>`, several separated by spaces, and `dokku %s:info lollipop --volume-targets` shows the ones a service moved.", data.CommandPrefix, data.CommandPrefix),
 		strings.Join(table, "\n"),
 		"Moving a volume changes where it is mounted, not where the image reads and writes. " +
 			"The datastore's own commands and the paths it is started with follow the volume, but an image that keeps writing to its own path writes into the container rather than into the volume, and what it writes is lost when the container is rebuilt, so only move a volume to where the image expects its data. " +
@@ -609,9 +609,9 @@ func readmeWaitTimeout(data DocumentationData) []string {
 		"### Waiting for a service to become ready",
 		"A service is waited on until it answers on its port after it is created, cloned, started, restarted, upgraded or exposed. " +
 			"If it takes longer than that to start - on a slow host, or with an image that does more on its first boot - the command fails with `ERROR: unable to connect`.",
-		fmt.Sprintf("To wait longer for every %s service on the host, set the `%s_WAIT_TIMEOUT` environment variable to a number of seconds. "+
+		fmt.Sprintf("To wait longer for every %s service on the host, set the `wait-timeout` global property to a number of seconds with `dokku %s:set --global wait-timeout 120`. "+
 			"To wait longer for a single service, set its `wait-timeout` property with `dokku %s:set` or pass `--wait-timeout` to `create`, `clone` or `upgrade`. "+
-			"The service's own setting is used first, then the environment variable, then the datastore's default.", data.CommandPrefix, data.PluginVariable, data.CommandPrefix),
+			"The service's own setting is used first, then the global property, then the datastore's default.", data.CommandPrefix, data.CommandPrefix, data.CommandPrefix),
 	}
 }
 

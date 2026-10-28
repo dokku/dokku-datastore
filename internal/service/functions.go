@@ -798,9 +798,8 @@ func EnsureTaggedImage(ctx context.Context, input EnsureTaggedImageInput) error 
 		return nil
 	}
 
-	pullVariable := input.Datastore.Properties().ImagePullVariable
-	if os.Getenv(pullVariable) == "true" {
-		return pullDisabledError(pullVariable, input.TaggedImage, input.ServiceName, input.Action)
+	if source := pullDisabledBy(input.Datastore); source != "" {
+		return pullDisabledError(source, input.TaggedImage, input.ServiceName, input.Action)
 	}
 
 	if _, err := pullTaggedImage(ctx, input.TaggedImage); err != nil {
@@ -826,6 +825,22 @@ func (message pullDisabledMessage) Error() string { return string(message) }
 
 func (message pullDisabledMessage) Unwrap() error { return ErrPullDisabled }
 
+// pullDisabledBy names what turned pulling off for a datastore, empty when
+// nothing did. The global property is what an operator is told to set. The
+// environment variable it replaces is still honored where it reaches the
+// binary, which it does not on a host whose sudo drops the caller's environment.
+func pullDisabledBy(s *Datastore) string {
+	if GlobalProperty(s, DisablePullProperty) == "true" {
+		return fmt.Sprintf("%s global property", DisablePullProperty)
+	}
+
+	if pullVariable := s.Properties().ImagePullVariable; os.Getenv(pullVariable) == "true" {
+		return fmt.Sprintf("%s environment variable", pullVariable)
+	}
+
+	return ""
+}
+
 // pullDisabledError is what a caller is told when the host has neither the
 // image nor permission to fetch it. Separate from EnsureTaggedImage so the
 // wording can be pinned by a test that needs no docker daemon.
@@ -833,9 +848,9 @@ func (message pullDisabledMessage) Unwrap() error { return ErrPullDisabled }
 // The last line names a service and what could not be done to it, and is left
 // out where there is neither: install fetches what the plugin needs before any
 // service exists.
-func pullDisabledError(pullVariable string, taggedImage string, serviceName string, action string) error {
+func pullDisabledError(source string, taggedImage string, serviceName string, action string) error {
 	message := []string{
-		fmt.Sprintf("%s environment variable detected. Not running pull command.", pullVariable),
+		fmt.Sprintf("%s detected. Not running pull command.", source),
 		fmt.Sprintf("docker image pull %s", taggedImage),
 	}
 

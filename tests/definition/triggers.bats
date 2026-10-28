@@ -26,7 +26,6 @@ teardown_file() {
 
 setup() {
   RECORDED="$RECORDED_IMAGE:$RECORDED_VERSION"
-  PULL_VARIABLE="$(echo "$PLUGIN" | tr '[:lower:]' '[:upper:]')_DISABLE_PULL"
 }
 
 # stops the service, which removes its container
@@ -95,7 +94,7 @@ assert_service_running() {
   stop_service
   remove_recorded_image
 
-  run --separate-stderr env "$PULL_VARIABLE=true" "$BIN" trigger-pre-build "$PLUGIN" herokuish "$APP" "$BATS_TEST_TMPDIR"
+  run --separate-stderr without_pull "$BIN" trigger-pre-build "$PLUGIN" herokuish "$APP" "$BATS_TEST_TMPDIR"
   assert_failure
   assert_stderr --partial "$SERVICE linked to app $APP"
   assert_stderr --partial "docker image pull $RECORDED"
@@ -129,7 +128,7 @@ assert_service_running() {
   stop_service
   remove_recorded_image
 
-  run --separate-stderr env "$PULL_VARIABLE=true" "$BIN" trigger-pre-restore "$PLUGIN"
+  run --separate-stderr without_pull "$BIN" trigger-pre-restore "$PLUGIN"
   assert_success
   assert_stderr --partial "unable to start $PLUGIN service $SERVICE"
 

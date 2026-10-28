@@ -367,30 +367,19 @@ func documentedDefinitions(datastore *service.Datastore) []string {
 }
 
 // documentedImage works out which image the readme and the help are written
-// about. An operator exports it as an environment variable at runtime, so that
-// is preferred over the datastore's own default; the definition supplies the
-// rest.
+// about, which is the image the definition pins.
 //
-// The environment is read through the same helper create reads it with, so the
-// image an operator is shown is the image they would get. It used to be read
-// here under one pair of names and there under another, and only one of the two
-// pairs was ever set.
+// The environment of whoever generated the docs is not consulted. An operator
+// picks another image with --image and --image-version, since an exported
+// variable does not reach the binary on a host whose sudo drops the caller's
+// environment, so a readme written from one would describe a default no command
+// runs with.
 //
 // A plugin no longer pins the image in a Dockerfile of its own. It pins it in the
-// definition, which is where the default here comes from, so the two cannot say
-// different things.
+// definition, which is where this comes from, so the two cannot say different
+// things.
 func documentedImage(properties service.ServiceStruct) (string, string) {
-	image := ImageFromEnv(properties)
-	imageVersion := ImageVersionFromEnv(properties)
-
-	if image == "" {
-		image = properties.DefaultImage
-	}
-	if imageVersion == "" {
-		imageVersion = properties.DefaultImageVersion
-	}
-
-	return image, imageVersion
+	return properties.DefaultImage, properties.DefaultImageVersion
 }
 
 // RenderDocumentation fills a template from a command in for a datastore

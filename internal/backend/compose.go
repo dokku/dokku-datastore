@@ -91,27 +91,33 @@ type SelectInput struct {
 	// Recorded is the contents of the service's BACKEND file, empty when it has
 	// none
 	Recorded string
+}
 
-	// Default is the host wide default, from DOKKU_DATASTORE_BACKEND
-	Default string
+// Validate reports whether a backend is one a service can be created with.
+// Empty is valid and means docker.
+//
+// Checked where a command starts, since Select falls back to docker for a name
+// it does not know, and a create that asked for compose by a misspelling would
+// otherwise be made with docker and say nothing.
+func Validate(name string) error {
+	switch name {
+	case "", Docker, Compose:
+		return nil
+	}
+
+	return fmt.Errorf("invalid backend %q, must be %s or %s", name, Docker, Compose)
 }
 
 // Select reports which backend a service is driven with.
 //
-// The service's own record wins over the host default, so that turning the
-// default on does not move services that already exist: a service is created
-// one way and stays that way until something recreates it. An unknown name
-// falls back to docker rather than failing, because a service that cannot be
-// addressed at all is worse than one addressed the way every service was
-// before.
+// A service is driven the way it records it was made, which create decides
+// with --backend: a service is created one way and stays that way until
+// something recreates it. Nothing recorded, or an unknown name, is docker rather
+// than a failure, because a service that cannot be addressed at all is worse
+// than one addressed the way every service was before.
 func Select(input SelectInput) string {
-	for _, candidate := range []string{input.Recorded, input.Default} {
-		switch candidate {
-		case Compose:
-			return Compose
-		case Docker:
-			return Docker
-		}
+	if input.Recorded == Compose {
+		return Compose
 	}
 
 	return Docker

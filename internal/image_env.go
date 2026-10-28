@@ -21,11 +21,11 @@ const (
 )
 
 // ImageFromEnv is the image an operator asked a plugin to run, under the name
-// the plugin's own readme documents - REDIS_IMAGE for redis.
+// the plugin's readme used to document - REDIS_IMAGE for redis.
 //
-// One function rather than one per caller. The readme is generated from the
-// same answer create acts on, so an operator who follows it gets the service
-// they were shown rather than one on the definition's own image.
+// The readme now documents --image instead, because a host whose sudo drops the
+// caller's environment never hands this variable to the binary. It is still
+// read by create, after the flag, for a host where it does arrive.
 func ImageFromEnv(properties service.ServiceStruct) string {
 	if image := os.Getenv(properties.PluginVariable + "_IMAGE"); image != "" {
 		return image

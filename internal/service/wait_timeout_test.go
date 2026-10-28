@@ -39,8 +39,9 @@ func TestWaitTimeoutVariable(t *testing.T) {
 	}
 }
 
-// The most specific answer wins: the service's own, then the host's, then the
-// definition's, and otherwise none at all so the probe keeps its own default.
+// The most specific answer wins: the service's own, then the global property,
+// then the host's variable, then the definition's, and otherwise none at all so
+// the probe keeps its own default.
 func TestWaitTimeoutPrecedence(t *testing.T) {
 	withDefault := *redisDatastore(t)
 	withDefault.Definition.Dokku.WaitTimeout = 60
@@ -49,6 +50,7 @@ func TestWaitTimeoutPrecedence(t *testing.T) {
 		name      string
 		datastore Datastore
 		property  string
+		global    string
 		env       string
 		expected  int
 	}{
@@ -57,6 +59,9 @@ func TestWaitTimeoutPrecedence(t *testing.T) {
 		{name: "the host over the definition", datastore: withDefault, env: "90", expected: 90},
 		{name: "the service over the host", datastore: withDefault, env: "90", property: "120", expected: 120},
 		{name: "the service with nothing else set", datastore: *redisDatastore(t), property: "45", expected: 45},
+		{name: "the global property over the definition", datastore: withDefault, global: "75", expected: 75},
+		{name: "the global property over the host", datastore: withDefault, global: "75", env: "90", expected: 75},
+		{name: "the service over the global property", datastore: withDefault, global: "75", property: "120", expected: 120},
 	}
 
 	for _, test := range tests {
@@ -69,6 +74,10 @@ func TestWaitTimeoutPrecedence(t *testing.T) {
 				if err := common.PropertyWrite(test.datastore.Properties().CommandPrefix, "lollipop", WaitTimeoutProperty, test.property); err != nil {
 					t.Fatalf("failed to write the property: %v", err)
 				}
+			}
+
+			if err := WriteGlobalProperty(&test.datastore, WaitTimeoutProperty, test.global); err != nil {
+				t.Fatalf("failed to write the global property: %v", err)
 			}
 
 			timeout, err := WaitTimeout(&test.datastore, "lollipop")
@@ -103,5 +112,26 @@ func TestWaitTimeoutRefusesAMalformedVariable(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "REDIS_WAIT_TIMEOUT") {
 		t.Errorf("expected the error to name the variable, got %q", err)
+	}
+}
+
+// A global property that is not a number is refused the same way, and the error
+// says it was the global one rather than the service's.
+func TestWaitTimeoutRefusesAMalformedGlobalProperty(t *testing.T) {
+	redis := redisDatastore(t)
+	withServiceRoot(t, redis, "lollipop")
+	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
+
+	if err := WriteGlobalProperty(redis, WaitTimeoutProperty, "forever"); err != nil {
+		t.Fatalf("failed to write the global property: %v", err)
+	}
+
+	_, err := WaitTimeout(redis, "lollipop")
+	if err == nil {
+		t.Fatal("expected a malformed global property to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "the global wait-timeout property") {
+		t.Errorf("expected the error to name the global property, got %q", err)
 	}
 }

@@ -21,7 +21,6 @@ teardown_file() {
 
 setup() {
   RECORDED="$RECORDED_IMAGE:$RECORDED_VERSION"
-  PULL_VARIABLE="$(echo "$PLUGIN" | tr '[:lower:]' '[:upper:]')_DISABLE_PULL"
 }
 
 @test "($DEFINITION) start brings the service back on the version it recorded" {
@@ -107,7 +106,7 @@ setup() {
   fi
 
   # start explains an image it is not allowed to fetch
-  run --separate-stderr env "$PULL_VARIABLE=true" "$BIN" start "$PLUGIN" "$SERVICE"
+  run --separate-stderr without_pull "$BIN" start "$PLUGIN" "$SERVICE"
   assert_failure
   assert_stderr --partial "docker image pull $RECORDED"
 
@@ -135,14 +134,14 @@ setup() {
   # container still holds the image, so a second run probing on this daemon makes
   # this skip rather than pull the image out from under it. A probe that has not
   # started yet is not covered, and does not need to be: the refusal below is
-  # scoped to one invocation with env rather than exported, so the worst another
-  # run sees is one extra pull.
+  # a global property under this file's own data root and is cleared as soon as
+  # the command returns, so the worst another run sees is one extra pull.
   if ! docker image rm "$wait_image" >/dev/null 2>/dev/null || docker image inspect "$wait_image" >/dev/null 2>/dev/null; then
     skip "$wait_image is still in use and cannot be removed"
   fi
 
   # start explains a sidecar image it is not allowed to fetch
-  run --separate-stderr env "$PULL_VARIABLE=true" "$BIN" start "$PLUGIN" "$SERVICE"
+  run --separate-stderr without_pull "$BIN" start "$PLUGIN" "$SERVICE"
   assert_failure
   assert_stderr --partial "docker image pull $wait_image"
 

@@ -14,7 +14,7 @@ PREVIOUS_IMAGE_VERSION="6.4.4"
 setup_file() {
   datastore_setup_file
   [[ "$DEFINITION" == "graphite" ]] || return 0
-  "$BIN" create "$PLUGIN" "$SERVICE" --image "$IMAGE" --image-version "$PREVIOUS_IMAGE_VERSION"
+  "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE" --image "$IMAGE" --image-version "$PREVIOUS_IMAGE_VERSION"
 
   wait_for_grafana
   "$(probe_path)" write "$SERVICE"

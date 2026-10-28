@@ -627,7 +627,7 @@ func TestPullDisabledError(t *testing.T) {
 
 	for _, action := range actions {
 		t.Run(action, func(t *testing.T) {
-			err := pullDisabledError("REDIS_DISABLE_PULL", "redis:8.9.0", "lollipop", action)
+			err := pullDisabledError("REDIS_DISABLE_PULL environment variable", "redis:8.9.0", "lollipop", action)
 
 			expected := "REDIS_DISABLE_PULL environment variable detected. Not running pull command.\n" +
 				"docker image pull redis:8.9.0\n" +
@@ -643,7 +643,7 @@ func TestPullDisabledError(t *testing.T) {
 // naming a service and what could not be done to it has nothing to say and is
 // left off. This is the wording install warns with and then carries on past.
 func TestPullDisabledErrorWithoutAService(t *testing.T) {
-	err := pullDisabledError("REDIS_DISABLE_PULL", "dokku/wait:0.9.3", "", "")
+	err := pullDisabledError("REDIS_DISABLE_PULL environment variable", "dokku/wait:0.9.3", "", "")
 
 	expected := "REDIS_DISABLE_PULL environment variable detected. Not running pull command.\n" +
 		"docker image pull dokku/wait:0.9.3"
@@ -652,11 +652,46 @@ func TestPullDisabledErrorWithoutAService(t *testing.T) {
 	}
 }
 
+// The global property is what an operator is told to set, and it is named over
+// the environment variable when both are, since it is the one a host keeps.
+func TestPullDisabledBy(t *testing.T) {
+	tests := []struct {
+		name     string
+		global   string
+		env      string
+		expected string
+	}{
+		{name: "nothing set", expected: ""},
+		{name: "the global property", global: "true", expected: "disable-pull global property"},
+		{name: "the environment variable", env: "true", expected: "REDIS_DISABLE_PULL environment variable"},
+		{name: "both", global: "true", env: "true", expected: "disable-pull global property"},
+		{name: "the global property turned off", global: "false", expected: ""},
+		{name: "anything other than true", global: "yes", env: "1", expected: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			redis := redisDatastore(t)
+			withServiceRoot(t, redis, "lollipop")
+			t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
+			t.Setenv("REDIS_DISABLE_PULL", test.env)
+
+			if err := WriteGlobalProperty(redis, DisablePullProperty, test.global); err != nil {
+				t.Fatalf("failed to write the global property: %v", err)
+			}
+
+			if source := pullDisabledBy(redis); source != test.expected {
+				t.Errorf("expected %q, got %q", test.expected, source)
+			}
+		})
+	}
+}
+
 // Install is the one caller that carries on past a disabled pull rather than
 // refusing, and it tells the two apart with errors.Is. Nothing about the message
 // says so, which is why this is pinned separately from the wording.
 func TestPullDisabledErrorIsErrPullDisabled(t *testing.T) {
-	err := pullDisabledError("REDIS_DISABLE_PULL", "redis:8.9.0", "lollipop", "start")
+	err := pullDisabledError("REDIS_DISABLE_PULL environment variable", "redis:8.9.0", "lollipop", "start")
 	if !errors.Is(err, ErrPullDisabled) {
 		t.Error("expected a disabled pull to be recognisable as one")
 	}

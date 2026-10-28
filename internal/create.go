@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/dokku/dokku-datastore/internal/backend"
 	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/execx"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
@@ -42,6 +43,10 @@ func CreateServiceFolders(folders []string, username string, groupName string) e
 
 // CreateServiceInput is the input for the CreateService function
 type CreateServiceInput struct {
+	// Backend is the execution backend the service is created with, empty for
+	// docker
+	Backend string
+
 	// ConfigOptions is the configuration options to use for the service
 	ConfigOptions string
 
@@ -184,6 +189,10 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return err
 	}
 
+	if err := backend.Validate(input.Backend); err != nil {
+		return err
+	}
+
 	if err := service.ValidateWaitTimeout(input.WaitTimeout); err != nil {
 		return err
 	}
@@ -304,6 +313,10 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	err = input.Datastore.CreateService(ctx, input.ServiceName, secrets)
 	if err != nil {
 		return fmt.Errorf("failed to create service: %w", err)
+	}
+
+	if err := input.Datastore.RecordBackend(input.ServiceName, input.Backend); err != nil {
+		return fmt.Errorf("failed to record the backend: %w", err)
 	}
 
 	// what was resolved rather than what was asked for, the way upgrade records

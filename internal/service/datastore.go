@@ -451,8 +451,28 @@ func (s *Datastore) writePayload(serviceName string) error {
 func (s *Datastore) backend(serviceName string) string {
 	return backend.Select(backend.SelectInput{
 		Recorded: common.ReadFirstLine(Files(s, serviceName).Backend),
-		Default:  hostenv.Backend(),
 	})
+}
+
+// RecordedBackend is the backend a service was made with, empty for one made
+// before the backend was recorded
+func (s *Datastore) RecordedBackend(serviceName string) string {
+	return common.ReadFirstLine(Files(s, serviceName).Backend)
+}
+
+// RecordBackend has a service that is about to be made use a backend, which
+// createContainer then reads back rather than choosing one itself. Empty leaves
+// the choice to it.
+func (s *Datastore) RecordBackend(serviceName string, selected string) error {
+	if selected == "" {
+		return nil
+	}
+
+	if err := backend.Validate(selected); err != nil {
+		return err
+	}
+
+	return s.recordBackend(serviceName, selected)
 }
 
 // composeInput addresses a service's rendered compose file.
@@ -520,8 +540,8 @@ func (s *Datastore) startContainer(ctx context.Context, serviceName string, cont
 	return backend.ComposeStart(ctx, s.composeInput(serviceName))
 }
 
-// recordBackend writes which backend made a service, so that a later change to
-// the host default does not address it the other way.
+// recordBackend writes which backend made a service, so that it is addressed
+// the same way for as long as it exists.
 func (s *Datastore) recordBackend(serviceName string, selected string) error {
 	filename := Files(s, serviceName).Backend
 	err := common.WriteStringToFile(common.WriteStringToFileInput{
