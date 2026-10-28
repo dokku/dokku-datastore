@@ -173,42 +173,6 @@ teardown_file() {
   assert_output "null"
 }
 
-@test "($DEFINITION) unlink and destroy agree once the app's url is repointed" {
-  run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart
-  assert_success
-
-  run jq -r --arg key "$ALIAS" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
-  assert_success
-  refute_output "null"
-
-  # the bug this closes: an app pointed at another datastore was still linked
-  # according to destroy, but not according to unlink
-  dokku config:set --no-restart "$APP" "$ALIAS=scheme://user:pass@elsewhere:1234/db"
-
-  run "$BIN" destroy "$PLUGIN" "$SERVICE" --force
-  assert_failure
-  assert_output --partial "Cannot delete linked service"
-  assert_output --partial "Linked to app(s): $APP"
-
-  run "$BIN" linked "$PLUGIN" "$SERVICE" "$APP"
-  assert_success
-
-  run "$BIN" unlink "$PLUGIN" "$SERVICE" "$APP" --no-restart
-  assert_success
-  assert_output --partial "none was unset"
-
-  # the url the app was repointed at is not the service's, so it is left alone
-  run jq -r --arg key "$ALIAS" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
-  assert_success
-  assert_output "scheme://user:pass@elsewhere:1234/db"
-
-  run "$BIN" linked "$PLUGIN" "$SERVICE" "$APP"
-  assert_failure
-
-  run "$BIN" destroy "$PLUGIN" "$SERVICE" --force
-  assert_success
-}
-
 @test "($DEFINITION) link --jdbc sets the jdbc values, and unlink unsets them" {
   [[ "$HAS_JDBC" == "true" ]] || skip "the definition hands over no jdbc values"
   echo '{}' >"$FAKE_CONFIG_ROOT/$APP.json"
@@ -285,4 +249,40 @@ teardown_file() {
   run jq -r 'keys | join(" ")' "$FAKE_CONFIG_ROOT/$APP.json"
   assert_success
   assert_output ""
+}
+
+@test "($DEFINITION) unlink and destroy agree once the app's url is repointed" {
+  run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart
+  assert_success
+
+  run jq -r --arg key "$ALIAS" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  refute_output "null"
+
+  # the bug this closes: an app pointed at another datastore was still linked
+  # according to destroy, but not according to unlink
+  dokku config:set --no-restart "$APP" "$ALIAS=scheme://user:pass@elsewhere:1234/db"
+
+  run "$BIN" destroy "$PLUGIN" "$SERVICE" --force
+  assert_failure
+  assert_output --partial "Cannot delete linked service"
+  assert_output --partial "Linked to app(s): $APP"
+
+  run "$BIN" linked "$PLUGIN" "$SERVICE" "$APP"
+  assert_success
+
+  run "$BIN" unlink "$PLUGIN" "$SERVICE" "$APP" --no-restart
+  assert_success
+  assert_output --partial "none was unset"
+
+  # the url the app was repointed at is not the service's, so it is left alone
+  run jq -r --arg key "$ALIAS" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output "scheme://user:pass@elsewhere:1234/db"
+
+  run "$BIN" linked "$PLUGIN" "$SERVICE" "$APP"
+  assert_failure
+
+  run "$BIN" destroy "$PLUGIN" "$SERVICE" --force
+  assert_success
 }
