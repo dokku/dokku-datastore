@@ -145,6 +145,21 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		}
 	}
 
+	if jdbc := definition.Dokku.JDBC; jdbc != nil {
+		for _, required := range []struct {
+			field string
+			value string
+		}{
+			{"url", jdbc.URL},
+			{"username", jdbc.Username},
+			{"password", jdbc.Password},
+		} {
+			if required.value == "" {
+				return fail("x-dokku.jdbc.%s is required", required.field)
+			}
+		}
+	}
+
 	if definition.Service.Image == "" {
 		return fail("services.%s.image is required", serviceKey)
 	}
@@ -709,6 +724,9 @@ func templateBodies(definition Definition, withUpgrade bool) []string {
 // skip names, as allCommands addresses them.
 func templateBodiesExcept(definition Definition, skip func(name string) bool) []string {
 	bodies := []string{definition.Service.Image, definition.Service.WorkingDir, definition.Dokku.DSN}
+	if jdbc := definition.Dokku.JDBC; jdbc != nil {
+		bodies = append(bodies, jdbc.URL, jdbc.Username, jdbc.Password)
+	}
 	bodies = append(bodies, definition.Service.Command...)
 	for _, value := range definition.Service.Environment {
 		bodies = append(bodies, value)

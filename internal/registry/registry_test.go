@@ -1313,6 +1313,103 @@ func TestEveryDatastoreWithManyDatabasesExportsThemAll(t *testing.T) {
 	}
 }
 
+// Only the datastores a java app reaches through a jdbc driver hand one over,
+// and every definition of such a datastore does, so that link --jdbc does not
+// start being refused once a service is upgraded onto another major
+func TestEveryDatastoreWithAJDBCDriverDeclaresIt(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	drivers := map[string]bool{
+		"mariadb":  true,
+		"mysql":    true,
+		"postgres": true,
+	}
+	for _, name := range loaded.Names() {
+		t.Run(name, func(t *testing.T) {
+			parsed, _ := loaded.Definition(name)
+			if declared := parsed.Dokku.JDBC != nil; declared != drivers[parsed.Dokku.Plugin] {
+				t.Errorf("expected jdbc to be declared=%t, got %t", drivers[parsed.Dokku.Plugin], declared)
+			}
+		})
+	}
+}
+
+// The jdbc url names the account the dsn does, with the password escaped for
+// the querystring it sits in rather than for userinfo
+func TestJDBCNamesTheAccountTheDSNDoes(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	tests := []struct {
+		name     string
+		host     string
+		port     int
+		url      string
+		username string
+	}{
+		{
+			name:     "postgres-18",
+			host:     "dokku-postgres-lollipop",
+			port:     5432,
+			url:      "jdbc:postgresql://dokku-postgres-lollipop:5432/lollipop?user=postgres&password=hun%26ter%3D2",
+			username: "postgres",
+		},
+		{
+			name:     "mysql",
+			host:     "dokku-mysql-lollipop",
+			port:     3306,
+			url:      "jdbc:mysql://dokku-mysql-lollipop:3306/lollipop?user=mysql&password=hun%26ter%3D2",
+			username: "mysql",
+		},
+		{
+			name:     "mariadb",
+			host:     "dokku-mariadb-lollipop",
+			port:     3306,
+			url:      "jdbc:mariadb://dokku-mariadb-lollipop:3306/lollipop?user=mariadb&password=hun%26ter%3D2",
+			username: "mariadb",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			found, ok := loaded.Definition(test.name)
+			if !ok {
+				t.Fatalf("expected a %s definition", test.name)
+			}
+
+			scope := definition.Scope{
+				Database: "lollipop",
+				Host:     test.host,
+				Secret:   map[string]string{"password": "hun&ter=2"},
+				Port:     map[string]int{"native": test.port},
+			}
+
+			for _, check := range []struct {
+				body     string
+				expected string
+			}{
+				{found.Dokku.JDBC.URL, test.url},
+				{found.Dokku.JDBC.Username, test.username},
+				{found.Dokku.JDBC.Password, "hun&ter=2"},
+			} {
+				actual, err := definition.Render(check.body, scope)
+				if err != nil {
+					t.Fatalf("unable to render %q: %s", check.body, err)
+				}
+
+				if actual != check.expected {
+					t.Errorf("expected %q, got %q", check.expected, actual)
+				}
+			}
+		})
+	}
+}
+
 // The every-database dumps are written once and copied to every postgres
 // definition, as the reset is, so that no major or flavor dumps them otherwise.
 func TestEveryDatabaseDumpsAreTheSameForPostgres(t *testing.T) {
@@ -2364,6 +2461,9 @@ func TestEveryDefinitionRendersWithItsDefaultTargets(t *testing.T) {
 			}
 
 			bodies := []string{found.Service.Image, found.Dokku.DSN}
+			if jdbc := found.Dokku.JDBC; jdbc != nil {
+				bodies = append(bodies, jdbc.URL, jdbc.Username, jdbc.Password)
+			}
 			bodies = append(bodies, found.Service.Command...)
 			for _, value := range found.Service.Environment {
 				bodies = append(bodies, value)

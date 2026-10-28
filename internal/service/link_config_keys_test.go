@@ -149,3 +149,39 @@ func TestRemoveLinkConfigKeysReplacesACorruptRecord(t *testing.T) {
 		t.Errorf("expected an empty record, got %v", entries)
 	}
 }
+
+// The jdbc keys are recorded apart from the ones holding the url, so that
+// recording or forgetting one leaves the other as it was
+func TestLinkJDBCConfigKeysAreKeptApart(t *testing.T) {
+	redis := redisDatastore(t)
+	withServiceRoot(t, redis, "lollipop")
+	t.Setenv("DOKKU_LIB_ROOT", DokkuLibRoot)
+
+	if actual := LinkJDBCConfigKeys(redis, "lollipop", "my-app"); actual != nil {
+		t.Errorf("expected nothing recorded, got %v", actual)
+	}
+
+	if err := SetLinkConfigKeys(redis, "lollipop", "my-app", []string{"REDIS_URL"}); err != nil {
+		t.Fatalf("failed to record the keys: %s", err)
+	}
+	if err := SetLinkJDBCConfigKeys(redis, "lollipop", "my-app", []string{"JDBC_REDIS_URL", "JDBC_REDIS_USERNAME", "JDBC_REDIS_PASSWORD"}); err != nil {
+		t.Fatalf("failed to record the jdbc keys: %s", err)
+	}
+
+	if actual := LinkJDBCConfigKeys(redis, "lollipop", "my-app"); !slices.Equal(actual, []string{"JDBC_REDIS_PASSWORD", "JDBC_REDIS_URL", "JDBC_REDIS_USERNAME"}) {
+		t.Errorf("expected the recorded jdbc keys, got %v", actual)
+	}
+	if actual := LinkConfigKeys(redis, "lollipop", "my-app"); !slices.Equal(actual, []string{"REDIS_URL"}) {
+		t.Errorf("expected the url keys to be kept apart, got %v", actual)
+	}
+
+	if err := RemoveLinkJDBCConfigKeys(redis, "lollipop", "my-app"); err != nil {
+		t.Fatalf("failed to remove the jdbc keys: %s", err)
+	}
+	if actual := LinkJDBCConfigKeys(redis, "lollipop", "my-app"); actual != nil {
+		t.Errorf("expected no jdbc keys once removed, got %v", actual)
+	}
+	if actual := LinkConfigKeys(redis, "lollipop", "my-app"); !slices.Equal(actual, []string{"REDIS_URL"}) {
+		t.Errorf("expected the url keys to be kept, got %v", actual)
+	}
+}

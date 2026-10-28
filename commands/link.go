@@ -26,6 +26,8 @@ type LinkCommand struct {
 	alias string
 	// envVar is the full name of the config variable to export the service url as
 	envVar string
+	// jdbc is whether to also export the jdbc url, username and password
+	jdbc bool
 	// noRestart is whether to skip restarting the app
 	noRestart bool
 	// querystring is appended to the service url
@@ -98,6 +100,7 @@ func (c *LinkCommand) FlagSet() *flag.FlagSet {
 	f.StringVarP(&c.alias, "alias", "a", "", "the prefix of the config variable the service url is set as on the app, which is suffixed with _URL")
 	f.StringVarP(&c.envVar, "env-var", "e", "", "the full name of the config variable the service url is set as on the app, used instead of an alias and not suffixed with _URL")
 	f.StringVarP(&c.querystring, "querystring", "q", "", "ampersand delimited querystring arguments to append to the service url after a ?")
+	f.BoolVarP(&c.jdbc, "jdbc", "j", false, "whether to also set the jdbc url, username and password on the app, as JDBC_ prefixed config variables named after the service url's")
 	f.BoolVarP(&c.noRestart, "no-restart", "n", false, "whether to skip restarting the app")
 	return f
 }
@@ -110,6 +113,7 @@ func (c *LinkCommand) AutocompleteFlags() complete.Flags {
 		complete.Flags{
 			"--alias":       complete.PredictAnything,
 			"--env-var":     complete.PredictAnything,
+			"--jdbc":        complete.PredictNothing,
 			"--no-restart":  complete.PredictNothing,
 			"--querystring": complete.PredictAnything,
 		},
@@ -226,6 +230,7 @@ func (c *LinkCommand) Run(args []string) int {
 		AppName:     appName,
 		Datastore:   datastore,
 		EnvVar:      c.envVar,
+		JDBC:        c.jdbc,
 		Logger:      logger,
 		NoRestart:   c.noRestart,
 		Querystring: c.querystring,
@@ -238,4 +243,9 @@ func (c *LinkCommand) Run(args []string) int {
 	}
 
 	return 0
+}
+
+// DocumentsFlag reports whether a flag is described for a datastore
+func (c *LinkCommand) DocumentsFlag(name string, data internal.DocumentationData) bool {
+	return name != "jdbc" || data.JDBC
 }

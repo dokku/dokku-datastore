@@ -1185,6 +1185,22 @@ dokku config:set metabase MB_DB_CONNECTION_URI=postgresql://postgres:password@do
 dokku postgres:unlink lollipop metabase
 ```
 
+### JDBC urls
+
+A java app connecting through a jdbc driver cannot read `DATABASE_URL`, since the driver expects `jdbc:postgresql://host:port/database?user=...&password=...` rather than `postgres://user:password@host:port/database`, so the url had to be rewritten by hand or by a wrapper in the app. `link --jdbc` sets the jdbc url beside the service url, along with the username and password it names, the way Heroku hands them to java apps. Postgres, MySQL and MariaDB support it, using the `postgresql`, `mysql` and `mariadb` jdbc drivers. Every other datastore refuses the flag and changes nothing.
+
+The jdbc variables are named after the variable holding the service url. `DATABASE_URL` is joined by `JDBC_DATABASE_URL`, `JDBC_DATABASE_USERNAME` and `JDBC_DATABASE_PASSWORD`, an `--alias` or a generated alias by the same three named after it, and an `--env-var` such as `MB_DB_CONNECTION_URI` by `JDBC_MB_DB_CONNECTION_URI`, `JDBC_MB_DB_CONNECTION_URI_USERNAME` and `JDBC_MB_DB_CONNECTION_URI_PASSWORD`. A name already set on the app is refused before anything changes. A `--querystring` is appended to the jdbc url as well, after the credentials it already carries. All of the variables are set together, so the app restarts once.
+
+`link` records the jdbc variables in the service's `link-jdbc-config-keys` property, apart from `link-config-keys`, and `unlink` unsets them along with the service url. A jdbc url that has been pointed elsewhere is left alone, as the service url is. `promote` copies the promoted service's jdbc values onto `JDBC_DATABASE_URL`, `JDBC_DATABASE_USERNAME` and `JDBC_DATABASE_PASSWORD`, and the ones they displace go with the displaced url to its generated alias. Promoting a service that was linked without `--jdbc` leaves the jdbc variables alone, with a warning that they do not point at it. Changing the password updates the jdbc url and password the same way it updates the service url, and renaming or cloning an app carries the record over. An app that is already linked has to be unlinked and linked again to be given the jdbc variables.
+
+```shell
+# sets DATABASE_URL, JDBC_DATABASE_URL, JDBC_DATABASE_USERNAME and JDBC_DATABASE_PASSWORD
+dokku postgres:link lollipop spring-app --jdbc
+
+# unsets all four
+dokku postgres:unlink lollipop spring-app
+```
+
 ## Hiding services from users
 
 A plugin may hide services from some users by implementing the `user-auth-service` trigger, the one the bash plugins fired. It is handed the ssh user, the name of the ssh key they connected with, the datastore's command prefix and every service, and prints the services that user may see, one per line on stdout. Anything it prints on stderr is ignored, and a service it names that was not asked about is dropped. `list`, `info` with no service named, `app-links` and the triggers that list services all see only what it prints.

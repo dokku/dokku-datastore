@@ -9,6 +9,9 @@ UNLINKED_APP="ci-link-unlinked-app"
 # the config variable a link sets by default
 ALIAS="$(awk '/^  alias:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose.yml")_URL"
 
+# whether the definition hands over jdbc values with link --jdbc
+HAS_JDBC="$(awk '/^  jdbc:/ { print "true"; exit }' "$DEFINITION_ROOT/docker-compose.yml")"
+
 setup_file() {
   datastore_setup_file
   fake_dokku_setup "$APP" "$UNLINKED_APP"
@@ -168,6 +171,84 @@ teardown_file() {
   run jq -r --arg key "$ALIAS" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
   assert_success
   assert_output "null"
+}
+
+@test "($DEFINITION) link --jdbc sets the jdbc values, and unlink unsets them" {
+  [[ "$HAS_JDBC" == "true" ]] || skip "the definition hands over no jdbc values"
+  echo '{}' >"$FAKE_CONFIG_ROOT/$APP.json"
+
+  run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart --jdbc
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --dsn
+  assert_success
+  local dsn="$output"
+
+  # the dsn is scheme://user:password@host:port/database, and the jdbc url
+  # names the same host, port, database and credentials
+  local credentials="${dsn#*://}"
+  credentials="${credentials%%@*}"
+  local user="${credentials%%:*}"
+  local password="${credentials#*:}"
+
+  run jq -r --arg key "$ALIAS" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output "$dsn"
+
+  run jq -r --arg key "JDBC_$ALIAS" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output --regexp "^jdbc:[a-z]+://"
+  assert_output --partial "://${dsn#*@}?"
+  assert_output --partial "user=$user&password=$password"
+
+  run jq -r --arg key "JDBC_${ALIAS%_URL}_USERNAME" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output "$user"
+
+  run jq -r --arg key "JDBC_${ALIAS%_URL}_PASSWORD" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output "$password"
+
+  run "$BIN" unlink "$PLUGIN" "$SERVICE" "$APP" --no-restart
+  assert_success
+  refute_output --partial "none was unset"
+
+  run jq -r 'keys | join(" ")' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output ""
+}
+
+@test "($DEFINITION) link --jdbc refuses a jdbc variable already in use" {
+  [[ "$HAS_JDBC" == "true" ]] || skip "the definition hands over no jdbc values"
+  echo '{}' >"$FAKE_CONFIG_ROOT/$APP.json"
+  dokku config:set --no-restart "$APP" "JDBC_$ALIAS=something"
+
+  run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart --jdbc
+  assert_failure
+  assert_output --partial "Specified jdbc env var JDBC_$ALIAS already in use"
+
+  run "$BIN" linked "$PLUGIN" "$SERVICE" "$APP"
+  assert_failure
+
+  run jq -r 'keys | join(" ")' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output "JDBC_$ALIAS"
+}
+
+@test "($DEFINITION) link --jdbc is refused by a datastore with no jdbc driver" {
+  [[ "$HAS_JDBC" != "true" ]] || skip "the definition hands over jdbc values"
+  echo '{}' >"$FAKE_CONFIG_ROOT/$APP.json"
+
+  run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart --jdbc
+  assert_failure
+  assert_output --partial "does not support jdbc urls"
+
+  run "$BIN" linked "$PLUGIN" "$SERVICE" "$APP"
+  assert_failure
+
+  run jq -r 'keys | join(" ")' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  assert_output ""
 }
 
 @test "($DEFINITION) unlink and destroy agree once the app's url is repointed" {

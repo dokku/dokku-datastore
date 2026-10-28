@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/service"
@@ -98,6 +100,11 @@ type linkedAppURL struct {
 	// keys are the app's config keys holding the url
 	keys []string
 
+	// jdbcKeys are the app's config keys holding the jdbc values, and jdbc
+	// those values before the secret changed
+	jdbcKeys []string
+	jdbc     service.JDBCValues
+
 	// environment is the app's config as it was read
 	environment map[string]string
 }
@@ -189,18 +196,22 @@ func linkedAppURLs(ctx context.Context, s *service.Datastore, serviceName string
 		scheme := SchemeForApp(s, environment)
 		serviceURL := s.URL(serviceName, scheme)
 		keys := LinkedConfigKeys(environment, service.LinkConfigKeys(s, serviceName, appName), serviceURL)
-		if len(keys) == 0 {
+		jdbcKeys := linkedJDBCKeys(s, serviceName, appName, environment)
+		if len(keys) == 0 && len(jdbcKeys) == 0 {
 			logger.Warn(WarnInput{
 				Warning: fmt.Sprintf("App %s is linked to %s, but none of its config holds the service url, so it is left as it is", appName, serviceName),
 			})
 			continue
 		}
 
+		jdbc, _ := s.JDBC(serviceName)
 		linked = append(linked, linkedAppURL{
 			appName:     appName,
 			scheme:      scheme,
 			url:         serviceURL,
 			keys:        keys,
+			jdbcKeys:    jdbcKeys,
+			jdbc:        jdbc,
 			environment: environment,
 		})
 	}
@@ -210,7 +221,8 @@ func linkedAppURLs(ctx context.Context, s *service.Datastore, serviceName string
 
 // updateLinkedAppURLs points every linked app at the service url as it is now,
 // replacing only the part of each value that names the service, so that a
-// scheme or querystring an app has around it is kept
+// scheme or querystring an app has around it is kept. The jdbc url is replaced
+// the same way, and the jdbc username and password are set to their new values.
 //
 // Every app is updated even when one cannot be, since an app left out only
 // because another failed would be one more app holding a url that no longer
@@ -218,18 +230,39 @@ func linkedAppURLs(ctx context.Context, s *service.Datastore, serviceName string
 func updateLinkedAppURLs(ctx context.Context, input ChangeServiceSecretInput, linked []linkedAppURL) error {
 	failed := []error{}
 	for _, app := range linked {
+		entries := map[string]string{}
+
 		before := urlAfterScheme(app.url)
 		after := urlAfterScheme(input.Datastore.URL(input.ServiceName, app.scheme))
-		if before == after {
+		if before != after {
+			for _, key := range app.keys {
+				entries[key] = strings.ReplaceAll(app.environment[key], before, after)
+			}
+		}
+
+		if jdbc, ok := input.Datastore.JDBC(input.ServiceName); ok && jdbc != app.jdbc {
+			for _, key := range app.jdbcKeys {
+				value := app.environment[key]
+				updated := strings.ReplaceAll(value, app.jdbc.URL, jdbc.URL)
+				switch value {
+				case app.jdbc.Password:
+					updated = jdbc.Password
+				case app.jdbc.Username:
+					updated = jdbc.Username
+				}
+
+				// only what changed, since the username rarely does
+				if updated != value {
+					entries[key] = updated
+				}
+			}
+		}
+
+		if len(entries) == 0 {
 			continue
 		}
 
-		entries := map[string]string{}
-		for _, key := range app.keys {
-			entries[key] = strings.ReplaceAll(app.environment[key], before, after)
-		}
-
-		input.Logger.Info(fmt.Sprintf("Updating the url app %s holds as %s", app.appName, strings.Join(app.keys, " ")))
+		input.Logger.Info(fmt.Sprintf("Updating the url app %s holds as %s", app.appName, strings.Join(slices.Sorted(maps.Keys(entries)), " ")))
 		if input.NoRestart {
 			input.Logger.Info(fmt.Sprintf("%s %s", SkippingRestartMessage, app.appName))
 		}
