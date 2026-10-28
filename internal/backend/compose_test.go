@@ -42,38 +42,26 @@ func TestSelect(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "nothing recorded and no default",
+			name:     "nothing recorded",
 			input:    SelectInput{},
 			expected: Docker,
 		},
 		{
-			name:     "the host default",
-			input:    SelectInput{Default: Compose},
-			expected: Compose,
-		},
-		{
-			// turning the default on must not move a service that already
-			// exists: it was created one way and stays that way
-			name:     "the service's own record wins",
-			input:    SelectInput{Recorded: Docker, Default: Compose},
+			name:     "a service recorded as docker",
+			input:    SelectInput{Recorded: Docker},
 			expected: Docker,
 		},
 		{
-			name:     "a service recorded as compose on a docker host",
-			input:    SelectInput{Recorded: Compose, Default: Docker},
+			name:     "a service recorded as compose",
+			input:    SelectInput{Recorded: Compose},
 			expected: Compose,
 		},
 		{
 			// a service that cannot be addressed at all is worse than one
 			// addressed the way every service was before
 			name:     "an unknown name falls back",
-			input:    SelectInput{Recorded: "nonsense", Default: "rubbish"},
+			input:    SelectInput{Recorded: "nonsense"},
 			expected: Docker,
-		},
-		{
-			name:     "an unknown record still honours the default",
-			input:    SelectInput{Recorded: "nonsense", Default: Compose},
-			expected: Compose,
 		},
 	}
 
@@ -83,5 +71,25 @@ func TestSelect(t *testing.T) {
 				t.Errorf("expected %q, got %q", test.expected, actual)
 			}
 		})
+	}
+}
+
+func TestValidate(t *testing.T) {
+	for _, name := range []string{"", Docker, Compose} {
+		if err := Validate(name); err != nil {
+			t.Errorf("expected %q to be accepted, got %q", name, err)
+		}
+	}
+
+	for _, name := range []string{"podman", "Compose", " docker"} {
+		err := Validate(name)
+		if err == nil {
+			t.Errorf("expected %q to be refused, got no error", name)
+			continue
+		}
+
+		if !strings.Contains(err.Error(), "must be docker or compose") {
+			t.Errorf("expected the error to name the backends, got %q", err)
+		}
 	}
 }

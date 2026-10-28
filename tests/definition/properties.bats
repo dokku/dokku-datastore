@@ -365,6 +365,62 @@ skip_unless_log_is_capped() {
   assert_output ""
 }
 
+@test "($DEFINITION) a global wait timeout reaches the readiness probe of every service" {
+  run "$BIN" set --global "$PLUGIN" wait-timeout 75
+  assert_success
+  assert_output --partial "Setting global wait-timeout to 75"
+
+  run "$BIN" restart "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_output --partial "to be ready (timeout: 75s)"
+
+  # what the service reports is what it set for itself, which is nothing
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --wait-timeout
+  assert_success
+  assert_output ""
+
+  # the service's own setting is used over the global one
+  run "$BIN" set "$PLUGIN" "$SERVICE" wait-timeout 90
+  assert_success
+
+  run "$BIN" restart "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_output --partial "to be ready (timeout: 90s)"
+
+  # and back to what every other check expects of this service
+  run "$BIN" set "$PLUGIN" "$SERVICE" wait-timeout
+  assert_success
+
+  run "$BIN" set --global "$PLUGIN" wait-timeout
+  assert_success
+  assert_output --partial "Unsetting global wait-timeout"
+}
+
+@test "($DEFINITION) a global property set does not take is refused first" {
+  run --separate-stderr "$BIN" set --global "$PLUGIN" memory 512
+  assert_failure
+  assert_stderr --partial "Invalid global key specified, valid keys include: disable-pull, wait-timeout"
+
+  local value
+  for value in abc 0; do
+    run --separate-stderr "$BIN" set --global "$PLUGIN" wait-timeout "$value"
+    assert_failure
+    assert_stderr --partial "wait-timeout"
+  done
+
+  run --separate-stderr "$BIN" set --global "$PLUGIN" disable-pull yes
+  assert_failure
+  assert_stderr --partial "must be true or false"
+
+  # each of these applies to one service, and --global names none
+  local flag
+  for flag in --allow-restart --no-restart "--id=nightly"; do
+    run --separate-stderr "$BIN" set --global "$flag" "$PLUGIN" wait-timeout 75
+    assert_failure
+    assert_stderr --partial "--global cannot be combined"
+  done
+}
+
 @test "($DEFINITION) the container settings create writes reach the container it is rebuilt with" {
   # generous, since an image that sizes itself by its limit still has to start
   run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" memory 4096

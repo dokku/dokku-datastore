@@ -112,3 +112,31 @@ func TestDefinitionIsDocumentedWhereThereIsAChoice(t *testing.T) {
 		})
 	}
 }
+
+// A host whose sudo drops the caller's environment never hands an exported
+// variable to the binary, so the create documentation names the flag for each
+// setting rather than a variable to export.
+func TestCreateDocumentationExportsNothing(t *testing.T) {
+	for _, name := range []string{"postgres", "redis", "graphite"} {
+		t.Run(name, func(t *testing.T) {
+			data := internal.NewDocumentationData(internal.DocumentationDataInput{Datastore: service.Datastores[name]})
+
+			documentation, err := internal.RenderDocumentation((&CreateCommand{}).Documentation(), data)
+			if err != nil {
+				t.Fatalf("unable to render the create documentation: %s", err)
+			}
+
+			for _, unexpected := range []string{"export ", data.PluginVariable + "_"} {
+				if strings.Contains(documentation, unexpected) {
+					t.Errorf("expected the create documentation not to contain %q:\n%s", unexpected, documentation)
+				}
+			}
+
+			for _, expected := range []string{"--image", "--image-version", "--custom-env", "set --global wait-timeout"} {
+				if !strings.Contains(documentation, expected) {
+					t.Errorf("expected the create documentation to contain %q:\n%s", expected, documentation)
+				}
+			}
+		})
+	}
+}

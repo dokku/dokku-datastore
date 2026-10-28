@@ -35,7 +35,7 @@ database_of() {
 }
 
 @test "($DEFINITION) a service created with LC_ALL=C still has its database" {
-  run "$BIN" create "$PLUGIN" "$SERVICE-c" --image "$IMAGE" --image-version "$IMAGE_VERSION" --custom-env "LC_ALL=C"
+  run "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE-c" --image "$IMAGE" --image-version "$IMAGE_VERSION" --custom-env "LC_ALL=C"
   assert_success
 
   # the locale the readme warns about: the database exists, in the encoding
@@ -46,7 +46,7 @@ database_of() {
 }
 
 @test "($DEFINITION) POSTGRES_INITDB_ARGS chooses the database encoding and locale" {
-  run "$BIN" create "$PLUGIN" "$SERVICE-utf8" --image "$IMAGE" --image-version "$IMAGE_VERSION" --custom-env "POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C"
+  run "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE-utf8" --image "$IMAGE" --image-version "$IMAGE_VERSION" --custom-env "POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C"
   assert_success
 
   run --separate-stderr database_of "$SERVICE-utf8"

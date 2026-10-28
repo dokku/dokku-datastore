@@ -120,7 +120,7 @@ previous_data() {
 
   # this major placed on the newest definition from the start, so its server
   # made its cluster where that definition mounts the data
-  run "$BIN" create "$PLUGIN" "$NEWEST_PINNED" --definition "$NEWEST" --image "$IMAGE" --image-version "$IMAGE_VERSION"
+  run "$BIN" create --backend "$BACKEND" "$PLUGIN" "$NEWEST_PINNED" --definition "$NEWEST" --image "$IMAGE" --image-version "$IMAGE_VERSION"
   assert_success
   run "$(probe_path)" write "$NEWEST_PINNED"
   assert_success

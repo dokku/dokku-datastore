@@ -266,7 +266,6 @@ setup() {
     -e DOKKU_LIB_HOST_ROOT="$DOKKU_LIB_ROOT" \
     -e DOKKU_SYSTEM_USER=root \
     -e DOKKU_SYSTEM_GROUP=root \
-    -e DOKKU_DATASTORE_BACKEND \
     "$DOCKER_CLI_IMAGE" dokku-datastore backup "$PLUGIN" "$SERVICE" "$S3_BUCKET"
   if [[ "$status" -eq "$NOT_IMPLEMENTED_EXIT" ]]; then
     skip "$PLUGIN does not implement backup"

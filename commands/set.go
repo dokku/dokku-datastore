@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
@@ -27,6 +28,10 @@ type SetCommand struct {
 	// service is restarted or reexposed has that done for it, when its value
 	// changed
 	allowRestart bool
+
+	// global sets a property for every service of the datastore, in which case
+	// no service is named
+	global bool
 
 	// noRestart leaves the apps linked to a service running on the config they
 	// had when a password changes the url they hold
@@ -58,6 +63,7 @@ func (c *SetCommand) Examples() map[string]string {
 		"Sets the initial network for a redis service named test":              fmt.Sprintf("%s %s redis test initial-network my-network", appName, c.Name()),
 		"Sets the memory limit for a redis service named test and restarts it": fmt.Sprintf("%s %s --allow-restart redis test memory 512", appName, c.Name()),
 		"Changes the password of a postgres service named test":                fmt.Sprintf("%s %s postgres test password a-new-password", appName, c.Name()),
+		"Waits up to two minutes for every redis service":                      fmt.Sprintf("%s %s --global redis wait-timeout 120", appName, c.Name()),
 	}
 }
 
@@ -91,6 +97,31 @@ func (c *SetCommand) Arguments() []command.Argument {
 	return args
 }
 
+// globalArguments are the arguments the command takes with --global, which
+// names no service
+func (c *SetCommand) globalArguments() []command.Argument {
+	return []command.Argument{
+		{
+			Name:        "datastore-type",
+			Description: "the type of datastore to set a property on",
+			Optional:    false,
+			Type:        command.ArgumentString,
+		},
+		{
+			Name:        "key",
+			Description: "the property to set",
+			Optional:    true,
+			Type:        command.ArgumentString,
+		},
+		{
+			Name:        "value",
+			Description: "the value to set, or empty to unset the property",
+			Optional:    true,
+			Type:        command.ArgumentString,
+		},
+	}
+}
+
 // AutocompleteArgs returns the autocomplete arguments for the command
 func (c *SetCommand) AutocompleteArgs() complete.Predictor {
 	return complete.PredictSet("redis")
@@ -105,6 +136,7 @@ func (c *SetCommand) ParsedArguments(args []string) (map[string]command.Argument
 func (c *SetCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.BoolVar(&c.global, "global", false, "set the property for every service of the datastore, taking <datastore-type> <key> [<value>] with no service name")
 	f.BoolVar(&c.allowRestart, "allow-restart", false, "restart or reexpose the service when the property only takes effect that way and its value changed")
 	f.BoolVar(&c.noRestart, "no-restart", false, "do not restart the linked apps when a password change updates the url they hold")
 	f.StringVar(&c.scheduleID, "id", "", "record the property on this backup schedule instead of on the service")
@@ -118,6 +150,7 @@ func (c *SetCommand) AutocompleteFlags() complete.Flags {
 		c.AutocompleteGlobalFlags(),
 		complete.Flags{
 			"--allow-restart": complete.PredictNothing,
+			"--global":        complete.PredictNothing,
 			"--id":            complete.PredictNothing,
 			"--no-restart":    complete.PredictNothing,
 		},
@@ -151,6 +184,10 @@ func (c *SetCommand) Run(args []string) int {
 	}
 
 	logger = c.Logger(c.Ui)
+
+	if c.global {
+		return c.runGlobal(logger, flags.Args())
+	}
 
 	arguments, err := c.ParsedArguments(flags.Args())
 	if err != nil {
@@ -335,6 +372,73 @@ func (c *SetCommand) Run(args []string) int {
 
 	if warning := property.Warning(datastore.Definition, datastore.Properties().CommandPrefix, serviceName); warning != "" {
 		logger.Warn(internal.WarnInput{Warning: warning})
+	}
+
+	return 0
+}
+
+// runGlobal sets or clears a property for every service of a datastore. None of
+// them is restarted, since a global property is read each time it is used.
+func (c *SetCommand) runGlobal(logger internal.Ui, args []string) int {
+	if c.allowRestart || c.noRestart || c.scheduleID != "" {
+		logger.Error(internal.ErrorInput{
+			Error: fmt.Errorf("--global cannot be combined with --allow-restart, --no-restart or --id, which each apply to one service"),
+		})
+		return 1
+	}
+
+	arguments, err := internal.ParseArguments(args, c.globalArguments())
+	if err != nil {
+		logger.Error(internal.ErrorInput{
+			Message: command.CommandErrorText(c),
+			Error:   err,
+		})
+		return 1
+	}
+
+	datastoreType := arguments["datastore-type"].StringValue()
+	if datastoreType == "" {
+		logger.Error(internal.ErrorInput{
+			Message: command.CommandErrorText(c),
+			Error:   fmt.Errorf("datastore type is required"),
+		})
+		return 1
+	}
+
+	datastore, ok := service.Datastores[datastoreType]
+	if !ok {
+		logger.Error(internal.ErrorInput{
+			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
+		})
+		return 1
+	}
+
+	key := arguments["key"].StringValue()
+	if key == "" {
+		logger.Error(internal.ErrorInput{
+			Message: command.CommandErrorText(c),
+			Error:   errors.New("No key specified"), //nolint:staticcheck // matches the bash datastore plugins
+		})
+		return 1
+	}
+
+	// validate before announcing, so an unusable key or value does not print a
+	// line claiming a change that will not happen
+	value := strings.TrimSpace(arguments["value"].StringValue())
+	if err := internal.ValidateGlobalProperty(key, value); err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
+	}
+
+	if value == "" {
+		logger.Info(fmt.Sprintf("Unsetting global %s", key))
+	} else {
+		logger.Info(fmt.Sprintf("Setting global %s to %s", key, value))
+	}
+
+	if err := internal.SetGlobalProperty(datastore, key, value); err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
 	}
 
 	return 0

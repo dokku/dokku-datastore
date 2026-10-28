@@ -410,9 +410,7 @@ func (c *CreateCommand) Documentation() string {
 dokku {{.CommandPrefix}}:create lollipop
 you can also specify the image and image version to use for the service.
 it *must* be compatible with the {{.Image}} image.
-export {{.PluginVariable}}_IMAGE="{{.Image}}"
-export {{.PluginVariable}}_IMAGE_VERSION="{{.ImageVersion}}"
-dokku {{.CommandPrefix}}:create lollipop
+dokku {{.CommandPrefix}}:create lollipop --image "{{.Image}}" --image-version "{{.ImageVersion}}"
 an image other than {{.Image}} has no version to fall back on, because the
 version this plugin pins belongs to {{.Image}}, so name one alongside it.
 dokku {{.CommandPrefix}}:create lollipop --image <image> --image-version <version>
@@ -428,20 +426,18 @@ the definition a service runs on decides where its data is mounted, and is other
 worked out from the image and version. an image whose tags do not carry the major
 version can name one outright, and --image and --image-version are laid over the
 image and version it ships. the definitions are: {{range $index, $name := .Definitions}}{{if $index}}, {{end}}{{$name}}{{end}}.
-export {{.PluginVariable}}_DEFINITION="{{index .Definitions 0}}"
 dokku {{.CommandPrefix}}:create lollipop --definition {{index .Definitions 0}} --image <image> --image-version <version>
 {{- end}}
 you can also specify custom environment variables to start
 the {{.CommandPrefix}} service in semicolon-separated form.
-export {{.PluginVariable}}_CUSTOM_ENV="USER=alpha;HOST=beta"
-dokku {{.CommandPrefix}}:create lollipop
+dokku {{.CommandPrefix}}:create lollipop --custom-env "USER=alpha;HOST=beta"
 the container log is bounded by whatever 'dokku logs:set --global max-size' says, and
 by dokku's own default where it says nothing, which a service may override for itself.
 dokku {{.CommandPrefix}}:create lollipop --log-opt max-size=20m,max-file=3
 the container is restarted by docker whenever it stops, which a service may change for itself.
 dokku {{.CommandPrefix}}:create lollipop --restart unless-stopped
 the service is waited on until it answers, for as long as the datastore's own default,
-which a slow host may raise for every service with {{.PluginVariable}}_WAIT_TIMEOUT or a service may raise for itself.
+which a slow host may raise for every service with 'dokku {{.CommandPrefix}}:set --global wait-timeout' or a service may raise for itself.
 dokku {{.CommandPrefix}}:create lollipop --wait-timeout 120
 {{- if .ServiceMemory}}
 the memory the datastore itself is told to use, in megabytes, is {{if .ServiceMemoryDefault}}{{.ServiceMemoryDefault}} unless it is given, and is kept apart from the container's memory limit.{{else}}left to the datastore unless it is given, and is kept apart from the container's memory limit.{{end}}
@@ -453,7 +449,6 @@ dokku {{.CommandPrefix}}:create lollipop --volume /var/lib/dokku/data/storage/lo
 {{- if .VolumeKey}}
 the definition's own volumes can be mounted at another path in the container, for an
 image that keeps its data somewhere else, with --volume-target, which may be repeated.
-export {{.PluginVariable}}_VOLUME_TARGETS="{{.VolumeKey}}=/srv/{{.CommandPrefix}}"
 dokku {{.CommandPrefix}}:create lollipop --volume-target {{.VolumeKey}}=/srv/{{.CommandPrefix}}
 {{- end}}
 the service passwords are generated unless they are given. A datastore without a

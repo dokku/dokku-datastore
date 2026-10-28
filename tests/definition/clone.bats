@@ -8,6 +8,7 @@ OVERRIDE="$SERVICE-override"
 ARGS="$SERVICE-args"
 CUSTOM="$SERVICE-custom"
 RETAGGED="$SERVICE-retagged"
+BACKEND_COPY="$SERVICE-backend-copy"
 OTHER_VERSION="other-version"
 MOUNT_TARGET="/opt/dokku-mount"
 
@@ -18,7 +19,7 @@ setup_file() {
   # the clone means it was copied rather than defaulted. Log settings are left
   # out: a max-size is refused by a daemon that logs any way but json-file or
   # local, and the unit tests already cover copying them
-  "$BIN" create "$PLUGIN" "$SERVICE" --image "$IMAGE" --image-version "$IMAGE_VERSION" \
+  "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE" --image "$IMAGE" --image-version "$IMAGE_VERSION" \
     --memory 512 --shm-size 128m --restart unless-stopped --custom-env FOO=bar --wait-timeout 120 \
     --volume "$(mount_source clone):$MOUNT_TARGET:ro"
   "$BIN" set "$PLUGIN" "$SERVICE" backup-keyserver keys.example.com
@@ -29,7 +30,7 @@ setup_file() {
 }
 
 teardown_file() {
-  datastore_teardown_file "$COPY" "$OVERRIDE" "$ARGS" "$CUSTOM-copy" "$CUSTOM" "$RETAGGED-copy" "$RETAGGED" "$SERVICE-next" "$SERVICE"
+  datastore_teardown_file "$BACKEND_COPY" "$COPY" "$OVERRIDE" "$ARGS" "$CUSTOM-copy" "$CUSTOM" "$RETAGGED-copy" "$RETAGGED" "$SERVICE-next" "$SERVICE"
   untag_custom_image
   untag_custom_image "$OTHER_VERSION"
 }
@@ -101,11 +102,25 @@ clone_or_skip() {
   assert_output "$(mount_source clone):false"
 }
 
+@test "($DEFINITION) a clone is made with its source's backend" {
+  # only create is told which backend to use, so a clone made the other way
+  # would be addressed differently from its source
+  clone_or_skip "$BACKEND_COPY"
+
+  run cat "$(service_root "$SERVICE")/BACKEND"
+  assert_success
+  assert_output "$BACKEND"
+
+  run cat "$(service_root "$BACKEND_COPY")/BACKEND"
+  assert_success
+  assert_output "$BACKEND"
+}
+
 @test "($DEFINITION) a clone runs the definition its source is pinned to" {
   # rather than the one the source's image resolves to, which for a tag that
   # does not carry the major version is the newest definition
   tag_custom_image
-  run "$BIN" create "$PLUGIN" "$CUSTOM" --definition "$DEFINITION" --image "$CUSTOM_IMAGE" --image-version "$CUSTOM_IMAGE_VERSION"
+  run "$BIN" create --backend "$BACKEND" "$PLUGIN" "$CUSTOM" --definition "$DEFINITION" --image "$CUSTOM_IMAGE" --image-version "$CUSTOM_IMAGE_VERSION"
   assert_success
 
   run "$BIN" clone "$PLUGIN" "$CUSTOM" "$CUSTOM-copy"
@@ -210,7 +225,7 @@ clone_or_skip() {
   # whatever they say, the way they would for a build of one's own
   tag_custom_image
   tag_custom_image "$OTHER_VERSION"
-  run "$BIN" create "$PLUGIN" "$RETAGGED" --definition "$DEFINITION" --image "$CUSTOM_IMAGE" --image-version "$CUSTOM_IMAGE_VERSION"
+  run "$BIN" create --backend "$BACKEND" "$PLUGIN" "$RETAGGED" --definition "$DEFINITION" --image "$CUSTOM_IMAGE" --image-version "$CUSTOM_IMAGE_VERSION"
   assert_success
 
   run "$BIN" clone "$PLUGIN" "$RETAGGED" "$RETAGGED-copy" --image-version "$OTHER_VERSION"

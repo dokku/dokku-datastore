@@ -173,7 +173,7 @@ volume_key_or_skip() {
 @test "($DEFINITION) a volume target given at create is mounted from the start" {
   volume_key_or_skip
 
-  run "$BIN" create "$PLUGIN" "$FLAG" --image "$IMAGE" --image-version "$IMAGE_VERSION" --volume-target "$VOLUME_KEY=$MOVED"
+  run "$BIN" create --backend "$BACKEND" "$PLUGIN" "$FLAG" --image "$IMAGE" --image-version "$IMAGE_VERSION" --volume-target "$VOLUME_KEY=$MOVED"
   assert_success
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$FLAG" --volume-targets
@@ -185,7 +185,7 @@ volume_key_or_skip() {
   assert_output "$(host_service_root "$FLAG")/$VOLUME_KEY:true"
 
   # and read from the environment when the flag is not given
-  run env "$(plugin_variable)_VOLUME_TARGETS=$VOLUME_KEY=$MOVED" "$BIN" create "$PLUGIN" "$ENVIRONMENT" --image "$IMAGE" --image-version "$IMAGE_VERSION"
+  run env "$(plugin_variable)_VOLUME_TARGETS=$VOLUME_KEY=$MOVED" "$BIN" create --backend "$BACKEND" "$PLUGIN" "$ENVIRONMENT" --image "$IMAGE" --image-version "$IMAGE_VERSION"
   assert_success
 
   run --separate-stderr "$BIN" info "$PLUGIN" "$ENVIRONMENT" --volume-targets
@@ -261,7 +261,7 @@ follows_a_move() {
   [[ "$DEFINITION" == "redis" ]] || skip "only redis is told where its data volume is"
 
   local dump="$BATS_TEST_TMPDIR/dump"
-  run "$BIN" create "$PLUGIN" "$REDIS" --image "$IMAGE" --image-version "$IMAGE_VERSION" --volume-target data=/redis-data
+  run "$BIN" create --backend "$BACKEND" "$PLUGIN" "$REDIS" --image "$IMAGE" --image-version "$IMAGE_VERSION" --volume-target data=/redis-data
   assert_success
 
   # started in the data volume, which is where the image's entrypoint hands

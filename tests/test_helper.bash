@@ -41,6 +41,10 @@ PLUGIN="$(awk '/^  plugin:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose
 IMAGE="$(awk '/^FROM / { split($2, parts, ":"); print parts[1]; exit }' "$DEFINITION_ROOT/Dockerfile")"
 IMAGE_VERSION="$(awk -F: '/^FROM / { print $2; exit }' "$DEFINITION_ROOT/Dockerfile")"
 
+# the execution backend every service in this run is created with. A clone is
+# made with its source's, so only create is told
+BACKEND="${BACKEND:-docker}"
+
 # the directory its services live in, which is the plugin name unless the
 # definition says otherwise. Graphite's are under the name of the image it runs
 DATA_DIR="$(awk '/^  data_directory:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose.yml")"
@@ -169,9 +173,20 @@ probe_path() {
   echo "$REPO_ROOT/tests/probes/$PLUGIN.sh"
 }
 
+# runs a command with the datastore's image pulls turned off, through the
+# disable-pull global property, and turns them back on afterwards whatever the
+# command did
+without_pull() {
+  "$BIN" set --global "$PLUGIN" disable-pull true >/dev/null
+  local status=0
+  "$@" || status=$?
+  "$BIN" set --global "$PLUGIN" disable-pull >/dev/null
+  return "$status"
+}
+
 # creates a service on the version this definition pins
 create_service() {
-  "$BIN" create "$PLUGIN" "$1" --image "$IMAGE" --image-version "$IMAGE_VERSION"
+  "$BIN" create --backend "$BACKEND" "$PLUGIN" "$1" --image "$IMAGE" --image-version "$IMAGE_VERSION"
 }
 
 # the definition a create naming no image, version or definition lands on: the

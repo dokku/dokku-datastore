@@ -24,6 +24,8 @@ type CreateCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+	// backend is the execution backend to create the service with
+	backend string
 	// configOptions is the configuration options to use for the service
 	configOptions string
 	// customEnv is the custom environment variables to use for the service
@@ -122,6 +124,7 @@ func (c *CreateCommand) ParsedArguments(args []string) (map[string]command.Argum
 func (c *CreateCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.StringVar(&c.backend, "backend", "", "the execution backend to create the service with, docker or compose (default: docker)")
 	f.StringVarP(&c.configOptions, "config-options", "c", "", "extra arguments for the process the service container runs, not docker flags; use mount for mounts")
 	f.StringVarP(&c.customEnv, "custom-env", "C", "", "semi-colon delimited environment variables to start the service with")
 	f.StringVar(&c.definition, "definition", "", "the definition to run the service on, instead of the one its image and version resolve to")
@@ -152,6 +155,7 @@ func (c *CreateCommand) AutocompleteFlags() complete.Flags {
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
 		complete.Flags{
+			"--backend":             complete.PredictSet("docker", "compose"),
 			"--config-options":      complete.PredictAnything,
 			"--custom-env":          complete.PredictAnything,
 			"--definition":          complete.PredictAnything,
@@ -271,6 +275,7 @@ func (c *CreateCommand) Run(args []string) int {
 	}
 
 	err = internal.CreateService(ctx, internal.CreateServiceInput{
+		Backend:            c.backend,
 		ConfigOptions:      updatedFlags.ConfigOptions,
 		CustomEnv:          updatedFlags.CustomEnv,
 		Datastore:          datastore,

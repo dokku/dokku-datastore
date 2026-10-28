@@ -138,6 +138,30 @@ func TestCreateServiceRefusesAnUnusableRestartPolicy(t *testing.T) {
 	}
 }
 
+// A backend is checked before anything is written, since one that is not known
+// would otherwise be made with docker without saying so.
+func TestCreateServiceRefusesAnUnknownBackend(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	withDataRoot(t)
+
+	err := CreateService(t.Context(), CreateServiceInput{
+		Backend:     "podman",
+		Datastore:   datastore,
+		ServiceName: "lollipop",
+	})
+	if err == nil {
+		t.Fatal("expected an unknown backend to be refused, got no error")
+	}
+
+	if !strings.Contains(err.Error(), `invalid backend "podman"`) {
+		t.Errorf("expected the error to name the backend, got %q", err)
+	}
+
+	if root := service.Folders(datastore, "lollipop").Root; common.DirectoryExists(root) {
+		t.Errorf("a refused create left %s behind", root)
+	}
+}
+
 // A wait timeout is checked the same way, since a service written down with one
 // the probe cannot use would fail every start after it.
 func TestCreateServiceRefusesAnUnusableWaitTimeout(t *testing.T) {
