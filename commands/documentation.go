@@ -767,27 +767,29 @@ func (c *LinkCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *LinkCommand) Documentation() string {
 	return `a {{.CommandPrefix}} service can be linked to a container.
-this will use native docker links via the docker-options plugin.
-here we link it to our 'playground' app.
+the app and the service are put on a private docker network made for that link
+alone, so the app reaches the service as dokku-{{.CommandPrefix}}-lollipop, and two
+apps linked to the same service cannot reach each other through it. the app's
+running containers join it straight away, and the containers it is built, deployed
+and run in from then on join it when they are made. here we link it to our
+'playground' app.
 > NOTE: this will restart your app
 dokku {{.CommandPrefix}}:link lollipop playground
-the following environment variables will be set automatically by docker
-(not on the app itself, so they won’t be listed when calling dokku config):
-
-    DOKKU_{{.PluginVariable}}_LOLLIPOP_NAME=/lollipop/DATABASE
-    DOKKU_{{.PluginVariable}}_LOLLIPOP_PORT=tcp://172.17.0.1:{{.Port}}
-    DOKKU_{{.PluginVariable}}_LOLLIPOP_PORT_{{.Port}}_TCP=tcp://172.17.0.1:{{.Port}}
-    DOKKU_{{.PluginVariable}}_LOLLIPOP_PORT_{{.Port}}_TCP_PROTO=tcp
-    DOKKU_{{.PluginVariable}}_LOLLIPOP_PORT_{{.Port}}_TCP_PORT={{.Port}}
-    DOKKU_{{.PluginVariable}}_LOLLIPOP_PORT_{{.Port}}_TCP_ADDR=172.17.0.1
-
 the following will be set on the linked application by default:
 
     {{.DefaultAlias}}_URL={{.Scheme}}://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}
 
 the host exposed here only works internally in docker containers.
 if you want your container to be reachable from outside, you should
-use the 'expose' subcommand. another service can be linked to your app:
+use the 'expose' subcommand. earlier versions of the plugin linked an app with
+a docker link, which docker has deprecated, and which set DOKKU_{{.PluginVariable}}_LOLLIPOP_PORT
+style variables on the app's containers. docker 29 no longer sets them, so an app
+reading them should read {{.DefaultAlias}}_URL instead. updating the plugin moves
+every linked app onto the network for its link, and the docker link is gone from
+each app's containers once they are restarted.
+> NOTE: every link uses a docker network of its own. docker's default address pools hold about 31 networks, so a server with many links may need a larger default-address-pools setting in /etc/docker/daemon.json.
+
+another service can be linked to your app:
 dokku {{.CommandPrefix}}:link other_service playground
 the url can be set under another name with the '--alias' flag. the value given is
 the prefix of the config variable, which is suffixed with _URL and holds the same url
@@ -1396,6 +1398,8 @@ func (c *UnlinkCommand) Documentation() string {
 	return `you can unlink a {{.CommandPrefix}} service
 > NOTE: this will restart your app and unset related environment variables
 dokku {{.CommandPrefix}}:unlink lollipop playground
+the network the link ran over is removed straight away, so the app's running
+containers can no longer reach the service, even with '--no-restart'.
 an app is still linked after its {{.DefaultAlias}}_URL is changed to point
 elsewhere, and is unlinked the same way. the variable it now holds is not
 the service's, so it is left alone, nothing is unset, the app is not

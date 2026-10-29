@@ -86,7 +86,8 @@ datastore_teardown_file() {
 # binary checks an app exists by its directory under the dokku root, and reads
 # and writes its config through the installed dokku. Neither is here, so the
 # apps are directories and dokku is a stand-in keeping the config of every app
-# in a json file of its own. Called from setup_file
+# in a json file of its own, and recording every docker option it is asked to
+# add or remove in docker-options.log beside them. Called from setup_file
 fake_dokku_setup() {
   export DOKKU_ROOT="$BATS_FILE_TMPDIR/dokku-root"
   export FAKE_CONFIG_ROOT="$BATS_FILE_TMPDIR/config"
@@ -105,7 +106,8 @@ subcommand="$1"
 shift
 [[ "$1" == "--format" ]] && shift 2
 [[ "$1" == "--no-restart" ]] && shift
-config="$FAKE_CONFIG_ROOT/$1.json"
+app="$1"
+config="$FAKE_CONFIG_ROOT/$app.json"
 [[ -f "$config" ]] || echo '{}' >"$config"
 shift || true
 
@@ -124,6 +126,9 @@ case "$subcommand" in
       jq --arg key "$key" 'del(.[$key])' "$config" >"$config.tmp"
       mv "$config.tmp" "$config"
     done
+    ;;
+  docker-options:add | docker-options:remove)
+    echo "$subcommand $app $*" >>"$FAKE_CONFIG_ROOT/docker-options.log"
     ;;
 esac
 EOS

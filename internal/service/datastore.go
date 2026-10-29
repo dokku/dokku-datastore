@@ -401,6 +401,20 @@ func (s *Datastore) CreateServiceContainer(ctx context.Context, input CreateServ
 		return fmt.Errorf("failed to read container ID from %s", cidFilename)
 	}
 
+	// a new container is on none of the networks its links run over, so every
+	// app linked to the service would lose it. A network that went missing is
+	// made again here too.
+	for _, appName := range LinkedApps(ctx, LinkedAppsInput{Datastore: input.Datastore, ServiceName: input.ServiceName}) {
+		if err := EnsureLinkNetwork(ctx, EnsureLinkNetworkInput{
+			AppName:     appName,
+			ContainerID: containerID,
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+		}); err != nil {
+			return err
+		}
+	}
+
 	if err := s.startContainer(ctx, input.ServiceName, containerID); err != nil {
 		return err
 	}

@@ -44,6 +44,16 @@ func CopyAppLinks(ctx context.Context, input TriggerInput, oldAppName string, ne
 			return err
 		}
 
+		// the new app's containers join the network for its own link when
+		// they are made, so it has to be there for them
+		if err := service.EnsureLinkNetwork(ctx, service.EnsureLinkNetworkInput{
+			AppName:     newAppName,
+			Datastore:   input.Datastore,
+			ServiceName: serviceName,
+		}); err != nil {
+			return err
+		}
+
 		// dokku copies the config along with the app, so the new app holds the
 		// url under the same keys. A link made before the keys were recorded
 		// has none to copy, and recording none would forget any the new name
@@ -74,7 +84,7 @@ func CopyAppLinks(ctx context.Context, input TriggerInput, oldAppName string, ne
 }
 
 // RemoveAppLinks drops an app from every service's links file, along with the
-// config keys recorded for it
+// config keys recorded for it and the network its link ran over
 func RemoveAppLinks(ctx context.Context, input TriggerInput, appName string) error {
 	services, err := ListServices(ctx, ListServicesInput{Datastore: input.Datastore})
 	if err != nil {
@@ -90,6 +100,47 @@ func RemoveAppLinks(ctx context.Context, input TriggerInput, appName string) err
 		if err := forgetLinkConfigKeys(input.Logger, input.Datastore, serviceName, appName); err != nil {
 			return err
 		}
+
+		if err := service.RemoveLinkNetwork(ctx, service.LinkNetworkName(input.Datastore, serviceName, appName)); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// ConnectContainerToLinks attaches a container dokku just made for an app to
+// the network of every link the app has, which is how an app reaches the
+// services it is linked to. dokku fires post-container-create for the
+// containers it builds, deploys and runs an app in, which are the phases a
+// container link used to cover. A container made for anything else is left
+// alone.
+func ConnectContainerToLinks(ctx context.Context, input TriggerInput, containerType string, containerID string, appName string) error {
+	if containerType != "app" || containerID == "" || appName == "" {
+		return nil
+	}
+
+	services, err := LinkedServices(ctx, LinkedServicesInput{
+		AppName:   appName,
+		Datastore: input.Datastore,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list services: %w", err)
+	}
+
+	for _, serviceName := range services {
+		// a network removed by hand is made again, so a deploy repairs it
+		if err := service.EnsureLinkNetwork(ctx, service.EnsureLinkNetworkInput{
+			AppName:     appName,
+			Datastore:   input.Datastore,
+			ServiceName: serviceName,
+		}); err != nil {
+			return err
+		}
+
+		if err := connectAppContainer(ctx, input.Logger, input.Datastore, serviceName, appName, containerID); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -100,7 +151,7 @@ func RemoveAppLinks(ctx context.Context, input TriggerInput, appName string) err
 //
 // It runs before an app starts, builds or releases, and the first service that
 // cannot be started stops there: the app would otherwise fail later on a
-// container link to something that does not exist, saying nothing about why.
+// service that is not there, saying nothing about why.
 func StartLinkedServices(ctx context.Context, input TriggerInput, appName string) error {
 	// a trigger that names no app has no services to answer for
 	if appName == "" {

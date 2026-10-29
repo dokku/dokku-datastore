@@ -82,6 +82,7 @@ Available commands are:
     trigger-install                       Prepares the host for a datastore plugin
     trigger-post-app-clone-setup          Copies an app's service links onto its clone
     trigger-post-app-rename-setup         Carries an app's service links across a rename
+    trigger-post-container-create         Attaches a new app container to the networks of its links
     trigger-pre-build                     Starts the services an app is linked to before it is built
     trigger-pre-delete                    Unlinks an app from every service before it is deleted
     trigger-pre-release-builder           Starts the services an app is linked to before it is released
@@ -1172,7 +1173,7 @@ dokku postgres:set lollipop expose-host
 
 ## Starting linked services before an app
 
-A service an app is linked to is started before the app needs it, rather than the app failing on a container link to something that does not exist. That happens at every point dokku offers a trigger for:
+A service an app is linked to is started before the app needs it, rather than the app failing to reach something that does not exist. That happens at every point dokku offers a trigger for:
 
 - `ps:start` and `ps:restore` start each app through `pre-start`.
 - A deploy, including `ps:rebuild`, builds through `pre-build` and releases through `pre-release-builder`.
@@ -1188,6 +1189,38 @@ dokku ps:rebuild --all
 A service that cannot be started stops the app from being started, built or released, and the error names the service and the app. `pre-restore` only warns, so one service that cannot be started does not stop every other app from being restored; the `pre-start` of each app using it is still where that app is stopped.
 
 Dokku has no trigger before it runs the containers of an image it has already built and released, so `ps:restart` of an app with a deployed image, `ps:scale`, and the restart after `config:set` do not start linked services.
+
+## Link networks
+
+`link` used to give the app a docker link to the service, added to the app's `build`, `deploy` and `run` docker options as `--link dokku.postgres.lollipop:dokku-postgres-lollipop`. Docker 29.6 warns that links on the default bridge network are deprecated, and Docker 30.0 removes them. Docker 29.0 had already stopped setting the `DOKKU_POSTGRES_LOLLIPOP_PORT`-style variables a link handed the app's containers, unless the daemon is run with `DOCKER_KEEP_DEPRECATED_LEGACY_LINKS_ENV_VARS=1`.
+
+Each link now has a docker network of its own, named for the service and the app, such as `dokku.postgres.lollipop.playground`. The service joins it as `dokku-postgres-lollipop`, the host its url already names, so the url does not change. The app's running containers join it when the app is linked, and every container dokku makes for the app from then on joins it through the `post-container-create` trigger, which dokku fires for the containers an app is built, deployed and run in. Two apps linked to the same service are on different networks, so neither can resolve or reach the other through it. The network is internal, so joining it changes neither container's route to anything else. A container on the host network, which could not be given a docker link either, is warned about and left as it is.
+
+`unlink` removes the network, which takes the service away from the app's running containers straight away, even with `--no-restart`. Deleting the app removes it too, and `destroy` removes any a service still has. A service container that is made again, by a `start` with no container left, an `upgrade` or a `reset`, rejoins the network of every app it is linked to, and a network that went missing is made again then, and whenever a container of the app is made.
+
+The readiness check a service is waited on with used a docker link as well. It now runs in the service container's network namespace, as the sidecar commands do.
+
+```shell
+dokku postgres:link lollipop playground
+
+# the network the link runs over, with the service and the app's containers on it
+docker network inspect dokku.postgres.lollipop.playground
+
+# removes the network, and the app's running containers lose the service
+dokku postgres:unlink lollipop playground --no-restart
+```
+
+Updating the plugin moves every linked app onto the network for its link and removes the `--link` docker option, without restarting anything. The app's containers keep the docker link they were started with until they are next restarted. An app that reads the `DOKKU_POSTGRES_LOLLIPOP_*` variables should read `DATABASE_URL` instead.
+
+Every link uses a network, and Docker's default address pools hold about 31, so a host with many links may need a larger `default-address-pools` setting in `/etc/docker/daemon.json`. It applies to networks made once docker is restarted:
+
+```json
+{
+  "default-address-pools": [
+    {"base": "172.16.0.0/12", "size": 24}
+  ]
+}
+```
 
 ## Linked apps
 
@@ -1209,17 +1242,16 @@ dokku postgres:unlink lollipop playground
 dokku postgres:destroy lollipop
 ```
 
-`link` goes by the same list. An app whose config already held the service's url, set by hand rather than by `link`, was refused with `Already linked as DATABASE_URL`, and was left without its container link and off the list, so it could not reach the service and `destroy` did not know it was in use. Such an app is now added to the list and given its container link. Its config is left as it is, so `--alias`, `--env-var` and `--querystring` do not apply and the app is not restarted, and a warning says it has no container link until it is. An app already on the list is still refused, including one whose url was repointed, which used to be linked a second time under a `DOKKU_POSTGRES_AQUA_URL`-style alias.
+`link` goes by the same list. An app whose config already held the service's url, set by hand rather than by `link`, was refused with `Already linked as DATABASE_URL`, and was left without its container link and off the list, so it could not reach the service and `destroy` did not know it was in use. Such an app is now added to the list and put on the network for its link. Its config is left as it is, so `--alias`, `--env-var` and `--querystring` do not apply and the app is not restarted, and a warning says so. An app already on the list is still refused, including one whose url was repointed, which used to be linked a second time under a `DOKKU_POSTGRES_AQUA_URL`-style alias.
 
 The bash plugins also took a key that merely contained the alias, such as `EXTERNAL_DATABASE_URL`, for the alias itself, and linked the app under a `DOKKU_POSTGRES_AQUA_URL`-style alias instead, or refused `--alias DATABASE` as already in use. Only a key named exactly `DATABASE_URL` counts.
 
 ```shell
 dokku config:set playground DATABASE_URL=postgres://postgres:password@dokku-postgres-lollipop:5432/lollipop
 
-# adds playground to the list and gives it the container link,
+# adds playground to the list and puts it on the network for its link,
 # warning that the app is not restarted
 dokku postgres:link lollipop playground
-dokku ps:restart playground
 ```
 
 ### The variable a link sets

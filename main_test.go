@@ -370,3 +370,14 @@ func TestGenerateWritesAScriptForEveryPluginCommand(t *testing.T) {
 		t.Errorf("expected a script for each of %v, got %v", expected, written)
 	}
 }
+
+// Every trigger a plugin dispatches to the binary has a command to dispatch
+// to, or dokku would run a file that calls a command that is not there
+func TestBuiltinTriggersHaveCommands(t *testing.T) {
+	commands := Commands(t.Context(), command.Meta{})
+	for _, name := range internal.BuiltinTriggers {
+		if _, ok := commands["trigger-"+name]; !ok {
+			t.Errorf("the %s trigger has no trigger-%s command", name, name)
+		}
+	}
+}

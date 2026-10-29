@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"net"
 	"strconv"
 	"time"
 
@@ -17,12 +18,9 @@ type WaitArgsInput struct {
 	// ContainerName is the service container to probe
 	ContainerName string
 
-	// NetworkAlias is the name the probe reaches the service by
-	NetworkAlias string
-
-	// InitialNetwork is the network the service was created on, which the probe
-	// has to join to see it
-	InitialNetwork string
+	// Host is the address the probe reaches the service on, which is the
+	// container's own, or the loopback interface when it has none
+	Host string
 
 	// Port is the port the service answers on
 	Port int
@@ -33,20 +31,28 @@ type WaitArgsInput struct {
 
 // WaitArgs builds the argv for the readiness probe. It is pure, so what a
 // service is waited on with can be pinned by a test without a docker daemon.
+//
+// The probe shares the service container's network namespace, as the sidecar
+// verbs do, rather than reaching it over a network. A container link is
+// deprecated, and over the bridge by address a host that sets icc=false would
+// refuse it. It probes the container's own address rather than the loopback
+// interface, so a server bound to the loopback interface alone is not reported
+// as ready to apps it cannot answer.
 func WaitArgs(input WaitArgsInput) []string {
+	host := input.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+
 	args := []string{
 		"container",
 		"run",
 		"--rm",
-		"--link=" + input.ContainerName + ":" + input.NetworkAlias,
-	}
-
-	if input.InitialNetwork != "" {
-		args = append(args, "--network="+input.InitialNetwork)
+		"--network=container:" + input.ContainerName,
 	}
 
 	args = append(args, hostenv.WaitImage)
-	args = append(args, "-c", fmt.Sprintf("%s:%d", input.NetworkAlias, input.Port))
+	args = append(args, "-c", net.JoinHostPort(host, strconv.Itoa(input.Port)))
 
 	if input.Timeout > 0 {
 		args = append(args, "-t", strconv.Itoa(input.Timeout))
@@ -145,10 +151,10 @@ func WaitForService(ctx context.Context, input WaitForServiceInput) error {
 		return err
 	}
 
-	// the probe reaches the service with --link, and docker refuses to link to a
-	// container that is not up yet. Starting a container that already exists
-	// returns before it has necessarily got there, so a service that is on its
-	// way up would otherwise be reported as one that never answered
+	// the probe joins the service container's network namespace, and docker
+	// refuses to join one that is not up yet. Starting a container that already
+	// exists returns before it has necessarily got there, so a service that is
+	// on its way up would otherwise be reported as one that never answered
 	if err := waitForRunningContainer(ctx, input); err != nil {
 		return err
 	}
@@ -159,11 +165,13 @@ func WaitForService(ctx context.Context, input WaitForServiceInput) error {
 	}
 
 	arguments := WaitArgs(WaitArgsInput{
-		ContainerName:  service.ContainerName(input.Datastore, input.ServiceName),
-		NetworkAlias:   service.DNSHostname(input.Datastore, input.ServiceName),
-		InitialNetwork: service.InitialNetwork(input.Datastore, input.ServiceName),
-		Port:           properties.WaitPort,
-		Timeout:        timeout,
+		ContainerName: service.ContainerName(input.Datastore, input.ServiceName),
+		Host: service.ContainerIP(ctx, service.ContainerIPInput{
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+		}),
+		Port:    properties.WaitPort,
+		Timeout: timeout,
 	})
 
 	input.Logger.Header1(WaitHeader(input.ServiceName, timeout)) //nolint:errcheck

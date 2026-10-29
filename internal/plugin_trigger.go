@@ -14,6 +14,7 @@ var BuiltinTriggers = []string{
 	"cron-entries",
 	"post-app-clone-setup",
 	"post-app-rename-setup",
+	"post-container-create",
 	"pre-build",
 	"pre-delete",
 	"pre-release-builder",

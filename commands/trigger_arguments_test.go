@@ -70,6 +70,19 @@ func TestTriggerCommandsAcceptExtraArguments(t *testing.T) {
 			args:      []string{"redis", "old-app", "new-app", "something-else"},
 		},
 		{
+			// dokku sends the container type, the container, the app, the phase
+			// and, for a deploy, the process type
+			name:      "trigger-post-container-create",
+			arguments: (&TriggerPostContainerCreateCommand{}).Arguments(),
+			args:      []string{"redis", "app", "0123abcd", "my-app", "deploy", "web"},
+		},
+		{
+			// and no process type for a build
+			name:      "trigger-post-container-create for a build",
+			arguments: (&TriggerPostContainerCreateCommand{}).Arguments(),
+			args:      []string{"redis", "app", "0123abcd", "my-app", "build"},
+		},
+		{
 			// dokku sends the scheduler, and nothing when listing global tasks
 			name:      "trigger-cron-entries",
 			arguments: (&TriggerCronEntriesCommand{}).Arguments(),
