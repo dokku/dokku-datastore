@@ -45,6 +45,10 @@ type UpgradeServiceInput struct {
 	// megabytes, empty to leave it to the datastore
 	ServiceMemory *string
 
+	// Labels are the docker labels the service container is made with beyond
+	// the plugin's own
+	Labels *map[string]string
+
 	// LogDriver is the docker logging driver the service container is run with
 	LogDriver *string
 
@@ -111,7 +115,8 @@ func (i UpgradeServiceInput) changesSettings() bool {
 		i.RestartPolicy != nil ||
 		i.WaitTimeout != nil ||
 		i.Mounts != nil ||
-		i.VolumeTargets != nil
+		i.VolumeTargets != nil ||
+		i.Labels != nil
 }
 
 // upgradeVersion is the version an upgrade moves a service to: the one asked
@@ -169,6 +174,11 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 	}
 	if input.RestartPolicy != nil {
 		if err := service.ValidateRestartPolicy(*input.RestartPolicy); err != nil {
+			return err
+		}
+	}
+	if input.Labels != nil {
+		if err := service.ValidateLabels(*input.Labels); err != nil {
 			return err
 		}
 	}
@@ -536,6 +546,12 @@ func applyUpgradeSettings(input UpgradeServiceInput) error {
 
 	if input.VolumeTargets != nil {
 		if err := service.WriteVolumeTargets(input.Datastore, input.ServiceName, *input.VolumeTargets); err != nil {
+			return err
+		}
+	}
+
+	if input.Labels != nil {
+		if err := service.WriteLabels(input.Datastore, input.ServiceName, *input.Labels); err != nil {
 			return err
 		}
 	}

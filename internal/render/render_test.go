@@ -129,6 +129,12 @@ func TestRendererReproducesTheGoldenArgs(t *testing.T) {
 			mutate: func(input *Input) { input.Scope.RestartPolicy = "on-failure:3" },
 		},
 		{
+			name: "labels",
+			mutate: func(input *Input) {
+				input.Scope.Labels = map[string]string{"traefik.enable": "true", "com.example.team": "data,ops"}
+			},
+		},
+		{
 			name: "mounts",
 			mutate: func(input *Input) {
 				input.Scope.Mounts = []string{"/srv/extra:/data/extra:ro,z", "some-volume:/opt/extra"}

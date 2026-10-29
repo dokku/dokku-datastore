@@ -53,6 +53,7 @@ func TestSetPropertyRefusesASettingOwnedElsewhere(t *testing.T) {
 		"image-version":   "upgrade",
 		"definition":      "upgrade",
 		"mounts":          "mount and unmount",
+		"labels":          "label and unlabel",
 		"backup-schedule": "backup-schedule and backup-unschedule",
 	}
 

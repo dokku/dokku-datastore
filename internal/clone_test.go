@@ -23,6 +23,7 @@ func cloneSource() serviceSettings {
 		ImportArgs:         "--force",
 		InitialNetwork:     "initial",
 		Keyserver:          "keys.example.com",
+		Labels:             map[string]string{"traefik.enable": "true", "com.example.team": "data,ops"},
 		LogDriver:          "json-file",
 		LogOptions:         []string{"max-size=20m", "max-file=3"},
 		Memory:             512,
@@ -55,6 +56,7 @@ func TestCloneFlagOverridesOneSetting(t *testing.T) {
 	serviceMemory := "512"
 	mounts := []service.Mount{{Source: "other", ContainerPath: "/opt/other"}}
 	volumeTargets := map[string]string{"config": "/etc/redis"}
+	labels := map[string]string{"com.example.tier": "gold"}
 
 	tests := []struct {
 		name     string
@@ -96,6 +98,12 @@ func TestCloneFlagOverridesOneSetting(t *testing.T) {
 			input:    CloneServiceInput{VolumeTargets: &volumeTargets},
 			expected: func(s *serviceSettings) { s.VolumeTargets = volumeTargets },
 		},
+		{
+			// the whole set, the same way --volume replaces every mount
+			name:     "the labels",
+			input:    CloneServiceInput{Labels: &labels},
+			expected: func(s *serviceSettings) { s.Labels = labels },
+		},
 	}
 
 	for _, test := range tests {
@@ -118,11 +126,13 @@ func TestCloneCanClearASetting(t *testing.T) {
 	unlimited := 0
 	unmounted := []service.Mount{}
 	unmoved := map[string]string{}
+	unlabeled := map[string]string{}
 
 	actual := cloneSource().withOverrides(CloneServiceInput{
 		ConfigOptions:      &empty,
 		CustomEnv:          &empty,
 		InitialNetwork:     &empty,
+		Labels:             &unlabeled,
 		LogDriver:          &empty,
 		LogOptions:         &none,
 		Memory:             &unlimited,
@@ -146,6 +156,7 @@ func TestCloneCanClearASetting(t *testing.T) {
 		ExportArgs:         "--hex-blob",
 		ImportArgs:         "--force",
 		Keyserver:          "keys.example.com",
+		Labels:             unlabeled,
 		LogOptions:         none,
 		Mounts:             unmounted,
 		PostCreateNetworks: none,
@@ -207,6 +218,10 @@ func TestReadServiceSettings(t *testing.T) {
 
 	if err := service.WriteMounts(datastore, "lollipop", cloneSource().Mounts); err != nil {
 		t.Fatalf("failed to write the mounts: %s", err)
+	}
+
+	if err := service.WriteLabels(datastore, "lollipop", cloneSource().Labels); err != nil {
+		t.Fatalf("failed to write the labels: %s", err)
 	}
 
 	actual, err := readServiceSettings(datastore, "lollipop")

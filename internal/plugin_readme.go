@@ -39,7 +39,7 @@ var readmeSections = []struct {
 	{
 		Group:    definition.GroupBasicUsage,
 		Title:    "Basic Usage",
-		Commands: []string{"create", "destroy", "info", "list", "logs", "link", "unlink", "set", "mount", "unmount"},
+		Commands: []string{"create", "destroy", "info", "list", "logs", "link", "unlink", "set", "mount", "unmount", "label", "unlabel"},
 	},
 	{
 		Group:    definition.GroupServiceLifecycle,
@@ -447,7 +447,7 @@ func readmeSettableProperties(data DocumentationData) []string {
 
 	sections := []string{
 		"### Service properties",
-		fmt.Sprintf("Every setting a service has after it is created, other than its image, its mounts and its backup schedule, each of which has a command of its own, is changed with `dokku %s:set lollipop <key> <value>`, and cleared by giving no value. "+
+		fmt.Sprintf("Every setting a service has after it is created, other than its image, its mounts, its labels and its backup schedule, each of which has a command of its own, is changed with `dokku %s:set lollipop <key> <value>`, and cleared by giving no value. "+
 			"`dokku %s:info lollipop` reports each of them, with a credential reported as a fingerprint rather than its value. "+
 			"A setting the container is made with only reaches it once the container is built again, and `set` warns when that is the case: "+
 			"`dokku %s:restart` keeps the container the service has, so use `dokku %s:stop` and then `dokku %s:start`. "+

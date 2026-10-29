@@ -93,6 +93,14 @@ func TestContainerArgs(t *testing.T) {
 			mutate: func(input *ContainerArgsInput) { input.RestartPolicy = "on-failure:3" },
 		},
 		{
+			// sorted, and ahead of the plugin's own, since docker keeps the last
+			// of two labels with the same key and the plugin's must win
+			name: "labels",
+			mutate: func(input *ContainerArgsInput) {
+				input.Labels = map[string]string{"traefik.enable": "true", "com.example.team": "data,ops"}
+			},
+		},
+		{
 			// what the operator mounted follows the definition's own volumes,
 			// options and all
 			name: "mounts",

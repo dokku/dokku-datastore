@@ -348,7 +348,7 @@ func (c *CloneCommand) Documentation() string {
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2
 the new service starts from the settings of the one it copies: its config options,
 custom env, memory, service memory, shm size, networks, log driver, log options, restart policy,
-mounts, volume targets, backup keyserver, backup storage class and backup timestamp. A flag passed to clone overrides that one setting, and a
+labels, mounts, volume targets, backup keyserver, backup storage class and backup timestamp. A flag passed to clone overrides that one setting, and a
 flag passed empty clears it
 dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --restart no --custom-env ""
 the new service runs the image and image version of the one it copies unless --image or
@@ -436,6 +436,9 @@ by dokku's own default where it says nothing, which a service may override for i
 dokku {{.CommandPrefix}}:create lollipop --log-opt max-size=20m,max-file=3
 the container is restarted by docker whenever it stops, which a service may change for itself.
 dokku {{.CommandPrefix}}:create lollipop --restart unless-stopped
+the container carries a docker label for each --label, which may be repeated, beyond the
+ones dokku puts on it. keys starting with 'dokku.' or 'com.dokku.' are dokku's own and are refused.
+dokku {{.CommandPrefix}}:create lollipop --label traefik.enable=true --label com.example.team=data
 the service is waited on until it answers, for as long as the datastore's own default,
 which a slow host may raise for every service with 'dokku {{.CommandPrefix}}:set --global wait-timeout' or a service may raise for itself.
 dokku {{.CommandPrefix}}:create lollipop --wait-timeout 120
@@ -698,6 +701,33 @@ the same fingerprints can be computed from the values that were passed to set, b
 
 // Group is the readme usage section the command is documented under
 func (c *InfoCommand) Group() string {
+	return definition.GroupBasicUsage
+}
+
+// Description returns the one line description of the command, in the idiom of the
+// plugin rather than of the binary
+func (c *LabelCommand) Description() string {
+	return `add docker labels to the service container`
+}
+
+// Usage returns the argument sketch rendered after the command name
+func (c *LabelCommand) Usage() string {
+	return `<service> <key=value>...`
+}
+
+// Documentation returns the long form documentation for the command
+func (c *LabelCommand) Documentation() string {
+	return `add a label to the service container
+dokku {{.CommandPrefix}}:label lollipop traefik.enable=true
+several may be given at once, and a value may hold commas and spaces
+dokku {{.CommandPrefix}}:label lollipop com.example.team=data "traefik.http.routers.lollipop.middlewares=auth,compress"
+labelling a key the service already has replaces its value. keys starting with 'dokku.' or
+'com.dokku.' are dokku's own and are refused.
+> NOTE: a label reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.`
+}
+
+// Group is the readme usage section the command is documented under
+func (c *LabelCommand) Group() string {
 	return definition.GroupBasicUsage
 }
 
@@ -1275,6 +1305,31 @@ dokku {{.CommandPrefix}}:reexpose lollipop --force
 // Group is the readme usage section the command is documented under
 func (c *ReexposeCommand) Group() string {
 	return definition.GroupServiceLifecycle
+}
+
+// Description returns the one line description of the command, in the idiom of the
+// plugin rather than of the binary
+func (c *UnlabelCommand) Description() string {
+	return `remove one or all docker labels from the service container`
+}
+
+// Usage returns the argument sketch rendered after the command name
+func (c *UnlabelCommand) Usage() string {
+	return `[--all] <service> [<key>...]`
+}
+
+// Documentation returns the long form documentation for the command
+func (c *UnlabelCommand) Documentation() string {
+	return `remove a label, naming it by its key
+dokku {{.CommandPrefix}}:unlabel lollipop traefik.enable
+remove every label the service was given
+dokku {{.CommandPrefix}}:unlabel --all lollipop
+> NOTE: the label is removed from the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.`
+}
+
+// Group is the readme usage section the command is documented under
+func (c *UnlabelCommand) Group() string {
+	return definition.GroupBasicUsage
 }
 
 // Description returns the one line description of the command, in the idiom of the

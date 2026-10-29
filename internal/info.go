@@ -69,6 +69,7 @@ var InfoKeys = []InfoKey{
 	{Name: "import-args", Description: "show the extra arguments every import into the service is run with"},
 	{Name: "initial-network", Description: "show the initial network being connected to"},
 	{Name: "internal-ip", Description: "show the service internal ip"},
+	{Name: "labels", Description: "show the docker labels the service container is made with beyond dokku's own, as a json object"},
 	{Name: "links", Description: "show the service app links"},
 	{Name: "log-driver", Description: "show the docker logging driver the service container is run with"},
 	{Name: "log-opt", Description: "show the docker log options the service container is run with"},
@@ -152,6 +153,9 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info[service.LogDriverProperty] = common.PropertyGet(commandPrefix, input.ServiceName, service.LogDriverProperty)
 	info[service.LogOptProperty] = common.PropertyGet(commandPrefix, input.ServiceName, service.LogOptProperty)
 	info[service.RestartPolicyProperty] = service.ServiceRestartPolicy(input.Datastore, input.ServiceName)
+	// a property that cannot be read reports as empty, the way the mounts do
+	labels, _ := service.ServiceLabels(input.Datastore, input.ServiceName)
+	info[service.LabelsProperty] = service.FormatLabels(labels)
 	info[service.WaitTimeoutProperty] = service.ServiceWaitTimeout(input.Datastore, input.ServiceName)
 	info[service.PortBindAddressProperty] = service.ServicePortBindAddress(input.Datastore, input.ServiceName)
 	info[service.PortSourceRangeProperty] = service.ServicePortSourceRange(input.Datastore, input.ServiceName)

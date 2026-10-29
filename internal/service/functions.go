@@ -89,6 +89,10 @@ type CommitServiceConfigInput struct {
 	// PostStartNetworks is the networks to attach the service container to after service start
 	PostStartNetworks []string
 
+	// Labels are the docker labels for the service container beyond the
+	// plugin's own
+	Labels map[string]string
+
 	// LogDriver is the docker logging driver to run the service container with
 	LogDriver string
 
@@ -219,6 +223,10 @@ func CommitServiceConfig(input CommitServiceConfigInput) error {
 	}
 
 	if err := WriteVolumeTargets(input.Datastore, input.ServiceName, input.VolumeTargets); err != nil {
+		return err
+	}
+
+	if err := WriteLabels(input.Datastore, input.ServiceName, input.Labels); err != nil {
 		return err
 	}
 
