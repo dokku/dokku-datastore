@@ -256,6 +256,16 @@ type Dokku struct {
 	// service-memory setting refused.
 	ServiceMemory *ServiceMemory `yaml:"service_memory"`
 
+	// Databases declares that a service can hold databases beside the one named
+	// for it, which an app can be linked to and a command can address. Nil for
+	// a datastore with nothing to address, which has --database refused.
+	Databases *Databases `yaml:"databases"`
+
+	// Users declares that a service can hold accounts beside its own, which an
+	// app can be linked as. Nil for a datastore with no accounts to make, which
+	// has --user refused.
+	Users *Users `yaml:"users"`
+
 	// Wait names the port to probe with the dokku/wait sidecar, for images with
 	// no tool a compose healthcheck could use. Ignored when Healthcheck is set.
 	Wait string `yaml:"wait"`
@@ -411,6 +421,76 @@ type JDBC struct {
 	// Password is the account's password, for the same reason.
 	Password string `yaml:"password"`
 }
+
+// Databases is how a service is given databases beside the one named for it.
+//
+// A datastore either makes them, which Create and Destroy do, or has a fixed
+// number it always holds and addresses by index, which Fixed declares. Redis is
+// the second: its sixteen databases exist from the moment it starts, so there is
+// nothing to create and a link only says which one it wants.
+type Databases struct {
+	// Create makes a database, named as {{ .Args.database }}. Every account
+	// the service holds is given access to it, named as {{ .Args.users }},
+	// space separated, and empty for a datastore with no accounts to make.
+	Create *Command `yaml:"create"`
+
+	// Destroy removes a database, named as Create names it, and takes away
+	// the access every account was given to it.
+	Destroy *Command `yaml:"destroy"`
+
+	// Fixed is the number of databases a datastore always holds, addressed
+	// by index from zero. A datastore declaring it declares neither Create nor
+	// Destroy.
+	Fixed int `yaml:"fixed"`
+
+	// Default is the index a link is on when it names none, for a datastore
+	// with Fixed. One that makes its databases uses the one named for the
+	// service.
+	Default string `yaml:"default"`
+}
+
+// Makes reports whether a datastore makes the databases a service holds, rather
+// than having a fixed number of them.
+func (d *Databases) Makes() bool {
+	return d != nil && d.Fixed == 0
+}
+
+// Users is how a service is given accounts beside its own.
+type Users struct {
+	// Default is the account the service was created with, which a link is
+	// made as when it names none, as a template such as "{{ .ServiceName }}".
+	Default string `yaml:"default"`
+
+	// Secret names the secret holding the default account's password.
+	Secret string `yaml:"secret"`
+
+	// Reserved are the accounts the datastore keeps for itself, which an
+	// account cannot be made as.
+	Reserved []string `yaml:"reserved"`
+
+	// Create makes an account, named as {{ .Args.user }} with the password as
+	// {{ .NewSecret }}, and gives it access to every database the service
+	// holds, named as {{ .Args.databases }}, space separated.
+	Create *Command `yaml:"create"`
+
+	// Destroy removes an account, named and handed the databases as Create
+	// is.
+	Destroy *Command `yaml:"destroy"`
+
+	// Change gives an account a new password, named as Create names it with
+	// the new password as {{ .NewSecret }}.
+	Change *Command `yaml:"change"`
+}
+
+// The names the databases and users commands are addressed by where commands
+// are named, as in the checks a definition is parsed with.
+const (
+	DatabasesCreateName  = "databases.create"
+	DatabasesDestroyName = "databases.destroy"
+	UsersCreateName      = "users.create"
+	UsersDestroyName     = "users.destroy"
+	UsersChangeName      = "users.change"
+)
 
 // ServiceMemoryChangeName is how the service memory's change command is
 // addressed where commands are named, as in the checks a definition is parsed
@@ -599,6 +679,7 @@ const (
 	GroupServiceLifecycle  = "service-lifecycle"
 	GroupServiceAutomation = "service-automation"
 	GroupDataManagement    = "data-management"
+	GroupDatabasesAndUsers = "databases-and-users"
 	GroupBackups           = "backups"
 
 	// GroupCustomCommands collects the commands a datastore adds for itself that
@@ -615,6 +696,7 @@ var Groups = map[string]bool{
 	GroupServiceLifecycle:  true,
 	GroupServiceAutomation: true,
 	GroupDataManagement:    true,
+	GroupDatabasesAndUsers: true,
 	GroupBackups:           true,
 }
 
@@ -675,6 +757,11 @@ func (d Definition) Implements(subcommand string) bool {
 		return ok
 	case "clone":
 		return hasExport && hasImport
+	case "create-database", "destroy-database":
+		// a datastore with a fixed number of databases has none to make
+		return d.Dokku.Databases.Makes()
+	case "create-user", "destroy-user", "set-user-password":
+		return d.Dokku.Users != nil
 	case "backup", "backup-auth", "backup-deauth", "backup-logs", "backup-schedule",
 		"backup-schedule-cat", "backup-set-encryption",
 		"backup-set-public-key-encryption", "backup-unschedule",
@@ -888,4 +975,30 @@ func (d Definition) WaitPort() (Port, bool) {
 	}
 
 	return d.PrimaryPort()
+}
+
+// WithDefaultAccount returns the scope rendered as the service's own database
+// and the account it was created with, which is what every template addresses
+// unless a link or a command names another. The account's name is a template
+// of its own, such as the service name, rendered against the rest of the
+// scope; one that cannot be rendered is left empty, so that a dsn naming it
+// names no one rather than the wrong account. A scope that already names a
+// database keeps it as the default.
+func (d Definition) WithDefaultAccount(scope Scope) Scope {
+	if scope.DefaultDatabase == "" {
+		scope.DefaultDatabase = scope.Database
+	}
+
+	users := d.Dokku.Users
+	if users == nil {
+		return scope
+	}
+
+	if username, err := Render(users.Default, scope); err == nil {
+		scope.Username = username
+		scope.DefaultUsername = username
+	}
+	scope.Password = scope.Secret[users.Secret]
+
+	return scope
 }

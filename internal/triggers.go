@@ -60,6 +60,14 @@ func CopyAppLinks(ctx context.Context, input TriggerInput, oldAppName string, ne
 				return err
 			}
 		}
+
+		// the copied url names the database and user the old app was linked
+		// on, which the new app is found by from now on
+		if account := service.LinkAccount(input.Datastore, serviceName, oldAppName); !account.IsDefault() {
+			if err := recordLinkAccount(input.Logger, input.Datastore, serviceName, newAppName, account); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

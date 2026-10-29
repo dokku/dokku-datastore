@@ -16,6 +16,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 
 ### a memory limit
 container
@@ -36,6 +38,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 
 ### a shared memory size
 container
@@ -56,6 +60,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 
 ### an initial network
 container
@@ -77,6 +83,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 
 ### config options
 container
@@ -96,6 +104,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 --appendonly
 yes
 
@@ -117,6 +127,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 --appendonly
 yes
 
@@ -138,6 +150,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 
 ### log options
 container
@@ -160,6 +174,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 
 ### log options with no driver
 container
@@ -180,6 +196,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 
 ### a restart policy
 container
@@ -199,6 +217,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 
 ### labels
 container
@@ -220,6 +240,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 
 ### mounts
 container
@@ -241,6 +263,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 
 ### a volume mounted from a subpath
 container
@@ -263,6 +287,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 
 ### no volumes at all
 container
@@ -298,6 +324,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 
 ### everything at once
 container
@@ -324,6 +352,8 @@ redis-server
 /usr/local/etc/redis/redis.conf
 --bind
 0.0.0.0
+--aclfile
+/data/users.acl
 --appendonly
 yes
 

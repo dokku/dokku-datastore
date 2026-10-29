@@ -21,6 +21,11 @@ type ConnectCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+
+	// database is the database to connect to in place of the service's own
+	database string
+	// user is the user to connect as in place of the service's own
+	user string
 }
 
 // Name returns the name of the command
@@ -78,6 +83,8 @@ func (c *ConnectCommand) ParsedArguments(args []string) (map[string]command.Argu
 func (c *ConnectCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	f.StringVar(&c.database, "database", "", "the database in the service to connect to, in place of the one named for the service")
+	f.StringVar(&c.user, "user", "", "the user in the service to connect as, in place of the one the service was created with")
 	return f
 }
 
@@ -86,7 +93,10 @@ func (c *ConnectCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--database": complete.PredictAnything,
+			"--user":     complete.PredictAnything,
+		},
 	)
 }
 
@@ -180,6 +190,7 @@ func (c *ConnectCommand) Run(args []string) int {
 	}
 
 	if err := datastore.ConnectToService(ctx, service.ConnectToServiceInput{
+		Account:     service.Account{Database: c.database, User: c.user},
 		Datastore:   datastore,
 		ServiceName: serviceName,
 	}); err != nil {
@@ -188,4 +199,16 @@ func (c *ConnectCommand) Run(args []string) int {
 	}
 
 	return 0
+}
+
+// DocumentsFlag reports whether a flag is described for a datastore
+func (c *ConnectCommand) DocumentsFlag(name string, data internal.DocumentationData) bool {
+	switch name {
+	case "database":
+		return data.Databases
+	case "user":
+		return data.Users
+	default:
+		return true
+	}
 }

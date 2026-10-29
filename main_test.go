@@ -238,9 +238,10 @@ func TestPluginCommandsCoverEveryDocumentedSubcommand(t *testing.T) {
 		"app-links", "backup", "backup-auth", "backup-deauth", "backup-logs", "backup-schedule",
 		"backup-schedule-cat", "backup-set-encryption", "backup-set-public-key-encryption",
 		"backup-unschedule", "backup-unset-encryption", "backup-unset-public-key-encryption",
-		"clone", "connect", "create", "destroy", "enter", "exists", "export", "expose",
+		"clone", "connect", "create", "create-database", "create-user", "destroy", "destroy-database",
+		"destroy-user", "enter", "exists", "export", "expose",
 		"import", "info", "label", "link", "linked", "links", "list", "logs", "mount", "pause", "promote",
-		"reset", "restart", "set", "start", "stop", "unexpose", "unlabel", "unlink", "unmount", "upgrade",
+		"reset", "restart", "set", "set-user-password", "start", "stop", "unexpose", "unlabel", "unlink", "unmount", "upgrade",
 	} {
 		if !names[name] {
 			t.Errorf("the %s command is not documented", name)

@@ -231,13 +231,13 @@ func TestUpdateLinkedAppURLs(t *testing.T) {
 				Logger:      Ui{Ui: cli.NewMockUi()},
 			}
 
-			linked, err := linkedAppURLs(context.Background(), redis, "lollipop", input.Logger)
+			linked, err := linkedAppURLs(context.Background(), redis, "lollipop", input.Logger, linkedAsDefaultUser)
 			if err != nil {
 				t.Fatalf("expected the linked apps to be read, got %q", err)
 			}
 
 			writeInfoFile(t, redis.SecretFile("lollipop", redis.Definition.Dokku.Secrets["password"]), "new")
-			if err := updateLinkedAppURLs(context.Background(), input, linked); err != nil {
+			if err := updateLinkedAppURLs(context.Background(), input.repoint(), linked); err != nil {
 				t.Fatalf("expected the linked apps to be updated, got %q", err)
 			}
 
@@ -295,13 +295,13 @@ func TestUpdateLinkedAppURLsWithJDBC(t *testing.T) {
 		Logger:      Ui{Ui: cli.NewMockUi()},
 	}
 
-	linked, err := linkedAppURLs(context.Background(), postgres, "lollipop", input.Logger)
+	linked, err := linkedAppURLs(context.Background(), postgres, "lollipop", input.Logger, linkedAsDefaultUser)
 	if err != nil {
 		t.Fatalf("expected the linked apps to be read, got %q", err)
 	}
 
 	writeInfoFile(t, postgres.SecretFile("lollipop", postgres.Definition.Dokku.Secrets["password"]), "new")
-	if err := updateLinkedAppURLs(context.Background(), input, linked); err != nil {
+	if err := updateLinkedAppURLs(context.Background(), input.repoint(), linked); err != nil {
 		t.Fatalf("expected the linked apps to be updated, got %q", err)
 	}
 

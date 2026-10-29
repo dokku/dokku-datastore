@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -484,13 +485,13 @@ func TestClickhouseUrlFollowsTheScheme(t *testing.T) {
 		t.Fatal("expected a clickhouse definition")
 	}
 
-	scope := definition.Scope{
+	scope := clickhouse.WithDefaultAccount(definition.Scope{
 		ServiceName: "analytics",
 		Database:    "analytics",
 		Host:        "dokku-clickhouse-analytics",
 		Secret:      map[string]string{"password": "hunter2"},
 		Port:        map[string]int{"native": 9000, "http": 8123},
-	}
+	})
 
 	tests := []struct {
 		name     string
@@ -1382,12 +1383,12 @@ func TestJDBCNamesTheAccountTheDSNDoes(t *testing.T) {
 				t.Fatalf("expected a %s definition", test.name)
 			}
 
-			scope := definition.Scope{
+			scope := found.WithDefaultAccount(definition.Scope{
 				Database: "lollipop",
 				Host:     test.host,
 				Secret:   map[string]string{"password": "hun&ter=2"},
 				Port:     map[string]int{"native": test.port},
-			}
+			})
 
 			for _, check := range []struct {
 				body     string
@@ -1627,8 +1628,22 @@ func TestOmnisciNamesTheAccountItMakes(t *testing.T) {
 		t.Fatal("expected an omnisci definition")
 	}
 
-	if !strings.Contains(omnisci.Dokku.DSN, "://omnisci:") {
-		t.Errorf("expected the url to name the omnisci account, got %q", omnisci.Dokku.DSN)
+	// the url names whichever account a link is made as, which is omnisci
+	// unless the link names a user made in the service
+	url, err := definition.Render(omnisci.Dokku.DSN, omnisci.WithDefaultAccount(definition.Scope{
+		ServiceName: "lollipop",
+		Database:    "lollipop",
+		Host:        "dokku-omnisci-lollipop",
+		Scheme:      omnisci.Dokku.Scheme,
+		Secret:      map[string]string{"password": "hunter2"},
+		Port:        map[string]int{"native": 6274},
+	}))
+	if err != nil {
+		t.Fatalf("unable to render the url: %s", err)
+	}
+
+	if !strings.Contains(url, "://omnisci:") {
+		t.Errorf("expected the url to name the omnisci account, got %q", url)
 	}
 
 	if strings.Contains(omnisci.Dokku.DSN, "ServiceName") {
@@ -2451,16 +2466,27 @@ func TestEveryDefinitionRendersWithItsDefaultTargets(t *testing.T) {
 				Scheme:      found.Dokku.Scheme,
 				Secret:      map[string]string{},
 				Port:        map[string]int{},
-				Args:        map[string]string{},
+				// every command is handed the databases and users the service
+				// holds, and the databases and users commands the one they act on
+				Args: map[string]string{
+					"database":  "paintshop",
+					"databases": "lollipop paintshop",
+					"user":      "painter",
+					"users":     "lollipop painter",
+				},
 			}
 			for secret := range found.Dokku.Secrets {
 				scope.Secret[secret] = "hunter2"
 			}
+			scope = found.WithDefaultAccount(scope)
 			for _, port := range found.Service.Ports {
 				scope.Port[port.Name] = port.Target
 			}
 
 			bodies := []string{found.Service.Image, found.Dokku.DSN}
+			if users := found.Dokku.Users; users != nil {
+				bodies = append(bodies, users.Default)
+			}
 			if jdbc := found.Dokku.JDBC; jdbc != nil {
 				bodies = append(bodies, jdbc.URL, jdbc.Username, jdbc.Password)
 			}
@@ -2487,6 +2513,20 @@ func TestEveryDefinitionRendersWithItsDefaultTargets(t *testing.T) {
 			for _, secret := range found.Dokku.Secrets {
 				if secret.Change != nil {
 					commands = append(commands, *secret.Change)
+				}
+			}
+			if databases := found.Dokku.Databases; databases != nil {
+				for _, command := range []*definition.Command{databases.Create, databases.Destroy} {
+					if command != nil {
+						commands = append(commands, *command)
+					}
+				}
+			}
+			if users := found.Dokku.Users; users != nil {
+				for _, command := range []*definition.Command{users.Create, users.Destroy, users.Change} {
+					if command != nil {
+						commands = append(commands, *command)
+					}
 				}
 			}
 			for _, command := range commands {
@@ -2973,5 +3013,154 @@ func TestServiceMemoryDefaults(t *testing.T) {
 		if (memory.Change != nil) != test.changeable {
 			t.Errorf("%s: expected declaring a change to be %t", test.name, test.changeable)
 		}
+	}
+}
+
+// Which datastores a service can hold more than one database and user of is a
+// decision, so it is pinned here rather than left to whichever definitions
+// happen to declare it. Redis has a fixed set of databases rather than ones it
+// makes, and solr and rethinkdb have databases but no users to give them to.
+func TestDatabasesAndUsersAreDeclaredWhereTheDatastoreHasThem(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	tests := map[string]struct {
+		makes bool
+		fixed int
+		users bool
+	}{
+		"clickhouse": {makes: true, users: true},
+		"couchdb":    {makes: true, users: true},
+		"mariadb":    {makes: true, users: true},
+		"mongo":      {makes: true, users: true},
+		"mysql":      {makes: true, users: true},
+		"omnisci":    {makes: true, users: true},
+		"postgres":   {makes: true, users: true},
+		"rabbitmq":   {makes: true, users: true},
+		"redis":      {fixed: 16, users: true},
+		"rethinkdb":  {makes: true},
+		"solr":       {makes: true},
+	}
+
+	for _, name := range loaded.Names() {
+		t.Run(name, func(t *testing.T) {
+			parsed, _ := loaded.Definition(name)
+			expected := tests[parsed.Dokku.Plugin]
+
+			if makes := parsed.Dokku.Databases.Makes(); makes != expected.makes {
+				t.Errorf("expected databases to be made=%t, got %t", expected.makes, makes)
+			}
+
+			fixed := 0
+			if parsed.Dokku.Databases != nil {
+				fixed = parsed.Dokku.Databases.Fixed
+			}
+			if fixed != expected.fixed {
+				t.Errorf("expected %d fixed databases, got %d", expected.fixed, fixed)
+			}
+
+			if users := parsed.Dokku.Users != nil; users != expected.users {
+				t.Errorf("expected users to be declared=%t, got %t", expected.users, users)
+			}
+		})
+	}
+}
+
+// A connect that runs as the same account whatever it is asked for would refuse
+// --user, so every datastore that holds users connects as the one it is given
+func TestConnectRunsAsTheAccountItIsGiven(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	for _, name := range loaded.Names() {
+		parsed, _ := loaded.Definition(name)
+		connect, ok := parsed.Dokku.Commands["connect"]
+		if parsed.Dokku.Users == nil || !ok {
+			continue
+		}
+
+		t.Run(name, func(t *testing.T) {
+			bodies := strings.Join(connect.Exec, " ")
+			for _, value := range connect.Env {
+				bodies += " " + value
+			}
+
+			for _, field := range []string{".Username", ".Password", ".Database"} {
+				if !strings.Contains(bodies, field) {
+					t.Errorf("expected connect to name %s, got %q", field, bodies)
+				}
+			}
+		})
+	}
+}
+
+// The scripts that make and remove databases and users are written once and
+// copied to every postgres definition, as the reset is, and mysql's are
+// mariadb's, given the client each ships, as their password changes are.
+func TestDatabasesAndUsersAreTheSameWhereTheDatastoreIs(t *testing.T) {
+	loaded, err := Load(LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	scripts := func(name string) map[string]string {
+		t.Helper()
+
+		parsed, ok := loaded.Definition(name)
+		if !ok {
+			t.Fatalf("expected a %s definition", name)
+		}
+
+		commands := map[string]*definition.Command{
+			"databases.create":  parsed.Dokku.Databases.Create,
+			"databases.destroy": parsed.Dokku.Databases.Destroy,
+		}
+		if users := parsed.Dokku.Users; users != nil {
+			commands["users.create"] = users.Create
+			commands["users.destroy"] = users.Destroy
+			commands["users.change"] = users.Change
+		}
+
+		found := map[string]string{}
+		for key, command := range commands {
+			// the script, without the label and the arguments after it
+			if command == nil || len(command.Exec) < 3 || command.Exec[0] != "sh" {
+				t.Fatalf("expected %s's %s to be an inline script, got %+v", name, key, command)
+			}
+			found[key] = command.Exec[2]
+		}
+
+		return found
+	}
+
+	postgres := loaded.NamesFor("postgres")
+	for _, name := range postgres[1:] {
+		if !maps.Equal(scripts(name), scripts(postgres[0])) {
+			t.Errorf("expected %s to make its databases and users as %s does", name, postgres[0])
+		}
+	}
+
+	if !maps.Equal(scripts("mariadb"), scripts("mysql")) {
+		t.Error("expected mariadb to make its databases and users as mysql does")
+	}
+
+	solr := loaded.NamesFor("solr")
+	for _, name := range solr[1:] {
+		if !maps.Equal(scripts(name), scripts(solr[0])) {
+			t.Errorf("expected %s to make its cores as %s does", name, solr[0])
+		}
+	}
+
+	// a user's password is changed the way the service's own is
+	mysql, ok := loaded.Definition("mysql")
+	if !ok {
+		t.Fatal("expected a mysql definition")
+	}
+	if scripts("mysql")["users.change"] != mysql.Dokku.Secrets["password"].Change.Exec[2] {
+		t.Error("expected mysql to change a user's password as it changes its own")
 	}
 }

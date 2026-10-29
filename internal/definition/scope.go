@@ -22,6 +22,17 @@ type Scope struct {
 	Title         string
 	Variable      string
 
+	// the account a template is rendered for. Database above is the database
+	// it addresses, and DefaultDatabase the one named for the service, which
+	// is the same unless a link or a command named another. Username and
+	// Password are the account, and DefaultUsername the one the service was
+	// created with. A dsn leaves out what is the default, so that a url made
+	// before a service could hold more than one of each is the url it has now.
+	DefaultDatabase string
+	Username        string
+	Password        string
+	DefaultUsername string
+
 	// image
 	Image        string
 	ImageVersion string

@@ -9,12 +9,18 @@
 # and the response.
 set -eo pipefail
 
-ACTION="${1:?usage: $0 <write|clobber|read> <service>}"
-SERVICE="${2:?usage: $0 <write|clobber|read> <service>}"
+ACTION="${1:?usage: $0 <write|clobber|read|write-as|read-as> <service> [<user> <password> <database>]}"
+SERVICE="${2:?usage: $0 <write|clobber|read|write-as|read-as> <service> [<user> <password> <database>]}"
 CONTAINER="dokku.rethinkdb.$SERVICE"
 # the database the service was created with, which is the service name with
 # anything a datastore would refuse in one replaced, rather than the name itself
 DATABASE="$(cat "$DOKKU_LIB_ROOT/services/rethinkdb/$SERVICE/DATABASE_NAME")"
+
+# the -as actions do the same in a database named rather than the service's
+# own. Rethinkdb has no users, so the user and password are ignored
+if [[ "$ACTION" == *-as ]]; then
+  DATABASE="${5:?usage: $0 $ACTION <service> <user> <password> <database>}"
+fi
 
 # the terms the queries below use, as the protocol numbers them
 START=1
@@ -59,13 +65,13 @@ put() {
 }
 
 case "$ACTION" in
-write)
+write | write-as)
   put known
   ;;
 clobber)
   put clobbered
   ;;
-read)
+read | read-as)
   # a table comes back a moment after the server does, so a read straight
   # after a start waits for it rather than finding nothing
   query "[$WAIT,[$table]]" >/dev/null

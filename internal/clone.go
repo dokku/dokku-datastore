@@ -105,7 +105,8 @@ type CloneServiceInput struct {
 // service itself, and so are what a clone of it starts from.
 //
 // What is left out is left out on purpose. The passwords are generated for each
-// service unless the clone is given its own, the database name comes from the service name, an exposed port
+// service unless the clone is given its own, though the users made in a service
+// keep theirs, as cloneAccounts says, the database name comes from the service name, an exposed port
 // would clash with the source's on the host, links belong to the apps, and the
 // backup credentials, schedule and encryption are secrets whose copy would
 // ship a second set of backups to the same bucket. The backup object name is
@@ -430,24 +431,84 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 
 	input.Logger.Info(fmt.Sprintf("Copying data from %s to %s", input.ServiceName, input.NewServiceName))
 
-	// the dump is staged on disk rather than piped, so that a failed export does
-	// not hand a truncated stream to the import
+	// the service's own database alone, unlike a backup. A dump of every
+	// database loads each one under the name it was exported from, so the
+	// source's own would land beside the new service's rather than in it.
+	if err := copyDatabase(ctx, input, ""); err != nil {
+		return err
+	}
+
+	if err := cloneAccounts(ctx, input); err != nil {
+		return err
+	}
+
+	input.Logger.Header2("Done") //nolint:errcheck
+	return nil
+}
+
+// cloneAccounts makes the users and databases made in the source in the clone,
+// and copies the data of each database across.
+//
+// The users come first, so that each database is made with every user given
+// access to it, and each is given the password it has in the source: unlike
+// the service's own, whose password the clone generates, a made user is one an
+// operator handed to an app by name, and relinking the app to the clone as it
+// should not need a new password. A datastore with a fixed set of databases
+// has every one of them in the dump of its own, so only its users are made.
+func cloneAccounts(ctx context.Context, input CloneServiceInput) error {
+	for _, user := range service.CreatedUsers(input.Datastore, input.ServiceName) {
+		input.Logger.Info(fmt.Sprintf("Creating user %s in %s", user, input.NewServiceName))
+		password := service.UserPassword(input.Datastore, input.ServiceName, user)
+		if err := input.Datastore.CreateUser(ctx, input.NewServiceName, user, password); err != nil {
+			return fmt.Errorf("unable to clone user %s: %w", user, err)
+		}
+	}
+
+	if !input.Datastore.Definition.Dokku.Databases.Makes() {
+		return nil
+	}
+
+	for _, database := range service.CreatedDatabases(input.Datastore, input.ServiceName) {
+		input.Logger.Info(fmt.Sprintf("Creating database %s in %s", database, input.NewServiceName))
+		if err := input.Datastore.CreateDatabase(ctx, input.NewServiceName, database); err != nil {
+			return fmt.Errorf("unable to clone database %s: %w", database, err)
+		}
+
+		if err := copyDatabase(ctx, input, database); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// copyDatabase copies the data of one database of the source into the same
+// database of the clone, the service's own when it is empty.
+//
+// The dump is staged on disk rather than piped, so that a failed export does
+// not hand a truncated stream to the import.
+func copyDatabase(ctx context.Context, input CloneServiceInput, database string) error {
+	source := input.ServiceName
+	target := input.NewServiceName
+	if database != "" {
+		source = fmt.Sprintf("database %s of %s", database, input.ServiceName)
+		target = fmt.Sprintf("database %s of %s", database, input.NewServiceName)
+	}
+
 	dumpFile, err := os.CreateTemp("", "dokku-datastore-clone")
 	if err != nil {
 		return fmt.Errorf("unable to create a temporary file: %w", err)
 	}
 	defer os.Remove(dumpFile.Name())
 
-	// the service's own database alone, unlike a backup. A dump of every
-	// database loads each one under the name it was exported from, so the
-	// source's own would land beside the new service's rather than in it.
 	if err := input.Datastore.ExportService(ctx, service.ExportServiceInput{
+		Database:    database,
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 		Writer:      dumpFile,
 	}); err != nil {
 		dumpFile.Close()
-		return fmt.Errorf("unable to export %s: %w", input.ServiceName, err)
+		return fmt.Errorf("unable to export %s: %w", source, err)
 	}
 
 	if _, err := dumpFile.Seek(0, io.SeekStart); err != nil {
@@ -456,18 +517,18 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 	}
 
 	if err := input.Datastore.ImportService(ctx, service.ImportServiceInput{
+		Database:    database,
 		Datastore:   input.Datastore,
 		Reader:      dumpFile,
 		ServiceName: input.NewServiceName,
 	}); err != nil {
 		dumpFile.Close()
-		return fmt.Errorf("unable to import into %s: %w", input.NewServiceName, err)
+		return fmt.Errorf("unable to import into %s: %w", target, err)
 	}
 
 	if err := dumpFile.Close(); err != nil {
 		return fmt.Errorf("unable to close the temporary file: %w", err)
 	}
 
-	input.Logger.Header2("Done") //nolint:errcheck
 	return nil
 }

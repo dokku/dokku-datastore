@@ -50,7 +50,11 @@ Available commands are:
     clone                                 Clones a service onto a new one
     connect                               Connects to a service with its native client
     create                                Creates a new datastore service
+    create-database                       Creates a database in a service
+    create-user                           Creates a user in a service
     destroy                               Destroys a datastore service
+    destroy-database                      Destroys a database created in a service
+    destroy-user                          Destroys a user created in a service
     enter                                 Enters a service or runs a command in it
     exists                                Checks if a service exists
     export                                Exports a service's data to stdout or a file
@@ -70,6 +74,7 @@ Available commands are:
     reexpose                              Applies a service's expose settings to its exposed ports
     restart                               Restarts a service
     set                                   Sets or clears a property for a service
+    set-user-password                     Changes the password of a user created in a service
     start                                 Starts a service
     stop                                  Stops a service and removes the container
     trigger-cron-entries                  Lists the scheduled backups dokku writes into its crontab
@@ -1247,6 +1252,50 @@ dokku postgres:link lollipop spring-app --jdbc
 # unsets all four
 dokku postgres:unlink lollipop spring-app
 ```
+
+## Multiple databases and users
+
+A service runs in a container of its own, with one database and one user, so every app that needed a database of its own needed a service of its own, and on a small host each of those containers takes memory. A service may now hold databases and users beside the ones it was created with, and an app may be linked to any database and as any user the service holds, so several apps can share one container. Services are still created with one database and one user, and nothing changes for a service that is never given more.
+
+```shell
+# a database and a user beside the service's own
+dokku postgres:create-database lollipop paintshop
+dokku postgres:create-user lollipop painter
+
+# an app linked to that database as that user, whose DATABASE_URL names both
+dokku postgres:link lollipop playground --database paintshop --user painter
+
+# the names a service holds, never the passwords
+dokku postgres:info lollipop --databases
+dokku postgres:info lollipop --users
+```
+
+`create-user` generates a password the way `create` does when none is given, and one of your own may follow the user name. `set-user-password` gives a user a new one, generated the same way when none is given, and rewrites the url of every app linked as that user, restarting it unless `--no-restart` is given. The apps linked as any other user hold nothing the change touches and are left alone, and the same is true of the password of the user the service was created with, which is still changed with `set lollipop password`. `destroy-database` and `destroy-user` remove what was made, asking first unless `--force` is given, and refuse while an app is linked to it. The database and user a service was created with are only removed with the service. A name may only contain lowercase letters, digits and `_`, start with a letter or `_`, and be at most 32 characters long, and the names a datastore keeps for itself are refused.
+
+Every user made in a service can use every database it holds, including the ones made after the user, but is not a superuser. On postgres each is a member of a role named `dokku_users`, which every database grants what is in its `public` schema, along with whatever any user makes there later. On mysql and mariadb each is granted every privilege on every database the service holds, but none on the server's own and no grant option. Mongo, couchdb, clickhouse, rabbitmq and omnisci grant each user every database the same way, a database being a vhost on rabbitmq. Redis users are acl users with the default user's permissions, kept in `users.acl` in the data volume. Each database is given every user the service holds when it is made, so making the database or the user first comes to the same thing.
+
+| datastore                                   | databases                                  | users |
+| ------------------------------------------- | ------------------------------------------ | ----- |
+| clickhouse, couchdb, mariadb, mongo, mysql  | made with `create-database`                | yes   |
+| omnisci, postgres and every postgres flavor | made with `create-database`                | yes   |
+| rabbitmq                                    | vhosts, made with `create-database`        | yes   |
+| redis                                       | its sixteen, numbered from 0               | yes   |
+| rethinkdb, solr                             | made with `create-database`, cores on solr | no    |
+
+Redis always holds sixteen databases, so there are none to make, and an app is linked to one by its index with `link --database 3`. The bound is redis's default rather than the `databases` line of the service's own config. A clickhouse or redis service made before this only takes users once its container has been made again, since the server is only told where to keep them as it starts: `create-user` says so, and `stop` and then `start` make it again. A clickhouse url using the `http` scheme names no database, so `--database` changes the native url alone.
+
+`link` records the database and user an app was linked on in the service's `link-database` and `link-user` properties, so `unlink`, `promote`, a password change and renaming or cloning an app find the url it was given. A link on the service's own database and user records nothing, which is what every link made before looks like. An app that is already linked has to be unlinked and linked again to be moved to another database or user.
+
+`connect` takes `--database` and `--user`, and `export`, `import` and `reset` take `--database`, each addressing that database or user in place of the service's own. A command that acts on the whole service refuses them rather than ignoring them, as redis's `export`, which dumps every database at once, does with `--database`. `export --database` cannot be combined with `--all-databases`. A `reset` of the service's own database on couchdb, rabbitmq and rethinkdb, which empties every database an app could have written to, leaves the ones made with `create-database` alone, and a `reset` of one of those empties it alone. A backup is unchanged, and holds the databases made in a service only where it holds every database.
+
+```shell
+dokku postgres:connect lollipop --database paintshop --user painter
+dokku postgres:export lollipop --database paintshop > paintshop.dump
+dokku postgres:import lollipop --database paintshop < paintshop.dump
+dokku postgres:reset lollipop --database paintshop
+```
+
+A `clone` makes every user and database its source made, and copies the data of each database across through the same export and import its own database is copied with. Unlike the password of the user the service was created with, which a clone generates afresh, each user keeps its password, so an app linked to the clone as that user keeps working with what it already holds.
 
 ## Hiding services from users
 

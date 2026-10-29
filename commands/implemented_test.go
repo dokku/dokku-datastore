@@ -100,6 +100,35 @@ func TestRequireImplemented(t *testing.T) {
 			subcommand: "clone",
 		},
 		{
+			name:       "creating a database where they are made",
+			datastore:  service.Datastores["postgres"],
+			subcommand: "create-database",
+		},
+		{
+			// redis has sixteen databases from the start, and none to make
+			name:          "creating a database where there is a fixed set",
+			datastore:     service.Datastores["redis"],
+			subcommand:    "create-database",
+			unimplemented: true,
+		},
+		{
+			name:       "creating a user where there are users",
+			datastore:  service.Datastores["redis"],
+			subcommand: "create-user",
+		},
+		{
+			name:          "changing a user's password where there are no users",
+			datastore:     service.Datastores["solr"],
+			subcommand:    "set-user-password",
+			unimplemented: true,
+		},
+		{
+			name:          "destroying a database where there are none",
+			datastore:     service.Datastores["memcached"],
+			subcommand:    "destroy-database",
+			unimplemented: true,
+		},
+		{
 			// everything a datastore does not choose is always available
 			name:       "a command no definition decides",
 			datastore:  withoutVerbs(t),

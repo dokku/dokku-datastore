@@ -3,8 +3,8 @@
 # survived rather than only that the service came back up.
 set -eo pipefail
 
-ACTION="${1:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra> <service>}"
-SERVICE="${2:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra> <service>}"
+ACTION="${1:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|write-as|read-as> <service> [<user> <password> <database>]}"
+SERVICE="${2:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|write-as|read-as> <service> [<user> <password> <database>]}"
 CONTAINER="dokku.couchdb.$SERVICE"
 PASSWORD="$(cat "$DOKKU_LIB_ROOT/services/couchdb/$SERVICE/PASSWORD")"
 # the database the service was created with, which is the service name with
@@ -17,6 +17,17 @@ EXTRA_DATABASE="probe_extra"
 
 couch() {
   docker container exec "$CONTAINER" curl -s -u "$SERVICE:$PASSWORD" "$@"
+}
+
+# the -as actions do the same as a user, on a database, each named rather than
+# the service's own, which is how a database or user made in the service is
+# shown to be one a linked app can reach
+AS_USER="${3:-}"
+AS_PASSWORD="${4:-}"
+AS_DATABASE="${5:-}"
+
+couch_as() {
+  docker container exec "$CONTAINER" curl -s -u "$AS_USER:$AS_PASSWORD" "$@"
 }
 
 case "$ACTION" in
@@ -46,6 +57,15 @@ clobber-extra)
   ;;
 read-extra)
   couch "http://127.0.0.1:5984/$EXTRA_DATABASE/probe" | sed 's/.*"value":"\([^"]*\)".*/\1/'
+  ;;
+write-as)
+  # written over the record if there is one, which has to be named by revision
+  rev="$(couch_as "http://127.0.0.1:5984/$AS_DATABASE/probe_account" | sed -n 's/.*"_rev":"\([^"]*\)".*/\1/p')"
+  couch_as -X PUT "http://127.0.0.1:5984/$AS_DATABASE/probe_account${rev:+?rev=$rev}" \
+    -H 'Content-Type: application/json' -d '{"value":"known"}' >/dev/null
+  ;;
+read-as)
+  couch_as "http://127.0.0.1:5984/$AS_DATABASE/probe_account" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p'
   ;;
 *)
   echo "unknown action $ACTION" >&2

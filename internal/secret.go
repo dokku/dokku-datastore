@@ -91,6 +91,9 @@ type linkedAppURL struct {
 	// appName is the linked app
 	appName string
 
+	// account is the database and user the app was linked on
+	account service.Account
+
 	// scheme is the scheme the app asked for, empty for the datastore's own
 	scheme string
 
@@ -143,7 +146,7 @@ func ChangeServiceSecret(ctx context.Context, input ChangeServiceSecretInput) er
 		}
 	}
 
-	linked, err := linkedAppURLs(ctx, input.Datastore, input.ServiceName, input.Logger)
+	linked, err := linkedAppURLs(ctx, input.Datastore, input.ServiceName, input.Logger, linkedAsDefaultUser)
 	if err != nil {
 		return err
 	}
@@ -175,12 +178,31 @@ func ChangeServiceSecret(ctx context.Context, input ChangeServiceSecretInput) er
 		})
 	}
 
-	return errors.Join(restartErr, updateLinkedAppURLs(ctx, input, linked))
+	return errors.Join(restartErr, updateLinkedAppURLs(ctx, input.repoint(), linked))
+}
+
+// repoint is what repointing the apps linked to the service needs of a change
+func (input ChangeServiceSecretInput) repoint() repointInput {
+	return repointInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		Changed:     input.Property.Name,
+		NoRestart:   input.NoRestart,
+		Logger:      input.Logger,
+	}
+}
+
+// linkedAsDefaultUser reports whether an app is linked as the account the
+// service was created with, which is the account its own password belongs to
+func linkedAsDefaultUser(account service.Account) bool {
+	return account.User == ""
 }
 
 // linkedAppURLs are the urls the apps linked to a service hold, read while
-// they still name the service as it is
-func linkedAppURLs(ctx context.Context, s *service.Datastore, serviceName string, logger Ui) ([]linkedAppURL, error) {
+// they still name the service as it is. Only the apps whose link the filter
+// keeps are read, since a password belongs to one account and an app linked as
+// another holds nothing it changes.
+func linkedAppURLs(ctx context.Context, s *service.Datastore, serviceName string, logger Ui, keep func(service.Account) bool) ([]linkedAppURL, error) {
 	apps := service.LinkedApps(ctx, service.LinkedAppsInput{
 		Datastore:   s,
 		ServiceName: serviceName,
@@ -188,13 +210,18 @@ func linkedAppURLs(ctx context.Context, s *service.Datastore, serviceName string
 
 	linked := make([]linkedAppURL, 0, len(apps))
 	for _, appName := range apps {
+		account := service.LinkAccount(s, serviceName, appName)
+		if !keep(account) {
+			continue
+		}
+
 		environment, err := AppEnvironment(ctx, appName)
 		if err != nil {
 			return nil, err
 		}
 
 		scheme := SchemeForApp(s, environment)
-		serviceURL := s.URL(serviceName, scheme)
+		serviceURL := s.AccountURL(serviceName, account, scheme)
 		keys := LinkedConfigKeys(environment, service.LinkConfigKeys(s, serviceName, appName), serviceURL)
 		jdbcKeys := linkedJDBCKeys(s, serviceName, appName, environment)
 		if len(keys) == 0 && len(jdbcKeys) == 0 {
@@ -204,9 +231,10 @@ func linkedAppURLs(ctx context.Context, s *service.Datastore, serviceName string
 			continue
 		}
 
-		jdbc, _ := s.JDBC(serviceName)
+		jdbc, _ := s.AccountJDBC(serviceName, account)
 		linked = append(linked, linkedAppURL{
 			appName:     appName,
+			account:     account,
 			scheme:      scheme,
 			url:         serviceURL,
 			keys:        keys,
@@ -219,6 +247,25 @@ func linkedAppURLs(ctx context.Context, s *service.Datastore, serviceName string
 	return linked, nil
 }
 
+// repointInput is what updateLinkedAppURLs needs to know of a change
+type repointInput struct {
+	// Datastore is the service's datastore
+	Datastore *service.Datastore
+
+	// ServiceName is the service that changed
+	ServiceName string
+
+	// Changed names what changed, for the error an app left behind is given
+	Changed string
+
+	// NoRestart leaves the linked apps running on the config they had until
+	// they are next restarted
+	NoRestart bool
+
+	// Logger reports what is done
+	Logger Ui
+}
+
 // updateLinkedAppURLs points every linked app at the service url as it is now,
 // replacing only the part of each value that names the service, so that a
 // scheme or querystring an app has around it is kept. The jdbc url is replaced
@@ -227,20 +274,20 @@ func linkedAppURLs(ctx context.Context, s *service.Datastore, serviceName string
 // Every app is updated even when one cannot be, since an app left out only
 // because another failed would be one more app holding a url that no longer
 // works.
-func updateLinkedAppURLs(ctx context.Context, input ChangeServiceSecretInput, linked []linkedAppURL) error {
+func updateLinkedAppURLs(ctx context.Context, input repointInput, linked []linkedAppURL) error {
 	failed := []error{}
 	for _, app := range linked {
 		entries := map[string]string{}
 
 		before := urlAfterScheme(app.url)
-		after := urlAfterScheme(input.Datastore.URL(input.ServiceName, app.scheme))
+		after := urlAfterScheme(input.Datastore.AccountURL(input.ServiceName, app.account, app.scheme))
 		if before != after {
 			for _, key := range app.keys {
 				entries[key] = strings.ReplaceAll(app.environment[key], before, after)
 			}
 		}
 
-		if jdbc, ok := input.Datastore.JDBC(input.ServiceName); ok && jdbc != app.jdbc {
+		if jdbc, ok := input.Datastore.AccountJDBC(input.ServiceName, app.account); ok && jdbc != app.jdbc {
 			for _, key := range app.jdbcKeys {
 				value := app.environment[key]
 				updated := strings.ReplaceAll(value, app.jdbc.URL, jdbc.URL)
@@ -268,9 +315,70 @@ func updateLinkedAppURLs(ctx context.Context, input ChangeServiceSecretInput, li
 		}
 
 		if err := SetAppConfig(ctx, app.appName, entries, !input.NoRestart); err != nil {
-			failed = append(failed, fmt.Errorf("%s was changed, but app %s still holds the old url: %w", input.Property.Name, app.appName, err))
+			failed = append(failed, fmt.Errorf("%s was changed, but app %s still holds the old url: %w", input.Changed, app.appName, err))
 		}
 	}
 
 	return errors.Join(failed...)
+}
+
+// ChangeUserPasswordInput is the input for the ChangeUserPassword function
+type ChangeUserPasswordInput struct {
+	// Datastore is the service's datastore
+	Datastore *service.Datastore
+
+	// ServiceName is the service holding the user
+	ServiceName string
+
+	// User is the account made in the service whose password is changed
+	User string
+
+	// Password is what the password is changed to, generated when empty
+	Password string
+
+	// NoRestart leaves the linked apps running on the config they had until
+	// they are next restarted
+	NoRestart bool
+
+	// Logger reports what is done
+	Logger Ui
+}
+
+// ChangeUserPassword changes the password of an account made in a service: in
+// the datastore, in the file the service keeps it in, and in the url every app
+// linked as that account holds. The apps linked as any other account hold
+// nothing the change touches, and are left alone.
+func ChangeUserPassword(ctx context.Context, input ChangeUserPasswordInput) error {
+	if err := service.ValidateCreatedUser(input.Datastore, input.ServiceName, input.User); err != nil {
+		return err
+	}
+
+	password, err := accountPassword(input.Datastore, input.Password)
+	if err != nil {
+		return err
+	}
+
+	if service.UserPassword(input.Datastore, input.ServiceName, input.User) == password {
+		input.Logger.Info(fmt.Sprintf("The password of user %s is unchanged, so neither %s nor its linked apps were touched", input.User, input.ServiceName))
+		return nil
+	}
+
+	linked, err := linkedAppURLs(ctx, input.Datastore, input.ServiceName, input.Logger, func(account service.Account) bool {
+		return account.User == input.User
+	})
+	if err != nil {
+		return err
+	}
+
+	if err := input.Datastore.ChangeUserPassword(ctx, input.ServiceName, input.User, password); err != nil {
+		return err
+	}
+
+	return updateLinkedAppURLs(ctx, repointInput{
+		Datastore:   input.Datastore,
+		ServiceName: input.ServiceName,
+		Changed:     fmt.Sprintf("the password of user %s", input.User),
+		NoRestart:   input.NoRestart,
+		Logger:      input.Logger,
+	}, linked)
 }

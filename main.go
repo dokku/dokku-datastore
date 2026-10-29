@@ -137,6 +137,21 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"label": func() (cli.Command, error) {
 			return &commands.LabelCommand{Meta: meta}, nil
 		},
+		"create-database": func() (cli.Command, error) {
+			return &commands.CreateDatabaseCommand{Meta: meta}, nil
+		},
+		"create-user": func() (cli.Command, error) {
+			return &commands.CreateUserCommand{Meta: meta}, nil
+		},
+		"destroy-database": func() (cli.Command, error) {
+			return &commands.DestroyDatabaseCommand{Meta: meta}, nil
+		},
+		"destroy-user": func() (cli.Command, error) {
+			return &commands.DestroyUserCommand{Meta: meta}, nil
+		},
+		"set-user-password": func() (cli.Command, error) {
+			return &commands.SetUserPasswordCommand{Meta: meta}, nil
+		},
 		"logs": func() (cli.Command, error) {
 			return &commands.LogsCommand{Meta: meta}, nil
 		},

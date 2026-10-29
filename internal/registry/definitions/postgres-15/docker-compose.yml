@@ -50,17 +50,164 @@ x-dokku:
   alt_alias: DOKKU_POSTGRES
 
   # the account is the image's own superuser rather than one named for the
-  # service, which is what the bash plugin hands over
-  dsn: "{{ .Scheme }}://postgres:{{ .Secret.password }}@{{ .Host }}:{{ .Port.native }}/{{ .Database }}"
+  # service, which is what the bash plugin hands over, unless the link names a
+  # user made in the service
+  dsn: "{{ .Scheme }}://{{ .Username }}:{{ .Password }}@{{ .Host }}:{{ .Port.native }}/{{ .Database }}"
 
   # handed over alongside the dsn by link --jdbc, for java drivers that cannot
   # read it. They take no credentials in the userinfo, so they go in the query
   jdbc:
-    url: "jdbc:postgresql://{{ .Host }}:{{ .Port.native }}/{{ .Database }}?user=postgres&password={{ urlescape .Secret.password }}"
-    username: postgres
-    password: "{{ .Secret.password }}"
+    url: "jdbc:postgresql://{{ .Host }}:{{ .Port.native }}/{{ .Database }}?user={{ urlescape .Username }}&password={{ urlescape .Password }}"
+    username: "{{ .Username }}"
+    password: "{{ .Password }}"
 
   wait: native
+
+  # the databases and users a service holds beside its own. Every user made in
+  # the service is a member of dokku_users, a role that is not a superuser and
+  # is made the first time it is needed. Each database grants that role what
+  # is in its public schema, and has whatever any of the service's users makes
+  # there later granted to it too, so that every user can use every database
+  # without any being able to become the superuser. Names are checked before
+  # they get here, so they are quoted rather than escaped, and a password is
+  # written to psql's stdin rather than passed as an argument. Every postgres
+  # definition carries the same text, which a test holds them to.
+  databases:
+    create:
+      exec:
+        - sh
+        - -c
+        - |
+          set -e
+          sql() {
+            psql -h localhost -U postgres -w -qtAX -v ON_ERROR_STOP=1 -d "$1"
+          }
+          group() {
+            echo "SELECT 'CREATE ROLE dokku_users NOLOGIN' WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dokku_users') \gexec" | sql postgres >/dev/null
+          }
+          share() {
+            database="$1"
+            shift
+            {
+              printf 'GRANT ALL ON DATABASE "%s" TO dokku_users;\n' "$database"
+              printf 'GRANT ALL ON SCHEMA public TO dokku_users;\n'
+              for kind in TABLES SEQUENCES FUNCTIONS; do
+                printf 'GRANT ALL ON ALL %s IN SCHEMA public TO dokku_users;\n' "$kind"
+                for role in "$@"; do
+                  printf 'ALTER DEFAULT PRIVILEGES FOR ROLE "%s" IN SCHEMA public GRANT ALL ON %s TO dokku_users;\n' "$role" "$kind"
+                done
+              done
+            } | sql "$database" >/dev/null
+          }
+          group
+          printf 'CREATE DATABASE "%s";\n' "$1" | sql postgres >/dev/null
+          database="$1"
+          shift
+          share "$database" $*
+        - dokku-postgres-create-database
+        - "{{ .Args.database }}"
+        - "{{ .Args.users }}"
+      env:
+        PGPASSWORD: "{{ .Secret.password }}"
+        PGOPTIONS: "-c client_min_messages=warning"
+    destroy:
+      exec:
+        - sh
+        - -c
+        - |
+          set -e
+          printf 'DROP DATABASE "%s" WITH (FORCE);\n' "$1" |
+            psql -h localhost -U postgres -w -qtAX -v ON_ERROR_STOP=1 -d postgres >/dev/null
+        - dokku-postgres-destroy-database
+        - "{{ .Args.database }}"
+      env:
+        PGPASSWORD: "{{ .Secret.password }}"
+        PGOPTIONS: "-c client_min_messages=warning"
+
+  users:
+    default: postgres
+    secret: password
+    reserved: [dokku_users, public]
+    create:
+      exec:
+        - sh
+        - -c
+        - |
+          set -e
+          sql() {
+            psql -h localhost -U postgres -w -qtAX -v ON_ERROR_STOP=1 -d "$1"
+          }
+          group() {
+            echo "SELECT 'CREATE ROLE dokku_users NOLOGIN' WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dokku_users') \gexec" | sql postgres >/dev/null
+          }
+          share() {
+            database="$1"
+            shift
+            {
+              printf 'GRANT ALL ON DATABASE "%s" TO dokku_users;\n' "$database"
+              printf 'GRANT ALL ON SCHEMA public TO dokku_users;\n'
+              for kind in TABLES SEQUENCES FUNCTIONS; do
+                printf 'GRANT ALL ON ALL %s IN SCHEMA public TO dokku_users;\n' "$kind"
+                for role in "$@"; do
+                  printf 'ALTER DEFAULT PRIVILEGES FOR ROLE "%s" IN SCHEMA public GRANT ALL ON %s TO dokku_users;\n' "$role" "$kind"
+                done
+              done
+            } | sql "$database" >/dev/null
+          }
+          user="$1"
+          databases="$2"
+          users="$3"
+          group
+          password="$(printf '%s' "$NEW_PASSWORD" | sed "s/'/''/g")"
+          printf "CREATE ROLE \"%s\" LOGIN IN ROLE dokku_users PASSWORD '%s';\n" "$user" "$password" | sql postgres >/dev/null
+          for database in $databases; do
+            share "$database" $users "$user"
+          done
+        - dokku-postgres-create-user
+        - "{{ .Args.user }}"
+        - "{{ .Args.databases }}"
+        - "{{ .Args.users }}"
+      env:
+        PGPASSWORD: "{{ .Secret.password }}"
+        PGOPTIONS: "-c client_min_messages=warning"
+        NEW_PASSWORD: "{{ .NewSecret }}"
+
+    # what the user owns in each database is handed to postgres rather than
+    # dropped with it, so that the data an app made as the user outlives it
+    destroy:
+      exec:
+        - sh
+        - -c
+        - |
+          set -e
+          sql() {
+            psql -h localhost -U postgres -w -qtAX -v ON_ERROR_STOP=1 -d "$1"
+          }
+          user="$1"
+          for database in $2; do
+            printf 'REASSIGN OWNED BY "%s" TO postgres;\nDROP OWNED BY "%s";\n' "$user" "$user" | sql "$database" >/dev/null
+          done
+          printf 'DROP ROLE "%s";\n' "$user" | sql postgres >/dev/null
+        - dokku-postgres-destroy-user
+        - "{{ .Args.user }}"
+        - "{{ .Args.databases }}"
+      env:
+        PGPASSWORD: "{{ .Secret.password }}"
+        PGOPTIONS: "-c client_min_messages=warning"
+    change:
+      exec:
+        - sh
+        - -c
+        - |
+          set -e
+          password="$(printf '%s' "$NEW_PASSWORD" | sed "s/'/''/g")"
+          printf "ALTER ROLE \"%s\" PASSWORD '%s';\n" "$1" "$password" |
+            psql -h localhost -U postgres -w -qtAX -v ON_ERROR_STOP=1 -d postgres >/dev/null
+        - dokku-postgres-change-user-password
+        - "{{ .Args.user }}"
+      env:
+        PGPASSWORD: "{{ .Secret.password }}"
+        NEW_PASSWORD: "{{ .NewSecret }}"
 
   secrets:
     password:
@@ -368,9 +515,9 @@ x-dokku:
     # the password goes in PGPASSWORD rather than on the command line, which is
     # what the bash plugin does too
     connect:
-      exec: ["psql", "-v", "ON_ERROR_STOP=1", "-h", "localhost", "-U", "postgres", "{{ .Database }}"]
+      exec: ["psql", "-v", "ON_ERROR_STOP=1", "-h", "localhost", "-U", "{{ .Username }}", "{{ .Database }}"]
       env:
-        PGPASSWORD: "{{ .Secret.password }}"
+        PGPASSWORD: "{{ .Password }}"
         LANG: C.UTF-8
         LC_ALL: C.UTF-8
 
@@ -492,6 +639,10 @@ x-dokku:
     # mounted into a container made after it was added, and a reset runs in the
     # container the service already has. Every postgres definition carries the
     # same text, which a test holds them to.
+    #
+    # a database the users made in the service share has what it grants their
+    # role made again too, as create-database made it, since those grants live
+    # in the database and go with it.
     reset:
       exec:
         - sh
@@ -535,8 +686,25 @@ x-dokku:
           if [ -n "$extensions" ]; then
             printf '%s\n' "$extensions" | sql "$database" >/dev/null
           fi
+          shared="$(sql postgres <<'SQL'
+          SELECT 1 FROM pg_roles WHERE rolname = 'dokku_users';
+          SQL
+          )"
+          if [ -n "$shared" ]; then
+            shift
+            {
+              printf 'GRANT ALL ON DATABASE "%s" TO dokku_users;\n' "$database"
+              printf 'GRANT ALL ON SCHEMA public TO dokku_users;\n'
+              for kind in TABLES SEQUENCES FUNCTIONS; do
+                for role in $*; do
+                  printf 'ALTER DEFAULT PRIVILEGES FOR ROLE "%s" IN SCHEMA public GRANT ALL ON %s TO dokku_users;\n' "$role" "$kind"
+                done
+              done
+            } | sql "$database" >/dev/null
+          fi
         - dokku-postgres-reset
         - "{{ .Database }}"
+        - "{{ .Args.users }}"
       env:
         PGPASSWORD: "{{ .Secret.password }}"
         PGOPTIONS: "-c client_min_messages=warning"

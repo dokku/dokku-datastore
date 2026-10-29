@@ -28,6 +28,8 @@ type ImportCommand struct {
 	file string
 	// allDatabases loads a dump of every database in the service
 	allDatabases bool
+	// database is the database to import into in place of the service's own
+	database string
 }
 
 // Name returns the name of the command
@@ -90,6 +92,7 @@ func (c *ImportCommand) FlagSet() *flag.FlagSet {
 	c.GlobalFlags(f)
 	f.StringVarP(&c.file, "file", "f", "", "a file on the dokku host to import instead of reading stdin")
 	f.BoolVar(&c.allDatabases, "all-databases", false, "load a dump of every database in the service, as written by export --all-databases or a backup")
+	f.StringVar(&c.database, "database", "", "the database in the service to import into, in place of the one named for the service")
 	return f
 }
 
@@ -101,6 +104,7 @@ func (c *ImportCommand) AutocompleteFlags() complete.Flags {
 		complete.Flags{
 			"--file":          complete.PredictFiles("*"),
 			"--all-databases": complete.PredictNothing,
+			"--database":      complete.PredictAnything,
 		},
 	)
 }
@@ -212,6 +216,7 @@ func (c *ImportCommand) Run(args []string) int {
 		ServiceName:  serviceName,
 		ExtraArgs:    extraArgs,
 		AllDatabases: c.allDatabases,
+		Database:     c.database,
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
@@ -259,5 +264,5 @@ func importSource(path string, stdin *os.File) (io.ReadCloser, error) {
 
 // DocumentsFlag reports whether a flag is described for a datastore
 func (c *ImportCommand) DocumentsFlag(name string, data internal.DocumentationData) bool {
-	return documentsAllDatabases(name, data)
+	return documentsAllDatabases(name, data) && documentsDatabase(name, data)
 }

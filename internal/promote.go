@@ -130,7 +130,7 @@ func PromoteService(ctx context.Context, input PromoteServiceInput) error {
 		return err
 	}
 
-	serviceURL := input.Datastore.URL(input.ServiceName, SchemeForApp(input.Datastore, environment))
+	serviceURL := input.Datastore.LinkURL(input.ServiceName, input.AppName, SchemeForApp(input.Datastore, environment))
 	linkedKeys := LinkedConfigKeys(environment, service.LinkConfigKeys(input.Datastore, input.ServiceName, input.AppName), serviceURL)
 	entries, preservedKey, err := PromotionEntries(input, environment, linkedKeys)
 	if err != nil {
@@ -160,7 +160,7 @@ func PromoteService(ctx context.Context, input PromoteServiceInput) error {
 			return err
 		}
 	} else if previous, ok := environment[defaultJDBC.URL]; ok {
-		values, rendered := input.Datastore.JDBC(input.ServiceName)
+		values, rendered := input.Datastore.LinkJDBC(input.ServiceName, input.AppName)
 		if !rendered || !strings.Contains(previous, values.URL) {
 			input.Logger.Warn(WarnInput{
 				Warning: fmt.Sprintf("Service %s was not linked to app %s with --jdbc, so %s does not point at it", input.ServiceName, input.AppName, defaultJDBC.URL),
@@ -217,7 +217,7 @@ func releaseDefaultKey(ctx context.Context, input PromoteServiceInput, environme
 				return key == release.defaultKey
 			})
 			if release.preservedKey != "" {
-				serviceURL := urlAfterScheme(input.Datastore.URL(serviceName, SchemeForApp(input.Datastore, environment)))
+				serviceURL := urlAfterScheme(input.Datastore.LinkURL(serviceName, input.AppName, SchemeForApp(input.Datastore, environment)))
 				if serviceURL != "" && strings.Contains(environment[release.defaultKey], serviceURL) {
 					keys = append(keys, release.preservedKey)
 				}
@@ -241,7 +241,7 @@ func releaseDefaultKey(ctx context.Context, input PromoteServiceInput, environme
 			return slices.Contains(defaultJDBC.List(), key)
 		})
 		if release.jdbcPreserved {
-			values, ok := input.Datastore.JDBC(serviceName)
+			values, ok := input.Datastore.LinkJDBC(serviceName, input.AppName)
 			if ok && strings.Contains(environment[defaultJDBC.URL], values.URL) {
 				jdbcKeys = append(jdbcKeys, JDBCConfigKeys(release.preservedKey).List()...)
 			}
