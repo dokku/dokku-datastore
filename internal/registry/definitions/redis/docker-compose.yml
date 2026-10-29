@@ -77,6 +77,21 @@ x-dokku:
   # uses today rather than on a compose healthcheck
   wait: native
 
+  hooks:
+    pre_create:
+      # the image's entrypoint hands the data volume to the redis user only
+      # while it holds nothing but dumps, so the seeded acl file would leave
+      # both it and the volume unreadable to redis. It runs as root with the
+      # entrypoint cleared, since the entrypoint would start redis rather than
+      # run this.
+      user: "0"
+      entrypoint: ""
+      volumes:
+        - type: bind
+          source: "{{ .HostRoot }}/data"
+          target: /seed-data
+      exec: ["chown", "-R", "redis:redis", "/seed-data"]
+
   # redis always holds sixteen databases, numbered from zero, so a link only
   # says which it wants and there is none to make. The bound is the redis
   # default rather than the databases line of the service's own config, which
