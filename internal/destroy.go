@@ -147,6 +147,12 @@ func DestroyService(ctx context.Context, input DestroyServiceInput) error {
 		return fmt.Errorf("failed to remove container: %w", err)
 	}
 
+	// a service in use is not destroyed, but a network its links ran over can
+	// outlive them, such as one an app deleted outside dokku left behind
+	if err := removeServiceLinkNetworks(ctx, input.Datastore, input.ServiceName); err != nil {
+		return err
+	}
+
 	if len(arguments) > 0 {
 		_, err = execx.Run(ctx, common.ExecCommandInput{
 			Command: common.DockerBin(),

@@ -17,25 +17,25 @@ func TestWaitArgs(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "a service on the default bridge",
+			// the probe shares the service's network namespace, which reaches
+			// it whatever network it is on and without a container link
+			name: "a service with an address",
 			input: WaitArgsInput{
 				ContainerName: "dokku.redis.lollipop",
-				NetworkAlias:  "dokku-redis-lollipop",
+				Host:          "172.17.0.2",
 				Port:          6379,
 			},
-			expected: "container run --rm --link=dokku.redis.lollipop:dokku-redis-lollipop " + hostenv.WaitImage + " -c dokku-redis-lollipop:6379",
+			expected: "container run --rm --network=container:dokku.redis.lollipop " + hostenv.WaitImage + " -c 172.17.0.2:6379",
 		},
 		{
-			// the probe has to join the network the service was created on, or
-			// it cannot see the service it is waiting for
-			name: "a service on its own network",
+			// a container whose address could not be read is still probed, on
+			// the loopback interface it shares with the probe
+			name: "a service with no address",
 			input: WaitArgsInput{
-				ContainerName:  "dokku.redis.lollipop",
-				NetworkAlias:   "dokku-redis-lollipop",
-				InitialNetwork: "custom-network",
-				Port:           6379,
+				ContainerName: "dokku.redis.lollipop",
+				Port:          6379,
 			},
-			expected: "container run --rm --link=dokku.redis.lollipop:dokku-redis-lollipop --network=custom-network " + hostenv.WaitImage + " -c dokku-redis-lollipop:6379",
+			expected: "container run --rm --network=container:dokku.redis.lollipop " + hostenv.WaitImage + " -c 127.0.0.1:6379",
 		},
 		{
 			// a timeout is handed to the probe after what it connects to, and
@@ -43,11 +43,11 @@ func TestWaitArgs(t *testing.T) {
 			name: "a service waited on for longer than the default",
 			input: WaitArgsInput{
 				ContainerName: "dokku.redis.lollipop",
-				NetworkAlias:  "dokku-redis-lollipop",
+				Host:          "172.17.0.2",
 				Port:          6379,
 				Timeout:       90,
 			},
-			expected: "container run --rm --link=dokku.redis.lollipop:dokku-redis-lollipop " + hostenv.WaitImage + " -c dokku-redis-lollipop:6379 -t 90",
+			expected: "container run --rm --network=container:dokku.redis.lollipop " + hostenv.WaitImage + " -c 172.17.0.2:6379 -t 90",
 		},
 	}
 
@@ -75,7 +75,7 @@ func TestWaitHeader(t *testing.T) {
 // The probe image is pinned rather than floating, so a service that waited
 // yesterday cannot start failing because a tag moved.
 func TestWaitArgsUsesThePinnedProbe(t *testing.T) {
-	args := WaitArgs(WaitArgsInput{ContainerName: "c", NetworkAlias: "a", Port: 1})
+	args := WaitArgs(WaitArgsInput{ContainerName: "c", Host: "a", Port: 1})
 
 	if !strings.Contains(strings.Join(args, " "), ":") {
 		t.Fatal("expected a tagged probe image")
@@ -94,10 +94,9 @@ func TestWaitArgsUsesThePinnedProbe(t *testing.T) {
 // would be read by the probe rather than by docker.
 func TestWaitArgsPutsTheProbeArgumentsLast(t *testing.T) {
 	args := WaitArgs(WaitArgsInput{
-		ContainerName:  "dokku.redis.lollipop",
-		NetworkAlias:   "dokku-redis-lollipop",
-		InitialNetwork: "custom-network",
-		Port:           6379,
+		ContainerName: "dokku.redis.lollipop",
+		Host:          "172.17.0.2",
+		Port:          6379,
 	})
 
 	image := -1
@@ -111,7 +110,7 @@ func TestWaitArgsPutsTheProbeArgumentsLast(t *testing.T) {
 		t.Fatalf("the probe image is not in the arguments: %v", args)
 	}
 
-	if strings.Join(args[image+1:], " ") != "-c dokku-redis-lollipop:6379" {
+	if strings.Join(args[image+1:], " ") != "-c 172.17.0.2:6379" {
 		t.Errorf("expected the probe arguments to follow the image, got %v", args[image+1:])
 	}
 }

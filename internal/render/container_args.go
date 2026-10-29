@@ -38,7 +38,8 @@ type ContainerArgsInput struct {
 
 	// InitialNetwork is the network to attach at create time. When it is empty no
 	// network is requested at all and the container lands on the default bridge
-	// with no alias, which is what tests/link_networks.bats asserts.
+	// with no alias. The networks its links run over are attached once it is
+	// made, under the alias the service url names.
 	InitialNetwork string
 
 	// LogDriver is the docker logging driver, empty for the daemon's default

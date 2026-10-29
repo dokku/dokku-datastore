@@ -413,7 +413,7 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 	// That config is left as it is, so the alias, env var, querystring and jdbc
 	// values do not apply and nothing changes that would restart the app.
 	if len(linkedKeys) > 0 {
-		if err := addLink(ctx, input.Datastore, input.ServiceName, input.AppName); err != nil {
+		if err := addLink(ctx, input.Logger, input.Datastore, input.ServiceName, input.AppName); err != nil {
 			return err
 		}
 
@@ -426,7 +426,7 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 		}
 
 		input.Logger.Warn(WarnInput{
-			Warning: fmt.Sprintf("App %s already holds the url for service %s as %s, so none was set. The app has no container link until it is restarted", input.AppName, input.ServiceName, strings.Join(linkedKeys, " ")),
+			Warning: fmt.Sprintf("App %s already holds the url for service %s as %s, so none was set and the app was not restarted", input.AppName, input.ServiceName, strings.Join(linkedKeys, " ")),
 		})
 
 		return callServiceAction(ctx, input.Datastore, "post-link-complete", input.ServiceName, input.AppName)
@@ -457,7 +457,7 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 		jdbcKeys = keys.List()
 	}
 
-	if err := addLink(ctx, input.Datastore, input.ServiceName, input.AppName); err != nil {
+	if err := addLink(ctx, input.Logger, input.Datastore, input.ServiceName, input.AppName); err != nil {
 		return err
 	}
 
@@ -537,11 +537,16 @@ type UnlinkServiceInput struct {
 func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 	// an app that has been deleted has no config to unset, no docker options to
 	// remove and nothing to restart, but its name still has to come out of the
-	// links file or the service can never be destroyed. The service-action
-	// triggers are skipped too: they are handed an app name, and firing them
-	// for an app that is gone asks other plugins to act on nothing.
+	// links file or the service can never be destroyed, and the network its link
+	// ran over has to go. The service-action triggers are skipped: they are
+	// handed an app name, and firing them for an app that is gone asks other
+	// plugins to act on nothing.
 	if !service.AppExists(input.AppName) {
 		if err := forgetLinkConfigKeys(input.Logger, input.Datastore, input.ServiceName, input.AppName); err != nil {
+			return err
+		}
+
+		if err := service.RemoveLinkNetwork(ctx, service.LinkNetworkName(input.Datastore, input.ServiceName, input.AppName)); err != nil {
 			return err
 		}
 
@@ -587,7 +592,13 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 		return err
 	}
 
-	if err := dockerOption(ctx, "remove", input.Datastore, input.ServiceName, input.AppName); err != nil {
+	if err := removeLegacyLinkOption(ctx, input.Datastore, input.ServiceName, input.AppName); err != nil {
+		return err
+	}
+
+	// the network goes now rather than at the next restart, which takes the
+	// service away from the app's running containers even with --no-restart
+	if err := service.RemoveLinkNetwork(ctx, service.LinkNetworkName(input.Datastore, input.ServiceName, input.AppName)); err != nil {
 		return err
 	}
 
@@ -598,10 +609,9 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 	// unset together, so the app restarts once for all of them
 	unset := append(slices.Clone(linkedKeys), jdbcKeys...)
 	if len(unset) == 0 {
-		// nothing to unset means nothing to restart for, so the running app
-		// keeps its container link until it is next restarted or deployed
+		// nothing to unset means nothing to restart for
 		input.Logger.Warn(WarnInput{
-			Warning: fmt.Sprintf("No config on app %s points at service %s, so none was unset. The app keeps its container link until it is restarted", input.AppName, input.ServiceName),
+			Warning: fmt.Sprintf("No config on app %s points at service %s, so none was unset and the app was not restarted", input.AppName, input.ServiceName),
 		})
 	} else if err := UnsetAppConfig(ctx, input.AppName, unset, !input.NoRestart); err != nil {
 		return err
@@ -677,9 +687,9 @@ func warnOnCorruptLinkConfigKeys(logger Ui, serviceName string, property string,
 	return nil
 }
 
-// addLink records an app as linked to a service and gives it the container link,
-// firing the triggers around both
-func addLink(ctx context.Context, s *service.Datastore, serviceName string, appName string) error {
+// addLink records an app as linked to a service and puts the app on the network
+// the link runs over, firing the triggers around both
+func addLink(ctx context.Context, logger Ui, s *service.Datastore, serviceName string, appName string) error {
 	if err := callServiceAction(ctx, s, "pre-link", serviceName, appName); err != nil {
 		return err
 	}
@@ -691,7 +701,7 @@ func addLink(ctx context.Context, s *service.Datastore, serviceName string, appN
 		return err
 	}
 
-	if err := dockerOption(ctx, "add", s, serviceName, appName); err != nil {
+	if err := connectLink(ctx, logger, s, serviceName, appName); err != nil {
 		return err
 	}
 
@@ -708,20 +718,6 @@ func callServiceAction(ctx context.Context, s *service.Datastore, action string,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to call service-action %s trigger: %w", action, err)
-	}
-
-	return nil
-}
-
-// dockerOption adds or removes the container link for an app across every phase
-func dockerOption(ctx context.Context, operation string, s *service.Datastore, serviceName string, appName string) error {
-	option := fmt.Sprintf("--link %s:%s", service.ContainerName(s, serviceName), service.DNSHostname(s, serviceName))
-	_, err := execx.Run(ctx, common.ExecCommandInput{
-		Command: "dokku",
-		Args:    []string{fmt.Sprintf("docker-options:%s", operation), appName, "build,deploy,run", option},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to %s the docker option for app %s: %w", operation, appName, err)
 	}
 
 	return nil

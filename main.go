@@ -179,6 +179,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"trigger-post-app-rename-setup": func() (cli.Command, error) {
 			return &commands.TriggerPostAppRenameSetupCommand{Meta: meta}, nil
 		},
+		"trigger-post-container-create": func() (cli.Command, error) {
+			return &commands.TriggerPostContainerCreateCommand{Meta: meta}, nil
+		},
 		"trigger-pre-build": func() (cli.Command, error) {
 			return &commands.TriggerPreBuildCommand{Meta: meta}, nil
 		},
