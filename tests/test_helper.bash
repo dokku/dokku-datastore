@@ -368,6 +368,11 @@ restart_policy_of() {
   container_inspect "$1" '{{ .HostConfig.RestartPolicy.Name }}:{{ .HostConfig.RestartPolicy.MaximumRetryCount }}'
 }
 
+# the value of one of a container's labels, empty when it has none of that key
+label_of() {
+  container_inspect "$1" "{{ index .Config.Labels \"$2\" }}"
+}
+
 # the source of whatever a container has mounted at a path, and whether it is
 # writable, as <source>:<rw>. Empty when nothing is mounted there
 mount_of() {

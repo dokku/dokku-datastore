@@ -262,6 +262,113 @@ skip_unless_log_is_capped() {
   assert_output ""
 }
 
+@test "($DEFINITION) a label reaches the container it is rebuilt with" {
+  run label_of "$(service_container)" com.example.team
+  assert_success
+  assert_output ""
+
+  # a value holding commas and spaces is the label's own
+  run --separate-stderr "$BIN" label "$PLUGIN" "$SERVICE" com.example.team=data "com.example.rule=Host(\`a\`) && Path(\`/b,c\`)"
+  assert_success
+  assert_output --partial "Set 2 label(s) on $SERVICE"
+  assert_output --partial "next time one is built"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --labels
+  assert_success
+  # shellcheck disable=SC2016
+  assert_output '{"com.example.rule":"Host(`a`) && Path(`/b,c`)","com.example.team":"data"}'
+
+  # docker cannot label a container it has already made, so nothing reaches the
+  # running one
+  run label_of "$(service_container)" com.example.team
+  assert_success
+  assert_output ""
+
+  run rebuild_service
+  assert_success
+
+  run label_of "$(service_container)" com.example.team
+  assert_success
+  assert_output "data"
+
+  run label_of "$(service_container)" com.example.rule
+  assert_success
+  # shellcheck disable=SC2016
+  assert_output 'Host(`a`) && Path(`/b,c`)'
+
+  # labelling a key again replaces its value
+  run "$BIN" label "$PLUGIN" "$SERVICE" com.example.team=ops
+  assert_success
+
+  run --separate-stderr "$BIN" unlabel "$PLUGIN" "$SERVICE" com.example.rule
+  assert_success
+  assert_output --partial "Removed 1 label(s) from $SERVICE"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --labels
+  assert_success
+  assert_output '{"com.example.team":"ops"}'
+
+  run rebuild_service
+  assert_success
+
+  run label_of "$(service_container)" com.example.team
+  assert_success
+  assert_output "ops"
+
+  run label_of "$(service_container)" com.example.rule
+  assert_success
+  assert_output ""
+
+  # and back to what every other check expects of this service
+  run "$BIN" unlabel --all "$PLUGIN" "$SERVICE"
+  assert_success
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --labels
+  assert_success
+  assert_output ""
+
+  run rebuild_service
+  assert_success
+
+  run label_of "$(service_container)" com.example.team
+  assert_success
+  assert_output ""
+
+  # with nothing left to remove, --all is still not an error
+  run "$BIN" unlabel --all "$PLUGIN" "$SERVICE"
+  assert_success
+}
+
+@test "($DEFINITION) a label dokku keeps is refused first" {
+  local spec
+  for spec in dokku.service=other com.dokku.app-name=lollipop dokku=app; do
+    run --separate-stderr "$BIN" label "$PLUGIN" "$SERVICE" "$spec"
+    assert_failure
+    assert_stderr --partial "reserved for dokku"
+  done
+
+  run --separate-stderr "$BIN" label "$PLUGIN" "$SERVICE" com.example.team
+  assert_failure
+  assert_stderr --partial "<key>=<value>"
+
+  run --separate-stderr "$BIN" unlabel "$PLUGIN" "$SERVICE" com.example.team
+  assert_failure
+  assert_stderr --partial "does not exist"
+
+  # labels have commands of their own, which set names
+  run --separate-stderr "$BIN" set "$PLUGIN" "$SERVICE" labels com.example.team=data
+  assert_failure
+  assert_stderr --partial "label and unlabel"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --labels
+  assert_success
+  assert_output ""
+
+  run label_of "$(service_container)" dokku.service
+  assert_success
+  assert_output "$PLUGIN"
+}
+
 @test "($DEFINITION) --allow-restart rebuilds the container when a container setting changes" {
   local service_before
 

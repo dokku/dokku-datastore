@@ -69,6 +69,10 @@ type CloneServiceInput struct {
 	// InitialNetwork is the network the new container is attached to on create
 	InitialNetwork *string
 
+	// Labels are the docker labels the new container is made with beyond the
+	// plugin's own
+	Labels *map[string]string
+
 	// LogDriver is the docker logging driver the new container is run with
 	LogDriver *string
 
@@ -117,6 +121,7 @@ type serviceSettings struct {
 	ImportArgs         string
 	InitialNetwork     string
 	Keyserver          string
+	Labels             map[string]string
 	LogDriver          string
 	LogOptions         []string
 	Memory             int
@@ -159,6 +164,11 @@ func readServiceSettings(datastore *service.Datastore, serviceName string) (serv
 		return serviceSettings{}, err
 	}
 
+	labels, err := service.ServiceLabels(datastore, serviceName)
+	if err != nil {
+		return serviceSettings{}, err
+	}
+
 	return serviceSettings{
 		BackupMailto:       service.BackupMailto(datastore, serviceName),
 		BackupStorageClass: service.BackupStorageClass(datastore, serviceName),
@@ -169,6 +179,7 @@ func readServiceSettings(datastore *service.Datastore, serviceName string) (serv
 		ImportArgs:         service.ServiceExtraArgs(datastore, serviceName, service.ImportArgsProperty),
 		InitialNetwork:     service.InitialNetwork(datastore, serviceName),
 		Keyserver:          service.Keyserver(datastore, serviceName),
+		Labels:             labels,
 		LogDriver:          common.PropertyGet(commandPrefix, serviceName, service.LogDriverProperty),
 		LogOptions:         splitList(common.PropertyGet(commandPrefix, serviceName, service.LogOptProperty)),
 		Memory:             memory,
@@ -232,6 +243,10 @@ func (s serviceSettings) withOverrides(input CloneServiceInput) serviceSettings 
 
 	if input.VolumeTargets != nil {
 		s.VolumeTargets = *input.VolumeTargets
+	}
+
+	if input.Labels != nil {
+		s.Labels = *input.Labels
 	}
 
 	return s
@@ -361,6 +376,7 @@ func CloneService(ctx context.Context, input CloneServiceInput) error {
 		Image:              image,
 		ImageVersion:       imageVersion,
 		InitialNetwork:     settings.InitialNetwork,
+		Labels:             settings.Labels,
 		LogDriver:          settings.LogDriver,
 		LogOptions:         settings.LogOptions,
 		Memory:             settings.Memory,

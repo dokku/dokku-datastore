@@ -152,3 +152,19 @@ func changedVolumeTargets(f *flag.FlagSet, name string, value []string) (*map[st
 
 	return &targets, nil
 }
+
+// changedLabels is changedSlice for the --label flag, read into labels, so that
+// --label "" asks for no labels at all, which is how a clone drops the ones its
+// source has.
+func changedLabels(f *flag.FlagSet, name string, value []string) (*map[string]string, error) {
+	if !f.Changed(name) {
+		return nil, nil
+	}
+
+	labels, err := service.ParseLabels(value)
+	if err != nil {
+		return nil, err
+	}
+
+	return &labels, nil
+}

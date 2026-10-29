@@ -20,6 +20,7 @@ func TestUpgradeChangesSettings(t *testing.T) {
 	policy := "unless-stopped"
 	timeout := "120"
 	memory := 512
+	labels := map[string]string{"traefik.enable": "true"}
 
 	tests := []struct {
 		name     string
@@ -39,6 +40,7 @@ func TestUpgradeChangesSettings(t *testing.T) {
 		{name: "log options", input: UpgradeServiceInput{LogOptions: &options}, expected: true},
 		{name: "restart policy", input: UpgradeServiceInput{RestartPolicy: &policy}, expected: true},
 		{name: "wait timeout", input: UpgradeServiceInput{WaitTimeout: &timeout}, expected: true},
+		{name: "labels", input: UpgradeServiceInput{Labels: &labels}, expected: true},
 	}
 
 	for _, test := range tests {

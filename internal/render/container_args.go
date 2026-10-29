@@ -44,6 +44,11 @@ type ContainerArgsInput struct {
 	// LogDriver is the docker logging driver, empty for the daemon's default
 	LogDriver string
 
+	// Labels are the docker labels the service was given beyond the plugin's
+	// own. The plugin's are applied after them, so they win over one of the
+	// same key
+	Labels map[string]string
+
 	// LogOptions are the docker log options, already resolved
 	LogOptions map[string]string
 
@@ -160,9 +165,18 @@ func DockerCreateArgs(input ContainerArgsInput) []string {
 		"--cidfile=" + input.IDFile,
 		"--env-file=" + input.EnvFile,
 		"--hostname=" + input.ContainerName,
-		"--label=dokku.service=" + input.CommandPrefix,
-		"--label=dokku=service",
 	}
+
+	// before the plugin's own, because docker keeps the last of two labels with
+	// the same key, and the plugin finds its containers by its own
+	for _, key := range sortedKeys(input.Labels) {
+		args = append(args, "--label="+key+"="+input.Labels[key])
+	}
+
+	args = append(args,
+		"--label=dokku.service="+input.CommandPrefix,
+		"--label=dokku=service",
+	)
 
 	if len(input.Publish) > 0 {
 		args = append(args, "--label="+PublishedPortsLabel+"="+strings.Join(input.Publish, ","))
@@ -173,14 +187,7 @@ func DockerCreateArgs(input ContainerArgsInput) []string {
 		"--restart="+RestartPolicy(input.RestartPolicy),
 	)
 
-	// sorted, because a map would otherwise emit a different command each run
-	names := make([]string, 0, len(input.Env))
-	for name := range input.Env {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	for _, name := range names {
+	for _, name := range sortedKeys(input.Env) {
 		args = append(args, "--env="+name+"="+input.Env[name])
 	}
 
@@ -242,16 +249,21 @@ func LogArgs(driver string, options map[string]string) []string {
 		args = append(args, "--log-driver="+driver)
 	}
 
-	// sorted, because a map would otherwise emit a different command each run
-	names := make([]string, 0, len(options))
-	for name := range options {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	for _, name := range names {
+	for _, name := range sortedKeys(options) {
 		args = append(args, "--log-opt="+name+"="+options[name])
 	}
 
 	return args
+}
+
+// sortedKeys are the keys of a map in order, because a map would otherwise emit
+// a different command each run
+func sortedKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	return keys
 }

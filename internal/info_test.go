@@ -153,6 +153,10 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		}
 	}
 
+	if err := service.WriteLabels(datastore, "lollipop", map[string]string{"traefik.enable": "true", "com.example.team": "data,ops"}); err != nil {
+		t.Fatalf("failed to write the labels: %s", err)
+	}
+
 	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
 
 	for key, expected := range map[string]string{
@@ -169,6 +173,7 @@ func TestInfoReadsTheRecordedState(t *testing.T) {
 		"image-version":     "8.4.2",
 		"import-args":       "--force",
 		"initial-network":   "my-network",
+		"labels":            `{"com.example.team":"data,ops","traefik.enable":"true"}`,
 		"log-driver":        "json-file",
 		"log-opt":           "max-size=20m,max-file=3",
 		"memory":            "512",

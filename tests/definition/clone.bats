@@ -21,7 +21,7 @@ setup_file() {
   # local, and the unit tests already cover copying them
   "$BIN" create --backend "$BACKEND" "$PLUGIN" "$SERVICE" --image "$IMAGE" --image-version "$IMAGE_VERSION" \
     --memory 512 --shm-size 128m --restart unless-stopped --custom-env FOO=bar --wait-timeout 120 \
-    --volume "$(mount_source clone):$MOUNT_TARGET:ro"
+    --volume "$(mount_source clone):$MOUNT_TARGET:ro" --label com.example.team=data,ops
   "$BIN" set "$PLUGIN" "$SERVICE" backup-keyserver keys.example.com
   "$BIN" set "$PLUGIN" "$SERVICE" backup-mailto ops@example.com
   "$BIN" set "$PLUGIN" "$SERVICE" backup-storage-class STANDARD_IA
@@ -71,13 +71,29 @@ clone_or_skip() {
   assert_output "$(mount_source clone):false"
 }
 
+@test "($DEFINITION) a label given at create is on the container from the start" {
+  # repeatable, and an array rather than a list, so the comma is the value's own
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --labels
+  assert_success
+  assert_output '{"com.example.team":"data,ops"}'
+
+  run label_of "$(service_container)" com.example.team
+  assert_success
+  assert_output "data,ops"
+
+  # and beside the labels dokku finds the container by, rather than in place of them
+  run label_of "$(service_container)" dokku.service
+  assert_success
+  assert_output "$PLUGIN"
+}
+
 @test "($DEFINITION) a clone starts from the source's settings" {
   # the bug this closes: a clone made without repeating every flag landed on the
   # defaults rather than on what the source runs with
   clone_or_skip "$COPY"
 
   local key expected
-  for key in memory shm-size custom-env restart-policy wait-timeout mounts backup-keyserver backup-mailto backup-storage-class backup-timestamp; do
+  for key in memory shm-size custom-env restart-policy wait-timeout mounts labels backup-keyserver backup-mailto backup-storage-class backup-timestamp; do
     run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" "--$key"
     assert_success
     expected="$output"
@@ -100,6 +116,10 @@ clone_or_skip() {
   run mount_of "$(service_container "$COPY")" "$MOUNT_TARGET"
   assert_success
   assert_output "$(mount_source clone):false"
+
+  run label_of "$(service_container "$COPY")" com.example.team
+  assert_success
+  assert_output "data,ops"
 }
 
 @test "($DEFINITION) a clone is made with its source's backend" {
@@ -141,7 +161,7 @@ clone_or_skip() {
 @test "($DEFINITION) a flag passed to clone overrides that one setting" {
   local flags
   mapfile -t flags < <(password_flags "clonedpassword1234" "clonedrootpassword1234")
-  clone_or_skip "$OVERRIDE" --restart no --wait-timeout 150 --custom-env "" --volume "" "${flags[@]}"
+  clone_or_skip "$OVERRIDE" --restart no --wait-timeout 150 --custom-env "" --volume "" --label "" "${flags[@]}"
 
   # the clone is waited on for as long as it was told to be, not the source's
   assert_output --partial "to be ready (timeout: 150s)"
@@ -169,6 +189,15 @@ clone_or_skip() {
   assert_output ""
 
   run mount_of "$(service_container "$OVERRIDE")" "$MOUNT_TARGET"
+  assert_success
+  assert_output ""
+
+  # --label given empty drops the labels the source has
+  run --separate-stderr "$BIN" info "$PLUGIN" "$OVERRIDE" --labels
+  assert_success
+  assert_output ""
+
+  run label_of "$(service_container "$OVERRIDE")" com.example.team
   assert_success
   assert_output ""
 

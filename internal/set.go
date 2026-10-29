@@ -459,6 +459,7 @@ var ownedElsewhere = map[string]string{
 	"image-version":        "the image version a service runs is changed with upgrade",
 	"definition":           "the definition a service runs on is changed with upgrade",
 	"mounts":               "mounts are changed with mount and unmount",
+	service.LabelsProperty: "labels are changed with label and unlabel",
 	BackupScheduleProperty: "a scheduled backup is changed with backup-schedule and backup-unschedule",
 }
 

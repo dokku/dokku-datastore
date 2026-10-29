@@ -57,6 +57,9 @@ type CreateCommand struct {
 	logDriver string
 	// logOpt are the docker log options to use for the service container
 	logOpt []string
+	// label are the docker labels to put on the service container beyond the
+	// plugin's own
+	label []string
 	// restart is the docker restart policy to use for the service container
 	restart string
 	// waitTimeout is how long, in seconds, the service is waited on to become ready
@@ -140,6 +143,9 @@ func (c *CreateCommand) FlagSet() *flag.FlagSet {
 	f.StringVarP(&c.shmSize, "shm-size", "s", "", "override shared memory size for the service docker container")
 	f.StringVar(&c.logDriver, "log-driver", "", "the docker logging driver to run the service container with (default: the daemon's own)")
 	f.StringSliceVar(&c.logOpt, "log-opt", []string{}, "a comma-separated list of key=value docker log options for the service container")
+	// an array rather than a slice, since a slice flag splits on the comma a
+	// label's own value is often a list of
+	f.StringArrayVar(&c.label, "label", []string{}, "a docker label to put on the service container, as <key>=<value>, repeatable")
 	f.StringVar(&c.restart, "restart", "", "the docker restart policy to run the service container with (default: always)")
 	f.StringVar(&c.waitTimeout, "wait-timeout", "", "seconds to wait for the service to become ready (default: the datastore's own)")
 	// an array rather than a slice, since a slice flag splits on the comma a
@@ -171,6 +177,7 @@ func (c *CreateCommand) AutocompleteFlags() complete.Flags {
 			"--shm-size":            complete.PredictAnything,
 			"--log-driver":          complete.PredictAnything,
 			"--log-opt":             complete.PredictAnything,
+			"--label":               complete.PredictAnything,
 			"--restart":             complete.PredictSet("no", "always", "unless-stopped", "on-failure"),
 			"--wait-timeout":        complete.PredictAnything,
 			"--volume":              complete.PredictAnything,
@@ -274,6 +281,14 @@ func (c *CreateCommand) Run(args []string) int {
 		return 1
 	}
 
+	labels, err := service.ParseLabels(c.label)
+	if err != nil {
+		logger.Error(internal.ErrorInput{
+			Error: err,
+		})
+		return 1
+	}
+
 	err = internal.CreateService(ctx, internal.CreateServiceInput{
 		Backend:            c.backend,
 		ConfigOptions:      updatedFlags.ConfigOptions,
@@ -283,6 +298,7 @@ func (c *CreateCommand) Run(args []string) int {
 		Image:              updatedFlags.Image,
 		ImageVersion:       updatedFlags.ImageVersion,
 		InitialNetwork:     c.initialNetwork,
+		Labels:             labels,
 		LogDriver:          c.logDriver,
 		LogOptions:         c.logOpt,
 		RestartPolicy:      c.restart,

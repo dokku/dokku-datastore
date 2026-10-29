@@ -36,8 +36,8 @@ type composeService struct {
 	Command []string `yaml:"command,omitempty"`
 	Restart string   `yaml:"restart"`
 
-	// Labels are dokku's, not the definition's: a definition setting one is a
-	// load error.
+	// Labels are dokku's and the service's, not the definition's: a definition
+	// setting one is a load error.
 	Labels map[string]string `yaml:"labels"`
 
 	// Environment carries literal values rather than pointing at the env file,
@@ -155,15 +155,12 @@ func Compose(input Input) ([]byte, error) {
 		Image:         arguments.TaggedImage,
 		Command:       append(append([]string{}, arguments.Command...), arguments.ConfigOptions...),
 		Restart:       RestartPolicy(arguments.RestartPolicy),
-		Labels: map[string]string{
-			"dokku":         "service",
-			"dokku.service": arguments.CommandPrefix,
-		},
-		Environment: environment(input.Environment, arguments.Env),
-		Volumes:     composeVolumes(arguments),
-		ShmSize:     arguments.ShmSize,
-		WorkingDir:  arguments.WorkingDir,
-		Ports:       arguments.Publish,
+		Labels:        labels(arguments.CommandPrefix, arguments.Labels),
+		Environment:   environment(input.Environment, arguments.Env),
+		Volumes:       composeVolumes(arguments),
+		ShmSize:       arguments.ShmSize,
+		WorkingDir:    arguments.WorkingDir,
+		Ports:         arguments.Publish,
 	}
 
 	if len(arguments.Publish) > 0 {
@@ -243,6 +240,24 @@ func environment(lines []string, declared map[string]string) map[string]string {
 	if len(values) == 0 {
 		return nil
 	}
+
+	return values
+}
+
+// labels renders the labels compose is handed: the service's own, then the
+// plugin's over them, the same order the docker path passes them in so that the
+// plugin's win there too.
+//
+// A dollar sign is doubled for the same reason it is in an environment value:
+// compose expands ${...} in a label and docker's own --label does not.
+func labels(commandPrefix string, service map[string]string) map[string]string {
+	values := make(map[string]string, len(service)+2)
+	for name, value := range service {
+		values[name] = strings.ReplaceAll(value, "$", "$$")
+	}
+
+	values["dokku"] = "service"
+	values["dokku.service"] = commandPrefix
 
 	return values
 }

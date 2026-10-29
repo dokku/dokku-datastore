@@ -56,6 +56,10 @@ type Scope struct {
 	LogDriver  string
 	LogOptions map[string]string
 
+	// Labels are the docker labels the service was given beyond the plugin's
+	// own. Empty for one given none.
+	Labels map[string]string
+
 	// Publish are the docker --publish specs a service exposed directly
 	// publishes its ports with, already rendered. Empty for one that is not
 	// exposed, or that is exposed through an ambassador.

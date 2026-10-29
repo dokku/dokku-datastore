@@ -432,3 +432,80 @@ func TestComposeMountsAMovedVolume(t *testing.T) {
 		t.Errorf("expected the container started in the moved data volume, got:\n%s", document)
 	}
 }
+
+// The labels a service was given ride along beside the plugin's own, the same
+// ones the docker path hands --label, with a dollar sign doubled for the reason
+// it is in a log option.
+func TestComposeCarriesTheServiceLabels(t *testing.T) {
+	input := redisInput(t)
+	input.Scope.Labels = map[string]string{
+		"traefik.enable":                     "true",
+		"traefik.http.routers.a.middlewares": "auth,compress",
+		"com.example.template":               "$SERVICE",
+	}
+
+	rendered, err := Compose(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	var file composeFile
+	if err := yaml.Unmarshal(rendered, &file); err != nil {
+		t.Fatalf("unable to parse the rendered file: %s", err)
+	}
+
+	expected := map[string]string{
+		"dokku":                              "service",
+		"dokku.service":                      "redis",
+		"traefik.enable":                     "true",
+		"traefik.http.routers.a.middlewares": "auth,compress",
+		"com.example.template":               "$$SERVICE",
+	}
+	if labels := file.Services["redis"].Labels; !reflect.DeepEqual(labels, expected) {
+		t.Errorf("expected the labels %v, got %v", expected, labels)
+	}
+}
+
+// A label of a key the plugin keeps is refused before it is stored, but one
+// written into the property by hand still never takes the plugin's place, on
+// either path, since the plugin finds its containers by its own.
+func TestThePluginsLabelsWinOverTheServices(t *testing.T) {
+	input := redisInput(t)
+	input.Scope.Labels = map[string]string{"dokku.service": "postgres", "dokku": "app"}
+
+	rendered, err := Compose(input)
+	if err != nil {
+		t.Fatalf("unable to render: %s", err)
+	}
+
+	var file composeFile
+	if err := yaml.Unmarshal(rendered, &file); err != nil {
+		t.Fatalf("unable to parse the rendered file: %s", err)
+	}
+
+	labels := file.Services["redis"].Labels
+	if labels["dokku.service"] != "redis" || labels["dokku"] != "service" {
+		t.Errorf("expected the plugin's labels to win in the compose file, got %v", labels)
+	}
+
+	arguments, err := ContainerArgs(input)
+	if err != nil {
+		t.Fatalf("unable to resolve: %s", err)
+	}
+
+	// docker keeps the last of two labels with the same key
+	last := map[string]string{}
+	for _, argument := range DockerCreateArgs(arguments) {
+		label, found := strings.CutPrefix(argument, "--label=")
+		if !found {
+			continue
+		}
+
+		key, value, _ := strings.Cut(label, "=")
+		last[key] = value
+	}
+
+	if last["dokku.service"] != "redis" || last["dokku"] != "service" {
+		t.Errorf("expected the plugin's labels to win in the argv, got %v", last)
+	}
+}

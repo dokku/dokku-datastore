@@ -57,6 +57,7 @@ Available commands are:
     expose                                Exposes a service
     import                                Imports data into a service from stdin or a file
     info                                  Gets information about a service
+    label                                 Adds docker labels to a service
     link                                  Links a service to an app
     linked                                Checks if a service is linked to an app
     links                                 Lists all apps that are linked to a given service
@@ -83,6 +84,7 @@ Available commands are:
     trigger-pre-start                     Starts the services an app is linked to before it starts
     trigger-service-list                  Lists the services other dokku plugins can see
     unexpose                              Unexposes a service
+    unlabel                               Removes one or all labels from a service
     unlink                                Unlinks a service from an app
     unmount                               Removes one or all mounts from a service
     upgrade                               Upgrades a service to a different image version
@@ -376,6 +378,30 @@ dokku-datastore create redis lollipop --restart on-failure:5
 ```
 
 A definition still cannot set `restart:` itself. The policy belongs to the service rather than to the datastore it runs.
+
+## Container labels
+
+A datastore container carried the labels dokku finds it by and nothing else, so a tool that discovers containers by their labels - traefik, a prometheus scrape config, a backup sidecar - had no way to find one. Docker cannot add a label to a container it has already made, so a label put on by hand was lost the next time the container was built. A service may now be given labels of its own, which are put on every container it is made with from then on.
+
+```shell
+# one or several at once, and a value may hold commas and spaces
+dokku redis:label lollipop traefik.enable=true "traefik.http.routers.lollipop.middlewares=auth,compress"
+
+# a key the service already has is given the new value
+dokku redis:label lollipop traefik.enable=false
+
+# and taken away again by key, or all at once
+dokku redis:unlabel lollipop traefik.enable
+dokku redis:unlabel --all lollipop
+```
+
+Labels have commands of their own rather than a `set` key, since a label's value is often a comma separated list itself and `set` takes a single value. `info --labels` reports them as a json object, sorted by key and empty for a service with none, since a list joined by spaces or commas could not be read back. A key starting with `dokku.` or `com.dokku.`, or the key `dokku` itself, is dokku's own and is refused, so a service cannot hide or stand in for the containers dokku finds by them. The ambassador an exposed service runs is not given the service's labels, so that a tool discovering containers by label finds the service once.
+
+They may be given at `create`, `clone` and `upgrade` as well, with `--label`, repeated for each. A `clone` not passed it takes the source's, and `--label ""` gives it none. A label given to `upgrade` replaces every label the service has. A change reaches a container the next time one is built: `restart` keeps the container it has, so a service already running takes a `stop` and then a `start`.
+
+```shell
+dokku-datastore create redis lollipop --label traefik.enable=true --label com.example.team=data
+```
 
 ## Readiness wait timeout
 
@@ -998,7 +1024,7 @@ x-dokku:
 
 A clone was made on the source's image and given its data, but nothing else about the source carried over: every other setting came from the flags passed to `clone`, so a clone made without repeating all of them landed on the defaults rather than on what the source runs with.
 
-A clone now starts from the source's settings - its config options, custom env, memory, service memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, mounts, volume targets, backup keyserver, backup mailto, backup storage class, backup timestamp and export and import arguments. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
+A clone now starts from the source's settings - its config options, custom env, memory, service memory, shm size, initial, post-create and post-start networks, log driver, log options, restart policy, labels, mounts, volume targets, backup keyserver, backup mailto, backup storage class, backup timestamp and export and import arguments. A flag passed to `clone` overrides that one setting, and a flag passed empty clears it, the same as on `upgrade`.
 
 ```shell
 # the same settings as lollipop

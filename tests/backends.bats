@@ -53,6 +53,30 @@ assert_containers_agree() {
   assert_containers_agree
 }
 
+@test "($DEFINITION) the two containers agree on labels of their own" {
+  # a dollar sign is expanded by compose and not by docker, and a comma is the
+  # value's own on both paths
+  local service
+  for service in viadocker viacompose; do
+    # shellcheck disable=SC2016
+    run "$BIN" label "$PLUGIN" "$service" com.example.team=data,ops 'com.example.template=$SERVICE'
+    assert_success
+    run rebuild_service "$service"
+    assert_success
+  done
+
+  assert_containers_agree
+
+  run label_of "$(service_container viacompose)" com.example.template
+  assert_success
+  # shellcheck disable=SC2016
+  assert_output '$SERVICE'
+
+  run label_of "$(service_container viacompose)" com.example.team
+  assert_success
+  assert_output "data,ops"
+}
+
 @test "($DEFINITION) the two containers agree on a restart policy of their own" {
   # a retry count rides in docker's own syntax on the command line and in the
   # compose file, and both have to arrive at the same policy

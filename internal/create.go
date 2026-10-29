@@ -69,6 +69,10 @@ type CreateServiceInput struct {
 	// InitialNetwork is the initial network to use for the service
 	InitialNetwork string
 
+	// Labels are the docker labels for the service container beyond the
+	// plugin's own
+	Labels map[string]string
+
 	// LogDriver is the docker logging driver to run the service container with
 	LogDriver string
 
@@ -186,6 +190,12 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 	}
 
 	if err := service.ValidateRestartPolicy(input.RestartPolicy); err != nil {
+		return err
+	}
+
+	// a label the plugin keeps for itself would be outranked by the plugin's
+	// own, and the service would carry a label other than the one it was given
+	if err := service.ValidateLabels(input.Labels); err != nil {
 		return err
 	}
 
@@ -332,6 +342,7 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		Image:              recordedImage,
 		ImageVersion:       recordedImageVersion,
 		InitialNetwork:     input.InitialNetwork,
+		Labels:             input.Labels,
 		LogDriver:          input.LogDriver,
 		LogOptions:         input.LogOptions,
 		Memory:             input.Memory,

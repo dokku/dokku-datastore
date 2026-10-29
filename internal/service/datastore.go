@@ -301,6 +301,18 @@ func (s *Datastore) CreateServiceContainer(ctx context.Context, input CreateServ
 	scope.RestartPolicy = ServiceRestartPolicy(input.Datastore, input.ServiceName)
 	scope.Publish = DirectPublishSpecs(input.Datastore, input.ServiceName, ExposedHostPorts(input.Datastore, input.ServiceName))
 
+	// read strictly, like the mounts, and checked again rather than trusted
+	// from when they were given: a property edited by hand into one naming a
+	// key the plugin keeps would otherwise reach the container
+	labels, err := ServiceLabels(input.Datastore, input.ServiceName)
+	if err != nil {
+		return err
+	}
+	if err := ValidateLabels(labels); err != nil {
+		return fmt.Errorf("unable to label %s: %w", input.ServiceName, err)
+	}
+	scope.Labels = labels
+
 	// checked again rather than trusted from when it was given: a host path
 	// removed since would otherwise be recreated by docker, empty and owned by
 	// root, and the service would start on that
