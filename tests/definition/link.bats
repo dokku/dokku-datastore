@@ -25,13 +25,15 @@ setup_file() {
 
 teardown() {
   remove_app_containers
+
+  # a failed test can leave the app linked, which every later test would find,
+  # and a linked service is not destroyed, which would leave its container
+  # behind
+  "$BIN" unlink "$PLUGIN" "$SERVICE" "$APP" --no-restart >/dev/null 2>/dev/null || true
+  "$BIN" unlink "$PLUGIN" "$SERVICE" "$OTHER_APP" --no-restart >/dev/null 2>/dev/null || true
 }
 
 teardown_file() {
-  # a failed test can leave the app linked, and a linked service is not
-  # destroyed, which would leave its container behind
-  "$BIN" unlink "$PLUGIN" "$SERVICE" "$APP" --no-restart >/dev/null 2>/dev/null || true
-  "$BIN" unlink "$PLUGIN" "$SERVICE" "$OTHER_APP" --no-restart >/dev/null 2>/dev/null || true
   datastore_teardown_file "$SERVICE"
 }
 
@@ -48,9 +50,16 @@ service_host() {
   echo "${host//_/-}"
 }
 
-# the port the service url names
-service_port() {
-  jq -r --arg key "$ALIAS" '.[$key]' "$FAKE_CONFIG_ROOT/$APP.json" | sed -nE "s#.*$(service_host):([0-9]+).*#\1#p"
+# the port the plugin waits on the service at. The tests reach the service on
+# it rather than on the port its url names, which for graphite is statsd over
+# udp, where there is no connection to make.
+service_wait_port() {
+  local name
+  name="$(awk '/^  wait:/ { print $2; exit }' "$DEFINITION_ROOT/docker-compose.yml")"
+  awk -v name="$name" '
+    $1 == "-" && $2 == "name:" { found = ($3 == name); next }
+    found && $1 == "target:" { print $2; exit }
+  ' "$DEFINITION_ROOT/docker-compose.yml"
 }
 
 # starts a stand-in for one of an app's containers, labeled the way dokku
@@ -71,7 +80,7 @@ container_networks() {
 
 # whether a container reaches the service by the host its url names
 reaches_service() {
-  docker container run --rm --network "container:$1" "$WAIT_IMAGE" -c "$(service_host):$(service_port)" -t 15
+  docker container run --rm --network "container:$1" "$WAIT_IMAGE" -c "$(service_host):$(service_wait_port)" -t 15
 }
 
 @test "($DEFINITION) unlink of an app that was never linked fails and changes nothing" {
