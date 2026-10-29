@@ -17,7 +17,9 @@ import (
 // data volume. Redis writes its dump to its working directory, and the image's
 // entrypoint hands that directory to the redis user, so a service that moved the
 // volume would otherwise write its data where nothing is mounted, or be refused
-// the directory it is mounted in.
+// the directory it is mounted in. And a second, the acl file redis keeps the
+// users made in the service in, in the data volume it owns, since saving them
+// writes the file again.
 const goldenContainerArgs = "testdata/container_args.golden"
 
 // redisScope is the state of a redis service named lollipop, matching the fixture
@@ -450,8 +452,8 @@ func TestRedisMaxmemoryFollowsTheServiceMemory(t *testing.T) {
 		serviceMemory string
 		expected      []string
 	}{
-		{name: "none", expected: []string{"redis-server", "/usr/local/etc/redis/redis.conf", "--bind", "0.0.0.0"}},
-		{name: "a service memory", serviceMemory: "256", expected: []string{"redis-server", "/usr/local/etc/redis/redis.conf", "--bind", "0.0.0.0", "--maxmemory", "256mb"}},
+		{name: "none", expected: []string{"redis-server", "/usr/local/etc/redis/redis.conf", "--bind", "0.0.0.0", "--aclfile", "/data/users.acl"}},
+		{name: "a service memory", serviceMemory: "256", expected: []string{"redis-server", "/usr/local/etc/redis/redis.conf", "--bind", "0.0.0.0", "--aclfile", "/data/users.acl", "--maxmemory", "256mb"}},
 	}
 
 	for _, test := range tests {

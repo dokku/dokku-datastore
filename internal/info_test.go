@@ -570,3 +570,31 @@ func TestInfoReportsEveryBackupSchedule(t *testing.T) {
 		}
 	}
 }
+
+// the databases and users a service holds are reported by name, and a user's
+// password never is
+func TestInfoReportsDatabasesAndUsers(t *testing.T) {
+	datastore := accountServices(t, map[string][]string{"lollipop": {}})
+	t.Setenv("DOKKU_LIB_ROOT", service.DokkuLibRoot)
+
+	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if info["databases"] != "lollipop paintshop" {
+		t.Errorf("expected the databases %q, got %q", "lollipop paintshop", info["databases"])
+	}
+
+	if info["users"] != "postgres painter" {
+		t.Errorf("expected the users %q, got %q", "postgres painter", info["users"])
+	}
+
+	for key, value := range info {
+		if strings.Contains(value, "brush") {
+			t.Errorf("expected no password in %s, got %q", key, value)
+		}
+	}
+
+	redis := service.Datastores["redis"]
+	withInfoService(t, redis, "lollipop")
+	if databases := Info(context.Background(), InfoInput{Datastore: redis, ServiceName: "lollipop"})["databases"]; databases != "0-15" {
+		t.Errorf("expected redis to report the range 0-15, got %q", databases)
+	}
+}

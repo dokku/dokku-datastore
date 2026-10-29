@@ -33,6 +33,8 @@ type ExportCommand struct {
 	force bool
 	// allDatabases exports every database in the service
 	allDatabases bool
+	// database is the database to export in place of the service's own
+	database string
 }
 
 // Name returns the name of the command
@@ -96,6 +98,7 @@ func (c *ExportCommand) FlagSet() *flag.FlagSet {
 	f.StringVarP(&c.file, "file", "f", "", "a file on the dokku host to export to instead of writing stdout")
 	f.BoolVar(&c.force, "force", false, "replace the file named with --file if it already exists")
 	f.BoolVar(&c.allDatabases, "all-databases", false, "export every database in the service rather than only the one named for it")
+	f.StringVar(&c.database, "database", "", "the database in the service to export, in place of the one named for the service")
 	return f
 }
 
@@ -108,6 +111,7 @@ func (c *ExportCommand) AutocompleteFlags() complete.Flags {
 			"--file":          complete.PredictFiles("*"),
 			"--force":         complete.PredictNothing,
 			"--all-databases": complete.PredictNothing,
+			"--database":      complete.PredictAnything,
 		},
 	)
 }
@@ -255,6 +259,7 @@ func (c *ExportCommand) Run(args []string) int {
 		Writer:       writer,
 		ExtraArgs:    extraArgs,
 		AllDatabases: c.allDatabases,
+		Database:     c.database,
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
@@ -328,5 +333,5 @@ func errExportFileExists(path string) error {
 
 // DocumentsFlag reports whether a flag is described for a datastore
 func (c *ExportCommand) DocumentsFlag(name string, data internal.DocumentationData) bool {
-	return documentsAllDatabases(name, data)
+	return documentsAllDatabases(name, data) && documentsDatabase(name, data)
 }

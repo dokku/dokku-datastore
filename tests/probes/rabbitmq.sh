@@ -6,8 +6,8 @@
 # keeps on disk across a restart.
 set -eo pipefail
 
-ACTION="${1:?usage: $0 <write|clobber|read> <service>}"
-SERVICE="${2:?usage: $0 <write|clobber|read> <service>}"
+ACTION="${1:?usage: $0 <write|clobber|read|write-as|read-as> <service> [<user> <password> <database>]}"
+SERVICE="${2:?usage: $0 <write|clobber|read|write-as|read-as> <service> [<user> <password> <database>]}"
 CONTAINER="dokku.rabbitmq.$SERVICE"
 PASSWORD="$(cat "$DOKKU_LIB_ROOT/services/rabbitmq/$SERVICE/PASSWORD")"
 # the vhost the service was created with, which is named after its database
@@ -27,6 +27,27 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 
+# the -as actions do the same in a vhost, as a user, each named rather than the
+# service's own. A user made in the service is given no tag, which the
+# management api refuses, so the server is asked whether it takes the user's
+# password and lets it into the vhost, and the message is written and read
+# there as the service's own account
+AS_USER="${3:-}"
+AS_PASSWORD="${4:-}"
+AS_VHOST="${5:-}"
+
+ctl() {
+  docker container exec "$CONTAINER" rabbitmqctl -q "$@"
+}
+
+allowed() {
+  ctl authenticate_user "$AS_USER" "$AS_PASSWORD" >/dev/null
+  if ! ctl -s list_user_permissions "$AS_USER" | awk -v vhost="$AS_VHOST" '$1 == vhost && $2 == ".*" && $3 == ".*" && $4 == ".*" { found = 1 } END { exit !found }'; then
+    echo "user $AS_USER may not use vhost $AS_VHOST" >&2
+    return 1
+  fi
+}
+
 # the queue holds the one message, so writing empties it first
 put() {
   rabbit -X PUT "$API/queues/$VHOST/probe" -d '{"durable":true}' >/dev/null
@@ -45,6 +66,15 @@ clobber)
 read)
   # put back on the queue once read, so reading leaves it as it was
   rabbit -X POST "$API/queues/$VHOST/probe/get" -d '{"count":1,"ackmode":"ack_requeue_true","encoding":"auto"}' |
+    sed -n 's/.*"payload":"\([^"]*\)".*/\1/p'
+  ;;
+write-as)
+  allowed
+  VHOST="$AS_VHOST" put known
+  ;;
+read-as)
+  allowed
+  rabbit -X POST "$API/queues/$AS_VHOST/probe/get" -d '{"count":1,"ackmode":"ack_requeue_true","encoding":"auto"}' |
     sed -n 's/.*"payload":"\([^"]*\)".*/\1/p'
   ;;
 *)

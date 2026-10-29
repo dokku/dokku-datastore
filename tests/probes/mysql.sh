@@ -3,8 +3,8 @@
 # survived rather than only that the service came back up.
 set -eo pipefail
 
-ACTION="${1:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra> <service>}"
-SERVICE="${2:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra> <service>}"
+ACTION="${1:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|write-as|read-as> <service> [<user> <password> <database>]}"
+SERVICE="${2:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|write-as|read-as> <service> [<user> <password> <database>]}"
 CONTAINER="dokku.mysql.$SERVICE"
 PASSWORD="$(cat "$DOKKU_LIB_ROOT/services/mysql/$SERVICE/ROOTPASSWORD")"
 # the database the service was created with, which is the service name with
@@ -18,6 +18,18 @@ EXTRA_DATABASE="probe_extra"
 sql() {
   docker container exec --env "MYSQL_PWD=$PASSWORD" -i "$CONTAINER" \
     mysql --user=root --skip-column-names --batch "$DATABASE" -e "$1"
+}
+
+# the -as actions do the same as a user, on a database, each named rather than
+# the service's own, which is how a database or user made in the service is
+# shown to be one a linked app can reach
+AS_USER="${3:-}"
+AS_PASSWORD="${4:-}"
+AS_DATABASE="${5:-}"
+
+as_sql() {
+  docker container exec --env "MYSQL_PWD=$AS_PASSWORD" -i "$CONTAINER" \
+    mysql --user="$AS_USER" --skip-column-names --batch "$AS_DATABASE" -e "$1"
 }
 
 case "$ACTION" in
@@ -38,6 +50,12 @@ clobber-extra)
   ;;
 read-extra)
   sql "SELECT value FROM $EXTRA_DATABASE.probe;"
+  ;;
+write-as)
+  as_sql "CREATE TABLE IF NOT EXISTS probe_account (value VARCHAR(32)); DELETE FROM probe_account; INSERT INTO probe_account VALUES ('known');" >/dev/null
+  ;;
+read-as)
+  as_sql "SELECT value FROM probe_account;"
   ;;
 *)
   echo "unknown action $ACTION" >&2

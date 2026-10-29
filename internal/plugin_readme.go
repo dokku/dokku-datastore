@@ -60,6 +60,14 @@ var readmeSections = []struct {
 		Commands: []string{"import", "export", "reset"},
 	},
 	{
+		Group: definition.GroupDatabasesAndUsers,
+		Title: "Databases and Users",
+		Intro: []string{
+			"A service runs in a container of its own. Several apps can share one service, and the memory its container uses, by each being linked to a database or user of its own within it, made with the following commands. Every user made in a service can use every database in it.",
+		},
+		Commands: []string{"create-database", "destroy-database", "create-user", "destroy-user", "set-user-password"},
+	},
+	{
 		Group: definition.GroupBackups,
 		Title: "Backups",
 		Intro: []string{

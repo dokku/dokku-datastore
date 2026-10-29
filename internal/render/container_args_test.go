@@ -20,7 +20,7 @@ var updateGolden = flag.Bool("update-golden", false, "rewrite the golden files i
 func redisContainerArgs() ContainerArgsInput {
 	return ContainerArgsInput{
 		CommandPrefix: "redis",
-		Command:       []string{"redis-server", "/usr/local/etc/redis/redis.conf", "--bind", "0.0.0.0"},
+		Command:       []string{"redis-server", "/usr/local/etc/redis/redis.conf", "--bind", "0.0.0.0", "--aclfile", "/data/users.acl"},
 		WorkingDir:    "/data",
 		ContainerName: "dokku.redis.lollipop",
 		EnvFile:       "/var/lib/dokku/services/redis/lollipop/ENV",

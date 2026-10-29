@@ -3,8 +3,8 @@
 # survived rather than only that the service came back up.
 set -eo pipefail
 
-ACTION="${1:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|write-icu|clobber-icu|read-icu|cluster|read-cluster|templates|extension|has-extension|old-extension|drop-old-extension|hypertable> <service> [extension]}"
-SERVICE="${2:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|write-icu|clobber-icu|read-icu|cluster|read-cluster|templates|extension|has-extension|old-extension|drop-old-extension|hypertable> <service> [extension]}"
+ACTION="${1:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|write-icu|clobber-icu|read-icu|cluster|read-cluster|templates|extension|has-extension|old-extension|drop-old-extension|hypertable|write-as|read-as> <service> [<user> <password> <database>] [extension]}"
+SERVICE="${2:?usage: $0 <write|clobber|read|write-extra|clobber-extra|read-extra|write-icu|clobber-icu|read-icu|cluster|read-cluster|templates|extension|has-extension|old-extension|drop-old-extension|hypertable|write-as|read-as> <service> [<user> <password> <database>] [extension]}"
 CONTAINER="dokku.postgres.$SERVICE"
 PASSWORD="$(cat "$DOKKU_LIB_ROOT/services/postgres/$SERVICE/PASSWORD")"
 # the database the service was created with, which is the service name with
@@ -25,6 +25,18 @@ OLD_EXTENSION_DATABASE="probe_old_extension"
 sql() {
   docker container exec --env "PGPASSWORD=$PASSWORD" -i "$CONTAINER" \
     psql -qtAX -h localhost -U postgres -d "${2:-$DATABASE}" -c "$1"
+}
+
+# the -as actions do the same as a user, on a database, each named rather than
+# the service's own, which is how a database or user made in the service is
+# shown to be one a linked app can reach
+AS_USER="${3:-}"
+AS_PASSWORD="${4:-}"
+AS_DATABASE="${5:-}"
+
+as_sql() {
+  docker container exec --env "PGPASSWORD=$AS_PASSWORD" -i "$CONTAINER" \
+    psql -qtAX -h localhost -U "$AS_USER" -d "$AS_DATABASE" -c "$1"
 }
 
 case "$ACTION" in
@@ -130,6 +142,12 @@ hypertable)
   sql "CREATE TABLE IF NOT EXISTS probe_metrics (time timestamptz NOT NULL, value double precision);" >/dev/null
   sql "SELECT create_hypertable('probe_metrics', 'time', if_not_exists => true);" >/dev/null
   sql "SELECT hypertable_name FROM timescaledb_information.hypertables WHERE hypertable_name = 'probe_metrics';"
+  ;;
+write-as)
+  as_sql "CREATE TABLE IF NOT EXISTS probe_account (value text); DELETE FROM probe_account; INSERT INTO probe_account VALUES ('known');" >/dev/null
+  ;;
+read-as)
+  as_sql "SELECT value FROM probe_account;"
   ;;
 *)
   echo "unknown action $ACTION" >&2

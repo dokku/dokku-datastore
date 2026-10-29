@@ -2,6 +2,7 @@ package definition
 
 import (
 	"fmt"
+	"maps"
 	"path"
 	"regexp"
 	"sort"
@@ -371,10 +372,15 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 		}
 	}
 
+	if err := validateAccounts(definition); err != nil {
+		return fail("%s", err)
+	}
+
 	// the value a secret is changed to only exists while it is being changed,
-	// so anything else naming it would render against nothing
+	// so anything else naming it would render against nothing. An account's
+	// password is handed over the same way when it is made or changed
 	notChange := func(name string) bool {
-		return strings.HasPrefix(name, "secrets.")
+		return strings.HasPrefix(name, "secrets.") || name == UsersCreateName || name == UsersChangeName
 	}
 	for _, body := range templateBodiesExcept(definition, notChange) {
 		if strings.Contains(body, NewSecretField) {
@@ -601,6 +607,118 @@ func validate(input ParseInput, serviceKey string, service composeService, defin
 	return nil
 }
 
+// validateAccounts rejects a databases or users block the tool could not act
+// on: one missing a command it runs, a fixed set of databases it could not
+// address, or a dsn that would hand every link the same url whatever it asked
+// for.
+func validateAccounts(definition Definition) error {
+	databases := definition.Dokku.Databases
+	if databases != nil {
+		if databases.Fixed < 0 {
+			return fmt.Errorf("x-dokku.databases.fixed is %d, which is not a number of databases", databases.Fixed)
+		}
+
+		if databases.Fixed > 0 {
+			if databases.Create != nil || databases.Destroy != nil {
+				return fmt.Errorf("x-dokku.databases declares fixed databases alongside create or destroy, but a fixed database is never made")
+			}
+
+			index, err := strconv.Atoi(databases.Default)
+			if err != nil || index < 0 || index >= databases.Fixed || strconv.Itoa(index) != databases.Default {
+				return fmt.Errorf("x-dokku.databases.default is %q, which is not an index below %d", databases.Default, databases.Fixed)
+			}
+		} else {
+			if databases.Create == nil || databases.Destroy == nil {
+				return fmt.Errorf("x-dokku.databases needs both create and destroy, or fixed")
+			}
+
+			if databases.Default != "" {
+				return fmt.Errorf("x-dokku.databases.default only names an index of fixed databases; a database a datastore makes is named for the service")
+			}
+		}
+
+		if !strings.Contains(definition.Dokku.DSN, ".Database") {
+			return fmt.Errorf("x-dokku.databases is declared, but the dsn never names .Database, so every link would get the same url")
+		}
+	}
+
+	users := definition.Dokku.Users
+	if users != nil {
+		if strings.TrimSpace(users.Default) == "" {
+			return fmt.Errorf("x-dokku.users.default is required")
+		}
+
+		if users.Secret == "" {
+			return fmt.Errorf("x-dokku.users.secret is required")
+		}
+
+		if _, ok := definition.Dokku.Secrets[users.Secret]; !ok {
+			return fmt.Errorf("x-dokku.users.secret names %q, which is not a declared secret", users.Secret)
+		}
+
+		if users.Create == nil || users.Destroy == nil || users.Change == nil {
+			return fmt.Errorf("x-dokku.users needs create, destroy and change")
+		}
+
+		for _, name := range users.Reserved {
+			if strings.TrimSpace(name) == "" {
+				return fmt.Errorf("x-dokku.users.reserved has an empty entry, which would reserve nothing")
+			}
+		}
+
+		for _, field := range []string{".Username", ".Password"} {
+			if !strings.Contains(definition.Dokku.DSN, field) {
+				return fmt.Errorf("x-dokku.users is declared, but the dsn never names %s, so every link would get the same account", field)
+			}
+		}
+	}
+
+	// the commands are told to the running datastore, or run in a container
+	// beside it, and nothing writes to their stdin
+	for name, command := range accountCommands(definition) {
+		if command.Mode == ModeHost || command.Mode == ModeOffline {
+			return fmt.Errorf("command %q runs %s, but it has to reach the running datastore", name, command.Mode)
+		}
+
+		if command.Stdin {
+			return fmt.Errorf("command %q reads stdin, which nothing writes to", name)
+		}
+	}
+
+	return nil
+}
+
+// accountCommands are the databases and users commands a definition declares,
+// keyed as allCommands names them
+func accountCommands(definition Definition) map[string]Command {
+	commands := map[string]Command{}
+	if databases := definition.Dokku.Databases; databases != nil {
+		if databases.Create != nil {
+			commands[DatabasesCreateName] = *databases.Create
+		}
+
+		if databases.Destroy != nil {
+			commands[DatabasesDestroyName] = *databases.Destroy
+		}
+	}
+
+	if users := definition.Dokku.Users; users != nil {
+		if users.Create != nil {
+			commands[UsersCreateName] = *users.Create
+		}
+
+		if users.Destroy != nil {
+			commands[UsersDestroyName] = *users.Destroy
+		}
+
+		if users.Change != nil {
+			commands[UsersChangeName] = *users.Change
+		}
+	}
+
+	return commands
+}
+
 // ImageFromDockerfile reads the image a definition pins, and reports whether the
 // Dockerfile does anything beyond pinning it. A Dockerfile that only declares its
 // base is a no-op the loader can skip building, which is what keeps eighteen of
@@ -724,6 +842,9 @@ func templateBodies(definition Definition, withUpgrade bool) []string {
 // skip names, as allCommands addresses them.
 func templateBodiesExcept(definition Definition, skip func(name string) bool) []string {
 	bodies := []string{definition.Service.Image, definition.Service.WorkingDir, definition.Dokku.DSN}
+	if users := definition.Dokku.Users; users != nil {
+		bodies = append(bodies, users.Default)
+	}
 	if jdbc := definition.Dokku.JDBC; jdbc != nil {
 		bodies = append(bodies, jdbc.URL, jdbc.Username, jdbc.Password)
 	}
@@ -812,6 +933,8 @@ func allCommands(definition Definition) map[string]Command {
 	if definition.Dokku.ServiceMemory != nil && definition.Dokku.ServiceMemory.Change != nil {
 		commands[ServiceMemoryChangeName] = *definition.Dokku.ServiceMemory.Change
 	}
+
+	maps.Copy(commands, accountCommands(definition))
 
 	return commands
 }

@@ -25,6 +25,9 @@ type ResetCommand struct {
 
 	// force is whether to reset the service without asking first
 	force bool
+
+	// database is the database to reset in place of the service's own
+	database string
 }
 
 // Name returns the name of the command
@@ -84,6 +87,7 @@ func (c *ResetCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
 	f.BoolVarP(&c.force, "force", "f", false, "reset the service without asking for its name first")
+	f.StringVar(&c.database, "database", "", "the database in the service to reset, in place of the one named for the service")
 	return f
 }
 
@@ -93,7 +97,8 @@ func (c *ResetCommand) AutocompleteFlags() complete.Flags {
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
 		complete.Flags{
-			"--force": complete.PredictNothing,
+			"--database": complete.PredictAnything,
+			"--force":    complete.PredictNothing,
 		},
 	)
 }
@@ -195,7 +200,12 @@ func (c *ResetCommand) Run(args []string) int {
 	}
 
 	if !c.force {
-		err := common.AskForDestructiveConfirmation(serviceName, fmt.Sprintf("all data in the %s service", datastoreType))
+		subject := fmt.Sprintf("all data in the %s service", datastoreType)
+		if c.database != "" {
+			subject = fmt.Sprintf("all data in the %s database of the %s service", c.database, datastoreType)
+		}
+
+		err := common.AskForDestructiveConfirmation(serviceName, subject)
 		if err != nil {
 			logger.Error(internal.ErrorInput{
 				Error: err,
@@ -206,6 +216,7 @@ func (c *ResetCommand) Run(args []string) int {
 
 	logger.Info(fmt.Sprintf("Resetting %s service %s", datastoreType, serviceName))
 	if err := datastore.ResetService(ctx, service.ResetServiceInput{
+		Database:    c.database,
 		Datastore:   datastore,
 		ServiceName: serviceName,
 	}); err != nil {
@@ -227,4 +238,9 @@ func (c *ResetCommand) Run(args []string) int {
 	logger.Header2(fmt.Sprintf("%s service %s reset", datastore.Title(), serviceName)) //nolint:errcheck
 
 	return 0
+}
+
+// DocumentsFlag reports whether a flag is described for a datastore
+func (c *ResetCommand) DocumentsFlag(name string, data internal.DocumentationData) bool {
+	return documentsDatabase(name, data)
 }

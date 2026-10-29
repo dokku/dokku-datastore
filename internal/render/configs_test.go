@@ -2,6 +2,7 @@ package render
 
 import (
 	"io/fs"
+	"strings"
 	"testing"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
@@ -13,11 +14,15 @@ func TestConfigsForRedis(t *testing.T) {
 		t.Fatalf("unable to resolve configs: %s", err)
 	}
 
-	if len(configs) != 1 {
-		t.Fatalf("expected one config, got %d", len(configs))
+	// redis.conf, and the acl file holding the default user
+	if len(configs) != 2 {
+		t.Fatalf("expected two configs, got %d", len(configs))
 	}
 
 	config := configs[0]
+	if strings.HasSuffix(config.Path, "users.acl") {
+		config = configs[1]
+	}
 
 	// the tool side path, not the bind mount source: the two differ on a docker
 	// in docker install and only one of them is writable from here
@@ -69,4 +74,36 @@ func TestConfigsAppliesADeclaredMode(t *testing.T) {
 	if expected := "lollipop"; config.Content != expected {
 		t.Errorf("expected %q, got %q", expected, config.Content)
 	}
+}
+
+// redis is told to read its users from the acl file, which replaces the default
+// user with the one it names, so the file is seeded with the default user and
+// its password, and readable by no one but dokku and the datastore
+func TestConfigsSeedRedisDefaultUser(t *testing.T) {
+	configs, err := Configs(redisInput(t))
+	if err != nil {
+		t.Fatalf("unable to resolve configs: %s", err)
+	}
+
+	for _, config := range configs {
+		if !strings.HasSuffix(config.Path, "users.acl") {
+			continue
+		}
+
+		if expected := "/var/lib/dokku/services/redis/lollipop/data/users.acl"; config.Path != expected {
+			t.Errorf("expected %q, got %q", expected, config.Path)
+		}
+
+		if expected := "user default on >hunter2 ~* &* +@all\n"; config.Content != expected {
+			t.Errorf("expected %q, got %q", expected, config.Content)
+		}
+
+		if config.Mode != fs.FileMode(0640) {
+			t.Errorf("expected mode 0640, got %v", config.Mode)
+		}
+
+		return
+	}
+
+	t.Fatal("expected the acl file to be seeded")
 }

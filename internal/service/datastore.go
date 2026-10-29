@@ -696,12 +696,81 @@ func (s *Datastore) PinnedImage(serviceName string, running string) string {
 
 // ConnectToService opens an interactive session against a service.
 func (s *Datastore) ConnectToService(ctx context.Context, input ConnectToServiceInput) error {
+	if err := s.checkAccount(input.ServiceName, "connect", nil, input.Account); err != nil {
+		return err
+	}
+
 	return s.run(ctx, input.ServiceName, "connect", runOptions{
-		TTY:    backend.HasTerminal(os.Stdin),
-		Stdin:  os.Stdin,
-		Stdout: os.Stdout,
-		Stderr: os.Stderr,
+		Account: input.Account,
+		TTY:     backend.HasTerminal(os.Stdin),
+		Stdin:   os.Stdin,
+		Stdout:  os.Stdout,
+		Stderr:  os.Stderr,
 	})
+}
+
+// checkAccount refuses a database or user a command cannot address: one the
+// service does not hold, or one the command would never be told about because
+// none of its templates names it. Redis dumps every database it holds at once,
+// so an export of one of them would hand back all of them without a word.
+func (s *Datastore) checkAccount(serviceName string, name string, command *definition.Command, account Account) error {
+	if account.IsDefault() {
+		return nil
+	}
+
+	if err := ValidateAccount(s, serviceName, account); err != nil {
+		return err
+	}
+
+	if command == nil {
+		declared, ok := s.Definition.CommandFor(name)
+		if !ok {
+			return verb.ErrNotImplemented{Plugin: s.Definition.Dokku.Plugin, Name: name}
+		}
+		command = &declared
+	}
+
+	if account.Database != "" && !CommandNames(*command, ".Database") {
+		return fmt.Errorf("%s %s acts on the whole service rather than one database, so it cannot be given --database", s.Definition.Dokku.Plugin, name)
+	}
+
+	if account.User != "" && !CommandNames(*command, ".Username") {
+		return fmt.Errorf("%s %s always runs as the same account, so it cannot be given --user", s.Definition.Dokku.Plugin, name)
+	}
+
+	return nil
+}
+
+// CommandNames reports whether any of a command's templates names a scope
+// field, such as .Database, as a field of its own rather than the tail of a
+// longer one such as .DefaultDatabase
+func CommandNames(command definition.Command, field string) bool {
+	bodies := append([]string{command.Image}, command.Exec...)
+	for _, value := range command.Env {
+		bodies = append(bodies, value)
+	}
+
+	for _, body := range bodies {
+		for rest := body; ; {
+			index := strings.Index(rest, field)
+			if index < 0 {
+				break
+			}
+
+			end := index + len(field)
+			if end == len(rest) || !isFieldCharacter(rest[end]) {
+				return true
+			}
+			rest = rest[end:]
+		}
+	}
+
+	return false
+}
+
+// isFieldCharacter reports whether a byte continues a template field name
+func isFieldCharacter(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 // ExportService writes a dump of the service's data to a writer.
@@ -711,10 +780,16 @@ func (s *Datastore) ExportService(ctx context.Context, input ExportServiceInput)
 		return err
 	}
 
+	account, err := s.dumpAccount(input.ServiceName, "export", command, input.AllDatabases, input.Database)
+	if err != nil {
+		return err
+	}
+
 	// the dump is streamed to the writer rather than buffered into a string,
 	// which is what makes it safe for binary data of any size. Nothing keeps a
 	// copy of it on the way, or a dump would be held in memory in full
 	return s.run(ctx, input.ServiceName, "export", runOptions{
+		Account:            account,
 		Command:            command,
 		ExtraArgs:          input.ExtraArgs,
 		Stdout:             input.Writer,
@@ -730,12 +805,33 @@ func (s *Datastore) ImportService(ctx context.Context, input ImportServiceInput)
 		return err
 	}
 
+	account, err := s.dumpAccount(input.ServiceName, "import", command, input.AllDatabases, input.Database)
+	if err != nil {
+		return err
+	}
+
 	return s.run(ctx, input.ServiceName, "import", runOptions{
+		Account:   account,
 		Command:   command,
 		ExtraArgs: input.ExtraArgs,
 		Stdin:     input.Reader,
 		Stderr:    os.Stderr,
 	})
+}
+
+// dumpAccount is the account an export or import of one database addresses,
+// which a dump of every database has no use for
+func (s *Datastore) dumpAccount(serviceName string, name string, command *definition.Command, allDatabases bool, database string) (Account, error) {
+	if database == "" {
+		return Account{}, nil
+	}
+
+	if allDatabases {
+		return Account{}, fmt.Errorf("%s --database names one database, so it cannot be used with --all-databases", name)
+	}
+
+	account := Account{Database: database}
+	return account, s.checkAccount(serviceName, name, command, account)
 }
 
 // CarriesDataTo reports whether a migration from this definition onto another
@@ -876,9 +972,15 @@ func (e ErrAllDatabasesUnsupported) Error() string {
 // ResetService deletes all of the service's data, leaving the service, its
 // credentials and its links as they were.
 func (s *Datastore) ResetService(ctx context.Context, input ResetServiceInput) error {
+	account := Account{Database: input.Database}
+	if err := s.checkAccount(input.ServiceName, "reset", nil, account); err != nil {
+		return err
+	}
+
 	return s.run(ctx, input.ServiceName, "reset", runOptions{
-		Stdout: os.Stdout,
-		Stderr: os.Stderr,
+		Account: account,
+		Stdout:  os.Stdout,
+		Stderr:  os.Stderr,
 	})
 }
 
@@ -1124,6 +1226,10 @@ type runOptions struct {
 	// NewSecret is the value a secret is being changed to, which only a
 	// secret's change command is given
 	NewSecret string
+
+	// Account is the database and user the command addresses in place of the
+	// service's own, empty for those
+	Account Account
 }
 
 // verbAction is what an operator is told could not be done when the image a
@@ -1148,6 +1254,19 @@ func verbAction(name string) string {
 		return "service memory change"
 	}
 
+	switch name {
+	case definition.DatabasesCreateName:
+		return "database creation"
+	case definition.DatabasesDestroyName:
+		return "database removal"
+	case definition.UsersCreateName:
+		return "user creation"
+	case definition.UsersDestroyName:
+		return "user removal"
+	case definition.UsersChangeName:
+		return "user password change"
+	}
+
 	return strings.TrimPrefix(name, "triggers.")
 }
 
@@ -1169,8 +1288,11 @@ func (s *Datastore) run(ctx context.Context, serviceName string, name string, op
 		return err
 	}
 
-	scope := s.scope(serviceName)
-	scope.Args = options.Arguments
+	// every command is handed the databases and users the service holds, as
+	// the databases and users commands are, so that one acting on the whole
+	// service, such as a reset, can leave the ones made in it alone
+	scope := s.scopeFor(serviceName, options.Account)
+	scope.Args = s.accountArguments(serviceName, options.Arguments)
 	scope.NewSecret = options.NewSecret
 
 	// a command that names an image of its own runs beside the service in it -
@@ -1270,6 +1392,21 @@ func (s *Datastore) ensureBindSources(ctx context.Context, serviceName string) e
 			if err := os.Remove(source); err != nil {
 				return fmt.Errorf("%s is mounted as a file and is a directory that could not be removed: %w", source, err)
 			}
+			missing = true
+		}
+	}
+
+	// a config the definition seeds into a directory the service already has
+	// is missing as well, since nothing else would ever make it: redis is told
+	// to read its users from a file that a service made before it was seeded
+	// does not have, and would not start without
+	for _, config := range s.Definition.Service.Configs {
+		relative, ok := s.Definition.ServicePath(config.Target)
+		if !ok {
+			continue
+		}
+
+		if _, err := os.Stat(filepath.Join(root, relative)); errors.Is(err, os.ErrNotExist) {
 			missing = true
 		}
 	}
@@ -1666,27 +1803,33 @@ func (s *Datastore) scope(serviceName string) definition.Scope {
 		ports[port.Name] = port.Target
 	}
 
-	return definition.Scope{
-		ServiceName:   serviceName,
-		ContainerName: ContainerName(s, serviceName),
-		Host:          DNSHostname(s, serviceName),
-		Database:      DatabaseName(s, serviceName),
-		Plugin:        dokku.Plugin,
-		Title:         dokku.Title,
-		Variable:      dokku.Variable,
-		Image:         image,
-		ImageVersion:  imageVersion,
-		TaggedImage:   taggedImage,
-		ServiceRoot:   serviceFolders.Root,
-		HostRoot:      serviceFolders.HostRoot,
-		Target:        s.Definition.VolumeTargets(scopeVolumeTargets(s, serviceName)),
-		Scheme:        dokku.Scheme,
-		Secret:        secrets,
-		Port:          ports,
-		Memory:        render.MemoryLimit(common.ReadFirstLine(serviceFiles.Memory)),
-		ServiceMemory: common.ReadFirstLine(serviceFiles.ServiceMemory),
-		ShmSize:       common.ReadFirstLine(serviceFiles.ShmSize),
+	database := s.DefaultDatabase(serviceName)
+	scope := definition.Scope{
+		ServiceName:     serviceName,
+		ContainerName:   ContainerName(s, serviceName),
+		Host:            DNSHostname(s, serviceName),
+		Database:        database,
+		DefaultDatabase: database,
+		Plugin:          dokku.Plugin,
+		Title:           dokku.Title,
+		Variable:        dokku.Variable,
+		Image:           image,
+		ImageVersion:    imageVersion,
+		TaggedImage:     taggedImage,
+		ServiceRoot:     serviceFolders.Root,
+		HostRoot:        serviceFolders.HostRoot,
+		Target:          s.Definition.VolumeTargets(scopeVolumeTargets(s, serviceName)),
+		Scheme:          dokku.Scheme,
+		Secret:          secrets,
+		Port:            ports,
+		Memory:          render.MemoryLimit(common.ReadFirstLine(serviceFiles.Memory)),
+		ServiceMemory:   common.ReadFirstLine(serviceFiles.ServiceMemory),
+		ShmSize:         common.ReadFirstLine(serviceFiles.ShmSize),
 	}
+
+	// the account the service was created with, which every template is
+	// rendered as unless a link or a command names another
+	return s.Definition.WithDefaultAccount(scope)
 }
 
 // cutTaggedImage splits an image reference into its name and tag, reading an

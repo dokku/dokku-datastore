@@ -5,11 +5,17 @@
 # Shared by solr-7 and solr-8, whose update and get apis are the same.
 set -eo pipefail
 
-ACTION="${1:?usage: $0 <write|clobber|read> <service>}"
-SERVICE="${2:?usage: $0 <write|clobber|read> <service>}"
+ACTION="${1:?usage: $0 <write|clobber|read|write-as|read-as> <service> [<user> <password> <database>]}"
+SERVICE="${2:?usage: $0 <write|clobber|read|write-as|read-as> <service> [<user> <password> <database>]}"
 CONTAINER="dokku.solr.$SERVICE"
 # the core the service was created with, which is named after its database
 CORE="$(cat "$DOKKU_LIB_ROOT/services/solr/$SERVICE/DATABASE_NAME")"
+
+# the -as actions do the same in a core named rather than the service's own.
+# Solr has no users, so the user and password are ignored
+if [[ "$ACTION" == *-as ]]; then
+  CORE="${5:?usage: $0 $ACTION <service> <user> <password> <core>}"
+fi
 
 # from a client beside the service, in its network namespace, since the image
 # is not one to rely on for a client of its own
@@ -32,13 +38,13 @@ put() {
 }
 
 case "$ACTION" in
-write)
+write | write-as)
   put known
   ;;
 clobber)
   put clobbered
   ;;
-read)
+read | read-as)
   solr "http://127.0.0.1:8983/solr/$CORE/get?id=probe&wt=json" | tr -d ' \n' | sed -n 's/.*"value_s":"\([^"]*\)".*/\1/p'
   ;;
 *)

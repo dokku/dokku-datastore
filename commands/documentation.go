@@ -375,7 +375,7 @@ func (c *ConnectCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *ConnectCommand) Usage() string {
-	return `<service>`
+	return `<service>{{if .Databases}} [--database <database>]{{end}}{{if .Users}} [--user <user>]{{end}}`
 }
 
 // Documentation returns the long form documentation for the command
@@ -385,7 +385,15 @@ func (c *ConnectCommand) Documentation() string {
 dokku {{.CommandPrefix}}:connect lollipop
 the connection tool only shows a prompt when it is given a terminal, which ssh allocates when run with -t.
 without a terminal, statements are read from stdin instead.
-dokku {{.CommandPrefix}}:connect lollipop < statements.txt`
+dokku {{.CommandPrefix}}:connect lollipop < statements.txt
+{{- if .Databases}}
+connect to {{if .MakesDatabases}}a database made with create-database{{else}}another of the service's databases{{end}} rather than the one the service was created with
+dokku {{.CommandPrefix}}:connect lollipop --database {{if .MakesDatabases}}paintshop{{else}}3{{end}}
+{{- end}}
+{{- if .Users}}
+connect as a user made with create-user rather than as the service's own
+dokku {{.CommandPrefix}}:connect lollipop --user painter
+{{- end}}`
 }
 
 // Group is the readme usage section the command is documented under
@@ -545,7 +553,7 @@ func (c *ExportCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *ExportCommand) Usage() string {
-	return `<service> [-f|--file <path>] [--force]{{if .AllDatabases}} [--all-databases]{{end}}{{if .ExportArgs}} [-- <export-args...>]{{end}}`
+	return `<service> [-f|--file <path>] [--force]{{if .AllDatabases}} [--all-databases]{{end}}{{if .MakesDatabases}} [--database <database>]{{end}}{{if .ExportArgs}} [-- <export-args...>]{{end}}`
 }
 
 // Documentation returns the long form documentation for the command
@@ -563,6 +571,10 @@ dokku {{.CommandPrefix}}:export lollipop --file /var/lib/dokku/data/storage/data
 only the database named for the service is exported unless --all-databases is given, which exports every database in the service, leaving out the ones the server keeps for itself.
 it is imported again with import --all-databases, into the databases it was exported from.
 dokku {{.CommandPrefix}}:export lollipop --all-databases > all.dump
+{{- end}}
+{{- if .MakesDatabases}}
+a database made with create-database is exported with --database in place of the one named for the service
+dokku {{.CommandPrefix}}:export lollipop --database paintshop > paintshop.dump
 {{- end}}
 {{- if .ExportArgs}}
 arguments after -- are passed to the tool that makes the dump, in place of the export-args property
@@ -618,7 +630,7 @@ func (c *ImportCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *ImportCommand) Usage() string {
-	return `<service> [-f|--file <path>]{{if .AllDatabases}} [--all-databases]{{end}}{{if .ImportArgs}} [-- <import-args...>]{{end}}`
+	return `<service> [-f|--file <path>]{{if .AllDatabases}} [--all-databases]{{end}}{{if .MakesDatabases}} [--database <database>]{{end}}{{if .ImportArgs}} [-- <import-args...>]{{end}}`
 }
 
 // Documentation returns the long form documentation for the command
@@ -632,6 +644,10 @@ dokku {{.CommandPrefix}}:import lollipop --file /var/lib/dokku/data/storage/data
 a dump of every database, as written by export --all-databases or a backup, is imported with --all-databases.
 each database in the dump is replaced under the name it was exported from, and any other database is left alone.
 dokku {{.CommandPrefix}}:import lollipop --all-databases < all.dump
+{{- end}}
+{{- if .MakesDatabases}}
+a dump is imported into a database made with create-database with --database in place of the one named for the service
+dokku {{.CommandPrefix}}:import lollipop --database paintshop < paintshop.dump
 {{- end}}
 {{- if .ImportArgs}}
 arguments after -- are passed to the tool that loads the dump, in place of the import-args property
@@ -672,6 +688,12 @@ dokku {{.CommandPrefix}}:info lollipop --dsn
 dokku {{.CommandPrefix}}:info lollipop --status
 dokku {{.CommandPrefix}}:info lollipop --internal-ip
 dokku {{.CommandPrefix}}:info lollipop --initial-network
+{{- if .Databases}}
+dokku {{.CommandPrefix}}:info lollipop --databases
+{{- end}}
+{{- if .Users}}
+dokku {{.CommandPrefix}}:info lollipop --users
+{{- end}}
 > NOTE: a flag cannot be combined with --format, and only one may be given
 the exposed dsn is the one a client off the host connects with. it names the expose-host, or the first global domain without one, and is empty until the service is exposed and there is a host to name:
 dokku {{.CommandPrefix}}:info lollipop --exposed-dsn
@@ -824,6 +846,28 @@ this will set the following on the linked application alongside MB_DB_CONNECTION
 a name already set on the app is refused, and a querystring is appended to the
 jdbc url as well. an app that is already linked has to be unlinked and linked
 again to be given the jdbc variables.
+{{- end}}
+{{- if .Databases}}
+
+{{if .MakesDatabases}}an app can be linked to a database made with create-database rather than the one
+named for the service with the '--database' flag:
+dokku {{.CommandPrefix}}:link lollipop playground --database paintshop
+{{- else}}an app can be linked to another of the service's {{.FixedDatabases}} databases, numbered from 0, with
+the '--database' flag:
+dokku {{.CommandPrefix}}:link lollipop playground --database 3
+{{- end}}
+{{- end}}
+{{- if .Users}}
+
+an app can be linked as a user made with create-user rather than as the service's own
+with the '--user' flag, which can be combined with the '--database' flag:
+dokku {{.CommandPrefix}}:link lollipop playground --user painter
+{{- end}}
+{{- if or .Databases .Users}}
+
+the database and user a link was made on are recorded, so unlink, promote and a
+password change find the url they gave the app. an app that is already linked has
+to be unlinked and linked again to move it to another database or user.
 {{- end}}`
 }
 
@@ -1033,7 +1077,7 @@ func (c *ResetCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *ResetCommand) Usage() string {
-	return `<service> [-f|--force]`
+	return `<service> [-f|--force]{{if .MakesDatabases}} [--database <database>]{{end}}`
 }
 
 // Documentation returns the long form documentation for the command
@@ -1043,7 +1087,11 @@ the service, its credentials, and the apps it is linked to are kept, so linked a
 connections the apps hold open may be closed.
 dokku {{.CommandPrefix}}:reset lollipop
 the service name is asked for before anything is deleted, unless --force is given
-dokku {{.CommandPrefix}}:reset lollipop --force`
+dokku {{.CommandPrefix}}:reset lollipop --force
+{{- if .MakesDatabases}}
+only the database named for the service is reset unless another is named with --database, which resets a database made with create-database and leaves every other alone
+dokku {{.CommandPrefix}}:reset lollipop --database paintshop
+{{- end}}`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1434,4 +1482,141 @@ dokku {{.CommandPrefix}}:upgrade lollipop --service-memory 256
 // Group is the readme usage section the command is documented under
 func (c *UpgradeCommand) Group() string {
 	return definition.GroupServiceLifecycle
+}
+
+// Description returns the one line description of the command, in the idiom of the
+// plugin rather than of the binary
+func (c *CreateDatabaseCommand) Description() string {
+	return `create a database in the {{.Title}} service`
+}
+
+// Usage returns the argument sketch rendered after the command name
+func (c *CreateDatabaseCommand) Usage() string {
+	return `<service> <database>`
+}
+
+// Documentation returns the long form documentation for the command
+func (c *CreateDatabaseCommand) Documentation() string {
+	return `create a database named 'paintshop' in the running 'lollipop' service, beside the one it was created with
+dokku {{.CommandPrefix}}:create-database lollipop paintshop
+{{- if .Users}}
+every user the service holds is given access to it.
+{{- end}}
+a database name may only contain lowercase letters, digits and '_', start with a letter or '_', and be at most 32 characters long.
+link an app to it with the '--database' flag
+dokku {{.CommandPrefix}}:link lollipop playground --database paintshop`
+}
+
+// Group is the readme usage section the command is documented under
+func (c *CreateDatabaseCommand) Group() string {
+	return definition.GroupDatabasesAndUsers
+}
+
+// Description returns the one line description of the command, in the idiom of the
+// plugin rather than of the binary
+func (c *DestroyDatabaseCommand) Description() string {
+	return `destroy a database created in the {{.Title}} service`
+}
+
+// Usage returns the argument sketch rendered after the command name
+func (c *DestroyDatabaseCommand) Usage() string {
+	return `<service> <database> [-f|--force]`
+}
+
+// Documentation returns the long form documentation for the command
+func (c *DestroyDatabaseCommand) Documentation() string {
+	return `destroy the 'paintshop' database made in the running 'lollipop' service, along with all of its data
+dokku {{.CommandPrefix}}:destroy-database lollipop paintshop
+the database name is asked for before anything is deleted, unless --force is given.
+a database an app is still linked to is refused, and the one the service was created with is only removed with the service.
+dokku {{.CommandPrefix}}:destroy-database lollipop paintshop --force`
+}
+
+// Group is the readme usage section the command is documented under
+func (c *DestroyDatabaseCommand) Group() string {
+	return definition.GroupDatabasesAndUsers
+}
+
+// Description returns the one line description of the command, in the idiom of the
+// plugin rather than of the binary
+func (c *CreateUserCommand) Description() string {
+	return `create a user in the {{.Title}} service`
+}
+
+// Usage returns the argument sketch rendered after the command name
+func (c *CreateUserCommand) Usage() string {
+	return `<service> <user> [<password>]`
+}
+
+// Documentation returns the long form documentation for the command
+func (c *CreateUserCommand) Documentation() string {
+	return `create a user named 'painter' in the running 'lollipop' service, with a generated password
+dokku {{.CommandPrefix}}:create-user lollipop painter
+the user is given access to every database the service holds, and to every database made in it later.
+a password of your own may be given instead.
+it may only contain letters, digits, '.', '_', '~' and '-'.
+dokku {{.CommandPrefix}}:create-user lollipop painter SOME_PASSWORD
+a user name may only contain lowercase letters, digits and '_', start with a letter or '_', and be at most 32 characters long.
+link an app as the user with the '--user' flag, which hands it the password in its url
+dokku {{.CommandPrefix}}:link lollipop playground --user painter`
+}
+
+// Group is the readme usage section the command is documented under
+func (c *CreateUserCommand) Group() string {
+	return definition.GroupDatabasesAndUsers
+}
+
+// Description returns the one line description of the command, in the idiom of the
+// plugin rather than of the binary
+func (c *DestroyUserCommand) Description() string {
+	return `destroy a user created in the {{.Title}} service`
+}
+
+// Usage returns the argument sketch rendered after the command name
+func (c *DestroyUserCommand) Usage() string {
+	return `<service> <user> [-f|--force]`
+}
+
+// Documentation returns the long form documentation for the command
+func (c *DestroyUserCommand) Documentation() string {
+	return `destroy the 'painter' user made in the running 'lollipop' service
+dokku {{.CommandPrefix}}:destroy-user lollipop painter
+the user name is asked for before it is destroyed, unless --force is given.
+a user an app is still linked as is refused, and the one the service was created with is only removed with the service.
+dokku {{.CommandPrefix}}:destroy-user lollipop painter --force`
+}
+
+// Group is the readme usage section the command is documented under
+func (c *DestroyUserCommand) Group() string {
+	return definition.GroupDatabasesAndUsers
+}
+
+// Description returns the one line description of the command, in the idiom of the
+// plugin rather than of the binary
+func (c *SetUserPasswordCommand) Description() string {
+	return `change the password of a user created in the {{.Title}} service`
+}
+
+// Usage returns the argument sketch rendered after the command name
+func (c *SetUserPasswordCommand) Usage() string {
+	return `<service> <user> [<password>] [-n|--no-restart]`
+}
+
+// Documentation returns the long form documentation for the command
+func (c *SetUserPasswordCommand) Documentation() string {
+	return `give the 'painter' user made in the running 'lollipop' service a generated password
+dokku {{.CommandPrefix}}:set-user-password lollipop painter
+or a password of your own
+dokku {{.CommandPrefix}}:set-user-password lollipop painter SOME_PASSWORD
+every app linked as the user is given the new url and restarted, unless --no-restart is given, and the apps linked as any other user are left alone.
+dokku {{.CommandPrefix}}:set-user-password lollipop painter --no-restart
+{{- if .Password}}
+the password of the user the service was created with is changed with set instead
+dokku {{.CommandPrefix}}:set lollipop password SOME_PASSWORD
+{{- end}}`
+}
+
+// Group is the readme usage section the command is documented under
+func (c *SetUserPasswordCommand) Group() string {
+	return definition.GroupDatabasesAndUsers
 }

@@ -41,3 +41,10 @@ func refuseAllDatabases(logger internal.Ui, datastore *service.Datastore, allDat
 func documentsAllDatabases(name string, data internal.DocumentationData) bool {
 	return name != "all-databases" || data.AllDatabases
 }
+
+// documentsDatabase is whether a datastore's help and readme describe the
+// --database flag of export, import and reset, which only one that makes its
+// databases accepts: a datastore with a fixed set acts on all of them at once.
+func documentsDatabase(name string, data internal.DocumentationData) bool {
+	return name != "database" || data.MakesDatabases
+}

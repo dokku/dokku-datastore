@@ -1095,7 +1095,9 @@ func TestCommitServiceConfigKeepsTheEnvironmentPrivate(t *testing.T) {
 // service records has them replaced, the way the bash plugins' write_database_name
 // did, and that recorded name is the one every template is handed.
 func TestWriteDatabaseName(t *testing.T) {
-	redis := redisDatastore(t)
+	// postgres rather than redis, whose templates are handed the index of one of
+	// its fixed databases instead
+	postgres := postgresDatastore(t)
 
 	tests := []struct {
 		serviceName string
@@ -1109,16 +1111,16 @@ func TestWriteDatabaseName(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.serviceName, func(t *testing.T) {
-			withServiceRoot(t, redis, test.serviceName)
+			withServiceRoot(t, postgres, test.serviceName)
 
 			if err := WriteDatabaseName(WriteDatabaseNameInput{
-				Datastore:   redis,
+				Datastore:   postgres,
 				ServiceName: test.serviceName,
 			}); err != nil {
 				t.Fatalf("failed to write the database name: %v", err)
 			}
 
-			content, err := os.ReadFile(Files(redis, test.serviceName).DatabaseName)
+			content, err := os.ReadFile(Files(postgres, test.serviceName).DatabaseName)
 			if err != nil {
 				t.Fatalf("failed to read the database name: %v", err)
 			}
@@ -1126,7 +1128,7 @@ func TestWriteDatabaseName(t *testing.T) {
 				t.Errorf("expected the database name %q, got %q", test.expected, actual)
 			}
 
-			if actual := redis.scope(test.serviceName).Database; actual != test.expected {
+			if actual := postgres.scope(test.serviceName).Database; actual != test.expected {
 				t.Errorf("expected templates to be handed the database %q, got %q", test.expected, actual)
 			}
 		})
@@ -1137,11 +1139,13 @@ func TestWriteDatabaseName(t *testing.T) {
 // plugins' get_database_name did: the service name as it is, since that is the
 // database such a service was created with.
 func TestDatabaseNameSeedsAMissingRecord(t *testing.T) {
-	redis := redisDatastore(t)
-	withServiceRoot(t, redis, "lolli-pop")
-	filename := Files(redis, "lolli-pop").DatabaseName
+	// postgres rather than redis, whose templates are handed the index of one of
+	// its fixed databases instead
+	postgres := postgresDatastore(t)
+	withServiceRoot(t, postgres, "lolli-pop")
+	filename := Files(postgres, "lolli-pop").DatabaseName
 
-	if actual := DatabaseName(redis, "lolli-pop"); actual != "lolli-pop" {
+	if actual := DatabaseName(postgres, "lolli-pop"); actual != "lolli-pop" {
 		t.Errorf("expected the service name %q, got %q", "lolli-pop", actual)
 	}
 
@@ -1153,7 +1157,7 @@ func TestDatabaseNameSeedsAMissingRecord(t *testing.T) {
 		t.Errorf("expected the recorded database name %q, got %q", "lolli-pop", actual)
 	}
 
-	if actual := redis.scope("lolli-pop").Database; actual != "lolli-pop" {
+	if actual := postgres.scope("lolli-pop").Database; actual != "lolli-pop" {
 		t.Errorf("expected templates to be handed the database %q, got %q", "lolli-pop", actual)
 	}
 }

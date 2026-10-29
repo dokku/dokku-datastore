@@ -24,6 +24,8 @@ type LinkCommand struct {
 	GlobalFlagCommand
 	// alias is an alternative alias to export the service url as
 	alias string
+	// database is the database in the service to link the app to
+	database string
 	// envVar is the full name of the config variable to export the service url as
 	envVar string
 	// jdbc is whether to also export the jdbc url, username and password
@@ -32,6 +34,8 @@ type LinkCommand struct {
 	noRestart bool
 	// querystring is appended to the service url
 	querystring string
+	// user is the user in the service to link the app as
+	user string
 }
 
 // Name returns the name of the command
@@ -102,6 +106,8 @@ func (c *LinkCommand) FlagSet() *flag.FlagSet {
 	f.StringVarP(&c.querystring, "querystring", "q", "", "ampersand delimited querystring arguments to append to the service url after a ?")
 	f.BoolVarP(&c.jdbc, "jdbc", "j", false, "whether to also set the jdbc url, username and password on the app, as JDBC_ prefixed config variables named after the service url's")
 	f.BoolVarP(&c.noRestart, "no-restart", "n", false, "whether to skip restarting the app")
+	f.StringVar(&c.database, "database", "", "the database in the service to link the app to, in place of the one named for the service")
+	f.StringVar(&c.user, "user", "", "the user in the service to link the app as, in place of the one the service was created with")
 	return f
 }
 
@@ -112,10 +118,12 @@ func (c *LinkCommand) AutocompleteFlags() complete.Flags {
 		c.AutocompleteGlobalFlags(),
 		complete.Flags{
 			"--alias":       complete.PredictAnything,
+			"--database":    complete.PredictAnything,
 			"--env-var":     complete.PredictAnything,
 			"--jdbc":        complete.PredictNothing,
 			"--no-restart":  complete.PredictNothing,
 			"--querystring": complete.PredictAnything,
+			"--user":        complete.PredictAnything,
 		},
 	)
 }
@@ -228,6 +236,7 @@ func (c *LinkCommand) Run(args []string) int {
 	if err := internal.LinkService(ctx, internal.LinkServiceInput{
 		Alias:       c.alias,
 		AppName:     appName,
+		Database:    c.database,
 		Datastore:   datastore,
 		EnvVar:      c.envVar,
 		JDBC:        c.jdbc,
@@ -235,6 +244,7 @@ func (c *LinkCommand) Run(args []string) int {
 		NoRestart:   c.noRestart,
 		Querystring: c.querystring,
 		ServiceName: serviceName,
+		User:        c.user,
 	}); err != nil {
 		logger.Error(internal.ErrorInput{
 			Error: err,
@@ -247,5 +257,14 @@ func (c *LinkCommand) Run(args []string) int {
 
 // DocumentsFlag reports whether a flag is described for a datastore
 func (c *LinkCommand) DocumentsFlag(name string, data internal.DocumentationData) bool {
-	return name != "jdbc" || data.JDBC
+	switch name {
+	case "jdbc":
+		return data.JDBC
+	case "database":
+		return data.Databases
+	case "user":
+		return data.Users
+	default:
+		return true
+	}
 }

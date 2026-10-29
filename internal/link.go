@@ -227,7 +227,7 @@ func LinkedJDBCConfigKeys(environment map[string]string, recorded []string, valu
 // linkedJDBCKeys returns the jdbc config keys on an app that belong to its link
 // to a service, none when the datastore has no jdbc values to find them by
 func linkedJDBCKeys(s *service.Datastore, serviceName string, appName string, environment map[string]string) []string {
-	values, ok := s.JDBC(serviceName)
+	values, ok := s.LinkJDBC(serviceName, appName)
 	if !ok {
 		return []string{}
 	}
@@ -311,6 +311,10 @@ type LinkServiceInput struct {
 	// AppName is the name of the app to link the service to
 	AppName string
 
+	// Database is the database in the service to link the app to, empty for
+	// the one named for the service
+	Database string
+
 	// Datastore is the datastore the service belongs to
 	Datastore *service.Datastore
 
@@ -333,6 +337,10 @@ type LinkServiceInput struct {
 
 	// ServiceName is the name of the service to link
 	ServiceName string
+
+	// User is the account in the service to link the app as, empty for the
+	// one the service was created with
+	User string
 }
 
 // LinkService links a service to an app
@@ -345,13 +353,20 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 		return fmt.Errorf("Invalid env var %s", input.EnvVar) //nolint:staticcheck // matches the other link errors
 	}
 
+	// the database and user the app is linked on, which are the service's own
+	// unless it asked for others the service holds
+	account := service.Account{Database: input.Database, User: input.User}
+	if err := service.ValidateAccount(input.Datastore, input.ServiceName, account); err != nil {
+		return err
+	}
+
 	jdbc := service.JDBCValues{}
 	if input.JDBC {
 		if !input.Datastore.SupportsJDBC() {
 			return fmt.Errorf("%s does not support jdbc urls", input.Datastore.Title())
 		}
 
-		values, ok := input.Datastore.JDBC(input.ServiceName)
+		values, ok := input.Datastore.AccountJDBC(input.ServiceName, account)
 		if !ok {
 			return fmt.Errorf("unable to render the jdbc url for service %s", input.ServiceName)
 		}
@@ -363,9 +378,6 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 		return err
 	}
 
-	serviceURL := input.Datastore.URL(input.ServiceName, SchemeForApp(input.Datastore, environment))
-	linkedKeys := LinkedConfigKeys(environment, service.LinkConfigKeys(input.Datastore, input.ServiceName, input.AppName), serviceURL)
-
 	// the links file decides whether the app is linked, as it does for unlink,
 	// destroy, linked and links. An app on it whose url was repointed is still
 	// linked, and linking it again would only add a second alias.
@@ -373,6 +385,16 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
 	}), input.AppName)
+
+	// an app already linked is found by the url of the account it was linked
+	// on, and one that is not by the url of the account it asks for
+	found := account
+	if linked {
+		found = service.LinkAccount(input.Datastore, input.ServiceName, input.AppName)
+	}
+
+	serviceURL := input.Datastore.AccountURL(input.ServiceName, found, SchemeForApp(input.Datastore, environment))
+	linkedKeys := LinkedConfigKeys(environment, service.LinkConfigKeys(input.Datastore, input.ServiceName, input.AppName), serviceURL)
 	if linked && len(linkedKeys) > 0 {
 		// a link made before the keys were recorded is recorded now, so that
 		// the keys are still found once the url on the app has changed
@@ -396,6 +418,10 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 		}
 
 		if err := recordLinkConfigKeys(input.Logger, input.Datastore, input.ServiceName, input.AppName, linkedKeys); err != nil {
+			return err
+		}
+
+		if err := recordLinkAccount(input.Logger, input.Datastore, input.ServiceName, input.AppName, account); err != nil {
 			return err
 		}
 
@@ -443,6 +469,12 @@ func LinkService(ctx context.Context, input LinkServiceInput) error {
 
 	// recorded even when there are none, which forgets any a lost link left
 	if err := recordLinkJDBCConfigKeys(input.Logger, input.Datastore, input.ServiceName, input.AppName, jdbcKeys); err != nil {
+		return err
+	}
+
+	// the service's own records nothing, which forgets whatever a lost link
+	// left, the same as the jdbc keys
+	if err := recordLinkAccount(input.Logger, input.Datastore, input.ServiceName, input.AppName, account); err != nil {
 		return err
 	}
 
@@ -524,7 +556,7 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 		return err
 	}
 
-	serviceURL := input.Datastore.URL(input.ServiceName, SchemeForApp(input.Datastore, environment))
+	serviceURL := input.Datastore.LinkURL(input.ServiceName, input.AppName, SchemeForApp(input.Datastore, environment))
 	linkedKeys := LinkedConfigKeys(environment, service.LinkConfigKeys(input.Datastore, input.ServiceName, input.AppName), serviceURL)
 	jdbcKeys := linkedJDBCKeys(input.Datastore, input.ServiceName, input.AppName, environment)
 
@@ -590,14 +622,29 @@ func recordLinkJDBCConfigKeys(logger Ui, s *service.Datastore, serviceName strin
 	return warnOnCorruptLinkConfigKeys(logger, serviceName, service.LinkJDBCConfigKeysProperty, service.SetLinkJDBCConfigKeys(s, serviceName, appName, keys))
 }
 
-// forgetLinkConfigKeys forgets every config key recorded for an app, warning
-// when a corrupt record had to be replaced to do so
+// recordLinkAccount records the database and user an app is linked on,
+// warning when a corrupt record had to be replaced to do so
+func recordLinkAccount(logger Ui, s *service.Datastore, serviceName string, appName string, account service.Account) error {
+	if err := warnOnCorruptLinkConfigKeys(logger, serviceName, service.LinkDatabaseProperty, service.SetLinkDatabase(s, serviceName, appName, account.Database)); err != nil {
+		return err
+	}
+
+	return warnOnCorruptLinkConfigKeys(logger, serviceName, service.LinkUserProperty, service.SetLinkUser(s, serviceName, appName, account.User))
+}
+
+// forgetLinkConfigKeys forgets every config key recorded for an app, and the
+// database and user it was linked on, warning when a corrupt record had to be
+// replaced to do so
 func forgetLinkConfigKeys(logger Ui, s *service.Datastore, serviceName string, appName string) error {
 	if err := warnOnCorruptLinkConfigKeys(logger, serviceName, service.LinkConfigKeysProperty, service.RemoveLinkConfigKeys(s, serviceName, appName)); err != nil {
 		return err
 	}
 
-	return warnOnCorruptLinkConfigKeys(logger, serviceName, service.LinkJDBCConfigKeysProperty, service.RemoveLinkJDBCConfigKeys(s, serviceName, appName))
+	if err := warnOnCorruptLinkConfigKeys(logger, serviceName, service.LinkJDBCConfigKeysProperty, service.RemoveLinkJDBCConfigKeys(s, serviceName, appName)); err != nil {
+		return err
+	}
+
+	return recordLinkAccount(logger, s, serviceName, appName, service.Account{})
 }
 
 // warnOnCorruptLinkConfigKeys turns the report of a corrupt record that was
@@ -611,12 +658,20 @@ func warnOnCorruptLinkConfigKeys(logger Ui, serviceName string, property string,
 	}
 
 	consequence := "so those apps are found by their exact url until they are linked or promoted again"
-	if property == service.LinkJDBCConfigKeysProperty {
+	recorded := "config keys"
+	switch property {
+	case service.LinkJDBCConfigKeysProperty:
 		consequence = "so unlinking those apps leaves their jdbc config in place"
+	case service.LinkDatabaseProperty:
+		recorded = "databases"
+		consequence = "so those apps are looked for on the service's own database until they are linked again"
+	case service.LinkUserProperty:
+		recorded = "users"
+		consequence = "so those apps are looked for as the service's own user until they are linked again"
 	}
 
 	logger.Warn(WarnInput{
-		Warning: fmt.Sprintf("The %s property of service %s could not be parsed, and was replaced. The config keys it recorded for other linked apps were lost, %s", property, serviceName, consequence),
+		Warning: fmt.Sprintf("The %s property of service %s could not be parsed, and was replaced. The %s it recorded for other linked apps were lost, %s", property, serviceName, recorded, consequence),
 	})
 
 	return nil

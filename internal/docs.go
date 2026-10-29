@@ -141,6 +141,18 @@ type DocumentationData struct {
 	ServiceMemory        bool
 	ServiceMemoryDefault int
 	ServiceMemoryLive    bool
+
+	// Databases is whether an app can be linked to, and a command can address,
+	// a database other than the one named for the service. MakesDatabases is
+	// whether those are made with create-database, and FixedDatabases the
+	// number of them a datastore that does not make them always has.
+	Databases      bool
+	MakesDatabases bool
+	FixedDatabases int
+
+	// Users is whether a service can be given users beside its own, which an
+	// app can be linked as
+	Users bool
 }
 
 // DocumentedImage is an image and the version a definition pins for it.
@@ -191,6 +203,12 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 
 	jdbcURL, jdbcUsername := documentedJDBC(input.Datastore)
 
+	databases := input.Datastore.Definition.Dokku.Databases
+	fixedDatabases := 0
+	if databases != nil {
+		fixedDatabases = databases.Fixed
+	}
+
 	return DocumentationData{
 		AltAlias:       properties.AltAlias,
 		CommandPrefix:  properties.CommandPrefix,
@@ -225,6 +243,11 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		ServiceMemory:        serviceMemory != nil,
 		ServiceMemoryDefault: serviceMemoryDefault,
 		ServiceMemoryLive:    serviceMemory != nil && serviceMemory.Change != nil,
+
+		Databases:      databases != nil,
+		MakesDatabases: databases.Makes(),
+		FixedDatabases: fixedDatabases,
+		Users:          input.Datastore.SupportsUsers(),
 	}
 }
 

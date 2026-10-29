@@ -61,9 +61,12 @@ func redisDefinition(t *testing.T) definition.Definition {
 func redisInput(t *testing.T, name string) RunInput {
 	t.Helper()
 
+	// rendered as the service's own account, which is what a service's scope
+	// carries unless a link or a command names another
+	redis := redisDefinition(t)
 	return RunInput{
-		Definition: redisDefinition(t),
-		Scope:      redisScope(),
+		Definition: redis,
+		Scope:      redis.WithDefaultAccount(redisScope()),
 		Name:       name,
 		Names:      backend.Names{Container: "dokku.redis.lollipop", Ambassador: "dokku.redis.lollipop.ambassador"},
 	}
@@ -121,9 +124,10 @@ func TestResolveOmnisciConnectUsesTheDsnAccount(t *testing.T) {
 	scope.ContainerName = "dokku.omnisci.lollipop"
 	scope.Plugin = "omnisci"
 
+	omnisci := definitionFor(t, "omnisci")
 	resolved, err := Resolve(RunInput{
-		Definition: definitionFor(t, "omnisci"),
-		Scope:      scope,
+		Definition: omnisci,
+		Scope:      omnisci.WithDefaultAccount(scope),
 		Name:       "connect",
 		Names:      backend.Names{Container: scope.ContainerName},
 	})

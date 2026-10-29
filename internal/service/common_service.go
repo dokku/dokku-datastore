@@ -390,6 +390,14 @@ type ServiceFolders struct {
 	// Data is the data folder for the service
 	Data string
 
+	// Databases holds a file for each database made in the service beside the
+	// one named for it, named after the database
+	Databases string
+
+	// Auth holds a file for each account made in the service beside its own,
+	// named after the account and holding its password
+	Auth string
+
 	// HostRoot is the host root folder for the service
 	HostRoot string
 
@@ -410,6 +418,8 @@ func Folders(s *Datastore, serviceName string) ServiceFolders {
 		BackupEncryption: filepath.Join(serviceRoot, "backup-encryption"),
 		Config:           filepath.Join(serviceRoot, "config"),
 		Data:             filepath.Join(serviceRoot, "data"),
+		Databases:        filepath.Join(serviceRoot, "databases"),
+		Auth:             filepath.Join(serviceRoot, "auth"),
 		HostRoot:         filepath.Join(DokkuLibHostRoot, "services", directory, serviceName),
 		HostConfig:       filepath.Join(DokkuLibHostRoot, "services", directory, serviceName, "config"),
 		HostData:         filepath.Join(DokkuLibHostRoot, "services", directory, serviceName, "data"),

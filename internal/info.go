@@ -56,6 +56,7 @@ var InfoKeys = []InfoKey{
 	{Name: "custom-env", Description: "show the custom environment the service container is run with"},
 	{Name: "data-dir", Description: "show the service data directory"},
 	{Name: "database-name", Description: "show the name of the database inside the service"},
+	{Name: "databases", Description: "show the databases an app can be linked to in the service, space separated"},
 	{Name: "definition", Description: "show the definition the service was created with"},
 	{Name: "dsn", Description: "show the service DSN"},
 	{Name: "export-args", Description: "show the extra arguments every export of the service is run with"},
@@ -87,6 +88,7 @@ var InfoKeys = []InfoKey{
 	{Name: "service-root", Description: "show the service root directory"},
 	{Name: "shm-size", Description: "show the shared memory size the service container is run with"},
 	{Name: "status", Description: "show the service running status"},
+	{Name: "users", Description: "show the users an app can be linked as in the service, space separated"},
 	{Name: "version", Description: "show the service image version"},
 	{Name: "volume-targets", Description: "show the container paths the service's volumes are mounted at in place of the definition's"},
 	{Name: "wait-timeout", Description: "show the seconds the service is waited on to become ready"},
@@ -143,6 +145,10 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info[service.BackupTimestampProperty] = strconv.FormatBool(service.BackupTimestamp(input.Datastore, input.ServiceName))
 	info["custom-env"] = customEnv(serviceFiles.Env)
 	info["database-name"] = service.DatabaseName(input.Datastore, input.ServiceName)
+	// the names alone: a user's password reaches an app through its url, and
+	// is never printed here
+	info["databases"] = service.DatabasesSummary(input.Datastore, input.ServiceName)
+	info["users"] = strings.Join(service.Users(input.Datastore, input.ServiceName), " ")
 	info["definition"] = common.ReadFirstLine(serviceFiles.Definition)
 	info["image"] = common.ReadFirstLine(serviceFiles.Image)
 	info["image-version"] = common.ReadFirstLine(serviceFiles.ImageVersion)

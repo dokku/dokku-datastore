@@ -83,6 +83,10 @@ type ConnectToServiceInput struct {
 
 	// ServiceName is the name of the service to connect to
 	ServiceName string
+
+	// Account is the database and user to connect as, empty for the
+	// service's own
+	Account Account
 }
 
 // ExportServiceInput is the input for the ExportService function
@@ -103,6 +107,9 @@ type ExportServiceInput struct {
 	// AllDatabases exports every database in the service rather than only the
 	// one named for it, which only a datastore that declares it can do
 	AllDatabases bool
+
+	// Database is the database to export in place of the service's own
+	Database string
 }
 
 // ImportServiceInput is the input for the ImportService function
@@ -123,6 +130,9 @@ type ImportServiceInput struct {
 	// AllDatabases loads a dump of every database in a service, the kind an
 	// export with AllDatabases writes, rather than one of a single database
 	AllDatabases bool
+
+	// Database is the database to import into in place of the service's own
+	Database string
 }
 
 // ResetServiceInput is the input for the ResetService function
@@ -132,6 +142,9 @@ type ResetServiceInput struct {
 
 	// ServiceName is the name of the service to reset
 	ServiceName string
+
+	// Database is the database to reset in place of the service's own
+	Database string
 }
 
 var (
