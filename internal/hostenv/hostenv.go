@@ -7,6 +7,7 @@ package hostenv
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Sidecar images the plugin runs alongside a service. They are pinned rather
@@ -124,12 +125,72 @@ func PluginCommandPrefix() string {
 // looked for somewhere no plugin installs anything and was never found.
 //
 // An empty result means there is nowhere to look, which is what running outside
-// a dokku install looks like.
+// a dokku install looks like. It is also empty under a command namespace: the
+// plugin serving every datastore ships no definitions of its own, and a
+// PLUGIN_COMMAND_PREFIX it inherited from a per-datastore plugin's environment
+// names a checkout that is not its own.
 func PluginCheckout() string {
+	if CommandNamespace() != "" {
+		return ""
+	}
+
 	base, prefix := PluginBasePath(), PluginCommandPrefix()
 	if base == "" || prefix == "" {
 		return ""
 	}
 
 	return filepath.Join(base, prefix)
+}
+
+// PluginEnabledPath is the directory holding a symlink for every enabled
+// plugin. Dokku exports it to everything it runs, and PLUGIN_PATH is where it
+// keeps it when that export is missing.
+func PluginEnabledPath() string {
+	if enabled := os.Getenv("PLUGIN_ENABLED_PATH"); enabled != "" {
+		return enabled
+	}
+
+	if base := os.Getenv("PLUGIN_PATH"); base != "" {
+		return filepath.Join(base, "enabled")
+	}
+
+	return filepath.Join(PluginPath(), "enabled")
+}
+
+// commandNamespace is the dokku command every datastore is reached through,
+// and empty when each datastore is a plugin of its own
+var commandNamespace string
+
+// SetCommandNamespace makes every datastore reachable through a single dokku
+// command, as in `dokku datastore:create postgres lollipop`, rather than
+// through a command named for the datastore, as in `dokku postgres:create
+// lollipop`. It is set once, by whatever embeds the binary as such a plugin,
+// before anything else runs.
+func SetCommandNamespace(namespace string) {
+	commandNamespace = namespace
+}
+
+// CommandNamespace is the dokku command every datastore is reached through, or
+// empty when each datastore is a plugin of its own.
+func CommandNamespace() string {
+	return commandNamespace
+}
+
+// DokkuCommand is how a user runs one of a datastore's commands, so that a
+// hint or a crontab line names a command that exists whichever way the
+// datastore is installed.
+func DokkuCommand(commandPrefix string, name string, args ...string) string {
+	parts := append([]string{"dokku", Invocation(commandPrefix, name)}, args...)
+	return strings.Join(parts, " ")
+}
+
+// Invocation is a datastore's command as dokku is asked for it, without the
+// dokku in front: postgres:create for a plugin of its own, and datastore:create
+// postgres under a command namespace.
+func Invocation(commandPrefix string, name string) string {
+	if namespace := CommandNamespace(); namespace != "" {
+		return namespace + ":" + name + " " + commandPrefix
+	}
+
+	return commandPrefix + ":" + name
 }

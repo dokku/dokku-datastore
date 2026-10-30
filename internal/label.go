@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 )
 
@@ -123,7 +124,7 @@ func unlabeledSet(current map[string]string, input UnlabelServiceInput) (map[str
 	}
 
 	if len(input.Keys) == 0 {
-		return nil, "", fmt.Errorf("Must specify at least one label, use %s:unlabel --all to remove all labels", commandPrefix) //nolint:staticcheck // matches dokku's storage plugin
+		return nil, "", fmt.Errorf("Must specify at least one label, use %s --all to remove all labels", hostenv.Invocation(commandPrefix, "unlabel")) //nolint:staticcheck // matches dokku's storage plugin
 	}
 
 	labels := make(map[string]string, len(current))

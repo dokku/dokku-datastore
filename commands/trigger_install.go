@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
-	"github.com/dokku/dokku-datastore/internal/service"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/josegonzalez/cli-skeleton/command"
 	"github.com/posener/complete"
 	flag "github.com/spf13/pflag"
@@ -135,11 +135,8 @@ func (c *TriggerInstallCommand) Run(args []string) int {
 		return 1
 	}
 
-	datastore, ok := service.Datastores[datastoreType]
+	datastore, ok := lookupDatastore(logger, datastoreType)
 	if !ok {
-		logger.Error(internal.ErrorInput{
-			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
-		})
 		return 1
 	}
 
@@ -149,6 +146,25 @@ func (c *TriggerInstallCommand) Run(args []string) int {
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1
+	}
+
+	// a plugin taking a datastore back from the one serving every datastore
+	// has to put its own command back in the crontab, which dokku only writes
+	// again when asked. Under a namespace this is left to whatever installed
+	// every datastore, which asks once rather than once per datastore
+	if hostenv.CommandNamespace() == "" {
+		scheduled, err := internal.HasScheduledBackups(ctx, datastore)
+		if err != nil {
+			logger.Error(internal.ErrorInput{Error: err})
+			return 1
+		}
+
+		if scheduled {
+			if err := internal.RegenerateCrontab(ctx); err != nil {
+				logger.Error(internal.ErrorInput{Error: err})
+				return 1
+			}
+		}
 	}
 
 	return 0

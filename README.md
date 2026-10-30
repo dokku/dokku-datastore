@@ -6,8 +6,10 @@ A re-implementation of the datastore codebases in golang.
 
 ```shell
 # substitute the version number as desired
-go build -ldflags "-X main.Version=0.1.0" .
+go build -ldflags "-X main.Version=v0.1.0" .
 ```
+
+Releases are tagged `v<version>`, such as `v0.11.0`, which is the form go resolves a module version from, so that dokku can require this repository as a module. The binary reports the tag as its version, and the debian packages drop the `v`, since a debian version starts with a digit. Releases before `v0.11.0` were tagged without it.
 
 ## Testing
 
@@ -27,6 +29,9 @@ DEFINITION=redis BACKEND=compose bats tests/definition
 
 # the same definition through both backends, compared as docker sees it
 DEFINITION=redis bats tests/backends.bats
+
+# one definition through a plugin serving every datastore, built on the sdk package
+DEFINITION=redis bats tests/sdk.bats
 ```
 
 ## Usage
@@ -59,8 +64,10 @@ Available commands are:
     exists                                Checks if a service exists
     export                                Exports a service's data to stdout or a file
     expose                                Exposes a service
+    generate                              Writes the files a plugin derives from its datastore definition
     import                                Imports data into a service from stdin or a file
     info                                  Gets information about a service
+    invoke                                Invokes a datastore's own command against a service
     label                                 Adds docker labels to a service
     link                                  Links a service to an app
     linked                                Checks if a service is linked to an app
@@ -72,14 +79,17 @@ Available commands are:
     promote                               Promotes a linked service to the default config variable for an app
     readme                                Writes a datastore plugin's readme to stdout
     reexpose                              Applies a service's expose settings to its exposed ports
+    reset                                 Deletes all data in a datastore service
     restart                               Restarts a service
     set                                   Sets or clears a property for a service
     set-user-password                     Changes the password of a user created in a service
     start                                 Starts a service
     stop                                  Stops a service and removes the container
+    trigger                               Runs a dokku trigger a datastore implements
     trigger-cron-entries                  Lists the scheduled backups dokku writes into its crontab
     trigger-help                          Prints the help a dokku plugin's commands script is asked for
     trigger-install                       Prepares the host for a datastore plugin
+    trigger-namespace-help                Prints the help a plugin serving every datastore is asked for
     trigger-post-app-clone-setup          Copies an app's service links onto its clone
     trigger-post-app-rename-setup         Carries an app's service links across a rename
     trigger-post-container-create         Attaches a new app container to the networks of its links
@@ -1385,8 +1395,50 @@ x-dokku:
       body: |
         every {{.Title}} service is created with a self-signed certificate.
         to refuse an unencrypted connection, add 'sslmode=require' to the dsn the service is exposed at:
-        dokku {{.CommandPrefix}}:info lollipop --exposed-dsn
+        dokku {{.Command "info"}} lollipop --exposed-dsn
             postgres://postgres:PASSWORD@db.example.com:5432/lollipop?sslmode=require
 ```
 
-Both are templates rendered against the same data a command's documentation is, and the body is written the way that documentation is. A line starting with `dokku` or `export` becomes a shell block, a line indented by four spaces becomes a literal block, and a line opening with `>` becomes a note. Every other line is prose, and prose lines run together into one paragraph up to the next block, so each sentence ends in a period. Inline code is written in single quotes, which become backticks, and an all caps word is quoted as though it were a variable, so write "tls" and "dsn" in lowercase and leave contractions out. A section with no title or no body, or two with one title, is refused when the definition is parsed.
+Both are templates rendered against the same data a command's documentation is, and the body is written the way that documentation is. A command is written as `{{.Command "info"}}`, which renders as `postgres:info` for a plugin of its own and as `datastore:info postgres` for the plugin serving every datastore, rather than as `{{.CommandPrefix}}:info`, which names a command only the first of those has. A line starting with `dokku` or `export` becomes a shell block, a line indented by four spaces becomes a literal block, and a line opening with `>` becomes a note. Every other line is prose, and prose lines run together into one paragraph up to the next block, so each sentence ends in a period. Inline code is written in single quotes, which become backticks, and an all caps word is quoted as though it were a variable, so write "tls" and "dsn" in lowercase and leave contractions out. A section with no title or no body, or two with one title, is refused when the definition is parsed.
+
+## Shipping every datastore as one plugin
+
+Each datastore can also be served by a single dokku plugin, with the datastore type as the first argument of every command, as in `dokku datastore:create postgres lollipop`. Dokku ships that plugin as one of its own go plugins, built on the `sdk` package here:
+
+| Binary | Entry point | What it is handed |
+| --- | --- | --- |
+| `commands` | `sdk.RunCommands(os.Args[1:])` | the help dokku asks every plugin for, and any of the plugin's commands it found no subcommand for, which is what a datastore's own commands such as `connect-admin` are |
+| `subcommands/<name>` | `sdk.RunSubcommand(name, os.Args[2:])` | one of the commands every datastore may implement, with the datastore type first |
+| `<trigger>` | `sdk.RunTrigger(name, os.Args[1:])` | a dokku trigger, which it runs for every datastore in turn, stopping at the first that fails |
+
+`sdk.SubcommandNames()` and `sdk.TriggerNames()` list the subcommands and triggers such a plugin links, so a test of the plugin can check that it links every one. `sdk.Run` is what the `dokku-datastore` binary itself runs, and `sdk.Version()` reports the version of this module the plugin was built with.
+
+```shell
+dokku datastore:create postgres lollipop
+dokku datastore:link postgres lollipop playground
+dokku datastore:help
+dokku datastore:help postgres
+dokku datastore:help postgres create
+dokku datastore:version
+```
+
+The plugin differs from the per-datastore plugins in a few ways:
+
+- It runs every datastore from the definitions compiled into it, and reads no definitions from a plugin checkout.
+- Every hint, crontab line and piece of help it prints names its own commands, so a scheduled backup runs as `dokku datastore:backup postgres lollipop my-bucket --id default`.
+- Installing it does not pull the image of a datastore with no services, since it is installed with dokku itself. A command that needs an image fetches it when it gets there.
+- A datastore whose own plugin is enabled is left to that plugin by every trigger, so the two never both act on one event. A plugin is taken to serve a datastore when it is named after it, or when its `config` exports `PLUGIN_COMMAND_PREFIX` as that datastore.
+
+### Migrating from a per-datastore plugin
+
+The two keep their services in the same place, so moving a datastore from its own plugin to the one serving every datastore leaves services, containers, data, properties, global settings and links where they are. Running services and linked apps are not stopped. Using postgres as the example:
+
+1. Upgrade dokku to a release that ships the `datastore` plugin. While dokku-postgres is enabled, the new plugin leaves postgres to it.
+2. Check that `dokku datastore:version` is at least the version dokku-postgres runs, which is what `/var/lib/dokku/data/postgres/dokku-datastore version` prints. If the plugin runs a newer one, wait for a dokku release that ships it, so the services are never read by an older binary than the one that last wrote them.
+3. Uninstall the plugin with `dokku plugin:uninstall postgres`. It has no uninstall step, so nothing it set up on the host is removed.
+4. Run `dokku plugin:install` with no arguments, which runs every plugin's install step. The plugin serving every datastore now serves postgres, so it sets up the host for it, brings its services up to date, pulls its images and has dokku write its crontab again, so that each scheduled backup runs through `dokku datastore:backup`.
+5. Change anything that runs `dokku postgres:<command> <service>` to run `dokku datastore:<command> postgres <service>`.
+
+To go back, install dokku-postgres again from a release running at least the version `dokku datastore:version` prints. Its install step has dokku write the crontab again when a postgres service has a scheduled backup, so the backups run through `dokku postgres:backup` once more.
+
+A plugin that ships definitions of its own in `datastore/<name>/` should stay installed, since the plugin serving every datastore does not read them. While both are enabled, `dokku datastore:<command> postgres` still runs, with the definitions compiled into the `datastore` plugin rather than the ones dokku-postgres ships, and is best left alone until the move is done.

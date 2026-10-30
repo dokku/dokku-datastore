@@ -185,7 +185,7 @@ func migrateOnce(ctx context.Context, input migrateServiceInput, plan migration)
 
 	upgrade.Logger.Info(fmt.Sprintf("The data %s had on %s was kept in %s", upgrade.ServiceName, current.DefinitionName(), filepath.Join(folders.Root, previousData)))
 	if _, ok := input.Target.Definition.Dokku.CustomCommands[upgradeCleanupCommand]; ok {
-		upgrade.Logger.Info(fmt.Sprintf("Remove it once the upgrade is confirmed with: dokku %s:%s %s", current.Properties().CommandPrefix, upgradeCleanupCommand, upgrade.ServiceName))
+		upgrade.Logger.Info(fmt.Sprintf("Remove it once the upgrade is confirmed with: %s", hostenv.DokkuCommand(current.Properties().CommandPrefix, upgradeCleanupCommand, upgrade.ServiceName)))
 	}
 	return nil
 }

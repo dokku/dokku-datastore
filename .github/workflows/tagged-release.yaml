@@ -19,9 +19,16 @@ jobs:
     env:
       CI_BRANCH: release
       PACKAGECLOUD_REPOSITORY: dokku/dokku
-      VERSION: ${{ github.ref_name }}
 
     steps:
+      # a release is tagged v<version> so that go resolves it as a module
+      # version, and a debian version has to start with a digit, so the
+      # packages are versioned without the v. The binary reports the tag as it
+      # is, which is what a plugin pinning the release compares it against
+      - name: Set Package Version
+        run: |
+          echo "VERSION=${GITHUB_REF_NAME#v}" >>"$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@v7
 
@@ -74,8 +81,8 @@ jobs:
           cp dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-amd64 build/linux/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-amd64
           cp dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-arm64 build/linux/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-arm64
 
-          bundle exec make build/deb/${{ steps.repo-name.outputs.REPOSITORY_NAME }}_${{ github.ref_name }}_arm64.deb
-          bundle exec make build/deb/${{ steps.repo-name.outputs.REPOSITORY_NAME }}_${{ github.ref_name }}_amd64.deb
+          bundle exec make "build/deb/${{ steps.repo-name.outputs.REPOSITORY_NAME }}_${VERSION}_arm64.deb"
+          bundle exec make "build/deb/${{ steps.repo-name.outputs.REPOSITORY_NAME }}_${VERSION}_amd64.deb"
           cp build/deb/*.deb dist/
         env:
           BUNDLE_GEMFILE: .github/Gemfile

@@ -153,11 +153,8 @@ func (c *BackupCommand) Run(args []string) int {
 		return 1
 	}
 
-	datastore, ok := service.Datastores[datastoreType]
+	datastore, ok := lookupDatastore(logger, datastoreType)
 	if !ok {
-		logger.Error(internal.ErrorInput{
-			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
-		})
 		return 1
 	}
 

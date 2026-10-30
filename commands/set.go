@@ -207,11 +207,8 @@ func (c *SetCommand) Run(args []string) int {
 		return 1
 	}
 
-	datastore, ok := service.Datastores[datastoreType]
+	datastore, ok := lookupDatastore(logger, datastoreType)
 	if !ok {
-		logger.Error(internal.ErrorInput{
-			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
-		})
 		return 1
 	}
 
@@ -405,11 +402,8 @@ func (c *SetCommand) runGlobal(logger internal.Ui, args []string) int {
 		return 1
 	}
 
-	datastore, ok := service.Datastores[datastoreType]
+	datastore, ok := lookupDatastore(logger, datastoreType)
 	if !ok {
-		logger.Error(internal.ErrorInput{
-			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
-		})
 		return 1
 	}
 

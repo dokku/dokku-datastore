@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -355,5 +356,72 @@ func TestNewDocumentationDataVolumes(t *testing.T) {
 	memcached := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["memcached"]})
 	if memcached.VolumeKey != "" || len(memcached.Volumes) != 0 {
 		t.Errorf("expected memcached to document no volumes, got %q and %v", memcached.VolumeKey, memcached.Volumes)
+	}
+}
+
+// A template names a command with .Command, which reads as the command a user
+// runs whichever way the datastore is installed
+func TestDocumentationDataCommand(t *testing.T) {
+	data := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["redis"]})
+
+	rendered, err := RenderDocumentation(`dokku {{.Command "create"}} lollipop`, data)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if rendered != "dokku redis:create lollipop" {
+		t.Errorf("expected the per-datastore command, got %q", rendered)
+	}
+
+	hostenv.SetCommandNamespace("datastore")
+	t.Cleanup(func() {
+		hostenv.SetCommandNamespace("")
+	})
+
+	rendered, err = RenderDocumentation(`dokku {{.Command "create"}} lollipop`, data)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if rendered != "dokku datastore:create redis lollipop" {
+		t.Errorf("expected the namespaced command, got %q", rendered)
+	}
+}
+
+// A datastore's own plugin owns it whether it is installed under the
+// datastore's name or another one, and a plugin serving no datastore owns none
+func TestOwnedTypes(t *testing.T) {
+	enabled := t.TempDir()
+	t.Setenv("PLUGIN_ENABLED_PATH", enabled)
+
+	plugins := map[string]string{
+		"redis":    `export PLUGIN_COMMAND_PREFIX="redis"`,
+		"my-mysql": `export PLUGIN_COMMAND_PREFIX="mysql"`,
+		"apps":     "",
+	}
+	for name, config := range plugins {
+		dir := filepath.Join(enabled, name)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("unable to create %s: %s", dir, err)
+		}
+
+		if config == "" {
+			continue
+		}
+
+		if err := os.WriteFile(filepath.Join(dir, "config"), []byte("#!/usr/bin/env bash\n"+config+"\n"), 0644); err != nil {
+			t.Fatalf("unable to write the config: %s", err)
+		}
+	}
+
+	owned := OwnedTypes()
+	for _, expected := range []string{"redis", "mysql"} {
+		if !owned[expected] {
+			t.Errorf("expected %s to be owned, got %v", expected, owned)
+		}
+	}
+
+	if len(owned) != 2 {
+		t.Errorf("expected only redis and mysql to be owned, got %v", owned)
 	}
 }

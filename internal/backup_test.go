@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 )
@@ -305,6 +306,21 @@ func TestCrontabLine(t *testing.T) {
 				t.Errorf("expected %q, got %q", test.expected, actual)
 			}
 		})
+	}
+}
+
+// Under a command namespace the crontab runs the backup through the plugin
+// serving every datastore, since the per-datastore command is not there
+func TestCrontabLineUnderANamespace(t *testing.T) {
+	t.Setenv("DOKKU_LOGS_DIR", "")
+	hostenv.SetCommandNamespace("datastore")
+	t.Cleanup(func() {
+		hostenv.SetCommandNamespace("")
+	})
+
+	expected := "0 3 * * * dokku datastore:backup redis lollipop my-bucket --id default &>> /var/log/dokku/redis.lollipop.backup.log"
+	if actual := CrontabLine("redis", "lollipop", BackupSchedule{Schedule: "0 3 * * *", BucketName: "my-bucket"}); actual != expected {
+		t.Errorf("expected %q, got %q", expected, actual)
 	}
 }
 

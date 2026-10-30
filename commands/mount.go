@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -185,7 +186,7 @@ func (c *MountCommand) Run(args []string) int {
 // which is not when the command that made it returns
 func mountsRebuildNote(datastore *service.Datastore) string {
 	commandPrefix := datastore.Properties().CommandPrefix
-	return fmt.Sprintf("Mounts reach the container the next time one is built; on a running service use %s:stop and then %s:start", commandPrefix, commandPrefix)
+	return fmt.Sprintf("Mounts reach the container the next time one is built; on a running service use %s and then %s", hostenv.Invocation(commandPrefix, "stop"), hostenv.Invocation(commandPrefix, "start"))
 }
 
 // resolveExistingService reads the datastore type and service name a command
@@ -201,11 +202,8 @@ func resolveExistingService(ctx context.Context, c command.NamedCommand, logger 
 		return nil, "", false
 	}
 
-	datastore, ok := service.Datastores[datastoreType]
+	datastore, ok := lookupDatastore(logger, datastoreType)
 	if !ok {
-		logger.Error(internal.ErrorInput{
-			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
-		})
 		return nil, "", false
 	}
 

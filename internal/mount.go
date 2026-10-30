@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 )
 
@@ -106,7 +107,7 @@ func mountedSet(current []service.Mount, input MountServiceInput) ([]service.Mou
 		// every mount, so that a generated list which expands to nothing cannot
 		// quietly unmount everything
 		if len(input.Specs) == 0 {
-			return nil, "", fmt.Errorf("Must specify at least one mount, use %s:unmount --all to remove all mounts", commandPrefix) //nolint:staticcheck // matches dokku's storage plugin
+			return nil, "", fmt.Errorf("Must specify at least one mount, use %s --all to remove all mounts", hostenv.Invocation(commandPrefix, "unmount")) //nolint:staticcheck // matches dokku's storage plugin
 		}
 
 		mounts := make([]service.Mount, 0, len(input.Specs))
@@ -275,7 +276,7 @@ func unmountedSet(current []service.Mount, input UnmountServiceInput) ([]service
 	}
 
 	if len(input.Specs) == 0 {
-		return nil, "", fmt.Errorf("Must specify at least one mount, use %s:unmount --all to remove all mounts", commandPrefix) //nolint:staticcheck // matches dokku's storage plugin
+		return nil, "", fmt.Errorf("Must specify at least one mount, use %s --all to remove all mounts", hostenv.Invocation(commandPrefix, "unmount")) //nolint:staticcheck // matches dokku's storage plugin
 	}
 
 	mounts := append([]service.Mount{}, current...)

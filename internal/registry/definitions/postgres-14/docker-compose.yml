@@ -395,9 +395,9 @@ x-dokku:
       documentation: |
         print the certificate the {{.Title}} service encrypts connections with
         > NOTE: the service must be running
-        dokku {{.CommandPrefix}}:certificate lollipop
+        dokku {{.Command "certificate"}} lollipop
         save it to verify the server from a client off the host
-        dokku {{.CommandPrefix}}:certificate lollipop > server.crt
+        dokku {{.Command "certificate"}} lollipop > server.crt
       exec: ["cat", "{{ .Target.certs }}/server.crt"]
 
     # the data an upgrade kept aside belongs to the postgres user, so it is
@@ -409,7 +409,7 @@ x-dokku:
       documentation: |
         remove the data an upgrade across a major version kept aside
         > NOTE: the service must be running
-        dokku {{.CommandPrefix}}:upgrade-cleanup lollipop
+        dokku {{.Command "upgrade-cleanup"}} lollipop
       mode: sidecar
       user: "0"
       entrypoint: ""
@@ -431,17 +431,17 @@ x-dokku:
         the certificate and its key are kept in '/var/lib/dokku/services/{{.CommandPrefix}}/lollipop/certs', and are kept when the service is rebuilt or upgraded.
         clients such as psql ask for an encrypted connection by default, but fall back to an unencrypted one when the server does not offer it.
         to refuse an unencrypted connection instead, add 'sslmode=require' to the dsn the service is exposed at:
-        dokku {{.CommandPrefix}}:info lollipop --exposed-dsn
+        dokku {{.Command "info"}} lollipop --exposed-dsn
             postgres://postgres:PASSWORD@db.example.com:5432/lollipop?sslmode=require
         to also check that the client is talking to this service, save its certificate and have the client verify the server with it.
         the certificate names no host, so 'sslmode=verify-ca' works where 'sslmode=verify-full' does not:
-        dokku {{.CommandPrefix}}:certificate lollipop > server.crt
+        dokku {{.Command "certificate"}} lollipop > server.crt
             postgres://postgres:PASSWORD@db.example.com:5432/lollipop?sslmode=verify-ca&sslrootcert=server.crt
         to use a certificate of your own, write it and its key over the ones the service was created with as root, and restart the service.
         writing over the files rather than replacing them keeps the owner and mode the server needs to read its key:
             sudo sh -c 'cat server.crt > /var/lib/dokku/services/{{.CommandPrefix}}/lollipop/certs/server.crt'
             sudo sh -c 'cat server.key > /var/lib/dokku/services/{{.CommandPrefix}}/lollipop/certs/server.key'
-        dokku {{.CommandPrefix}}:restart lollipop
+        dokku {{.Command "restart"}} lollipop
 
     # the image makes the database from the environment its first start sees,
     # so the only way to choose these is the custom env the service is made with
@@ -450,12 +450,12 @@ x-dokku:
         the database is made the first time the service starts, with the encoding and locale of its container, which are utf8 and 'en_US.utf8' unless the custom environment says otherwise.
         a custom environment that only sets 'LC_ALL=C' leaves the database in the SQL_ASCII encoding, which stores bytes rather than utf8 text.
         to choose both, give the arguments 'initdb' takes in POSTGRES_INITDB_ARGS when the service is created:
-        dokku {{.CommandPrefix}}:create lollipop --custom-env "POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C"
+        dokku {{.Command "create"}} lollipop --custom-env "POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C"
         they are only read when the data directory is first made, so changing the custom environment of an existing service leaves its database as it was.
         to move a database to another encoding or locale, create a service with the new ones and import an export of the old service into it:
-        dokku {{.CommandPrefix}}:export lollipop > lollipop.dump
-        dokku {{.CommandPrefix}}:create lollipop-utf8 --custom-env "POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C"
-        dokku {{.CommandPrefix}}:import lollipop-utf8 < lollipop.dump
+        dokku {{.Command "export"}} lollipop > lollipop.dump
+        dokku {{.Command "create"}} lollipop-utf8 --custom-env "POSTGRES_INITDB_ARGS=--encoding=UTF8 --locale=C"
+        dokku {{.Command "import"}} lollipop-utf8 < lollipop.dump
 
     # what an upgrade across a major version does with the data, which is not
     # something the upgrade command's own documentation can say for every
@@ -464,12 +464,12 @@ x-dokku:
       body: |
         an upgrade that moves a service to another major version, or onto another flavor, carries its data across rather than mounting it where the new version would not read it.
         the linked apps are stopped while the data is copied, so the upgrade has to be given '--restart-apps':
-        dokku {{.CommandPrefix}}:upgrade lollipop --definition postgres-18 --restart-apps
+        dokku {{.Command "upgrade"}} lollipop --definition postgres-18 --restart-apps
         onto a newer major of the official image the data is copied with 'pg_upgrade', which needs as much free disk as the data takes up.
         every other move exports every database and role from the old version with 'pg_dumpall' and replays it into the new one.
         a move that fails puts the service back on the version it ran, with the data it had.
         the old data is kept in a 'data.<definition>.<timestamp>' directory beside the service's data, and is removed once the upgrade is confirmed:
-        dokku {{.CommandPrefix}}:upgrade-cleanup lollipop
+        dokku {{.Command "upgrade-cleanup"}} lollipop
 
   commands:
     # the password goes in PGPASSWORD rather than on the command line, which is

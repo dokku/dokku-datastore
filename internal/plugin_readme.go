@@ -246,7 +246,7 @@ func readmeCommandList(input ReadmeInput) (string, error) {
 			return "", err
 		}
 
-		invocation := input.Data.CommandPrefix + ":" + c.Name() + " " + usage
+		invocation := input.Data.Command(c.Name()) + " " + usage
 		if len(invocation) > width {
 			width = len(invocation)
 		}
@@ -277,9 +277,9 @@ func readmeCommandList(input ReadmeInput) (string, error) {
 func readmeUsage(input ReadmeInput) ([]string, error) {
 	sections := []string{
 		"## Usage",
-		fmt.Sprintf("Help for any commands can be displayed by specifying the command as an argument to %s:help. "+
+		fmt.Sprintf("Help for any commands can be displayed by specifying the command as an argument to %s. "+
 			"Plugin help output in conjunction with any files in the `docs/` folder is used to generate the plugin documentation. "+
-			"Please consult the `%s:help` command for any undocumented commands.", input.Data.CommandPrefix, input.Data.CommandPrefix),
+			"Please consult the `%s` command for any undocumented commands.", input.Data.Command("help"), input.Data.Command("help")),
 	}
 
 	for _, section := range readmeSections {
@@ -333,7 +333,7 @@ func readmeCommand(c PluginCommand, input ReadmeInput) ([]string, error) {
 		return nil, err
 	}
 
-	invocation := strings.TrimSpace(fmt.Sprintf("dokku %s:%s %s", input.Data.CommandPrefix, c.Name(), usage))
+	invocation := strings.TrimSpace(fmt.Sprintf("dokku %s %s", input.Data.Command(c.Name()), usage))
 	blocks := []string{
 		"### " + description,
 		strings.Join([]string{"```shell", "# usage", invocation, "```"}, "\n"),
@@ -414,8 +414,8 @@ func readmeDockerPull(data DocumentationData) []string {
 	return []string{
 		"### Disabling `docker image pull` calls",
 		fmt.Sprintf("If you wish to disable the `docker image pull` calls that the plugin triggers, you may set the `disable-pull` "+
-			"global property to `true` with `dokku %s:set --global disable-pull true`. Once disabled, you will need to pull the service image you wish to deploy as shown in the "+
-			"`stderr` output.", data.CommandPrefix),
+			"global property to `true` with `dokku %s --global disable-pull true`. Once disabled, you will need to pull the service image you wish to deploy as shown in the "+
+			"`stderr` output.", data.Command("set")),
 		"Please ensure the proper images are in place when `docker image pull` is disabled.",
 	}
 }
@@ -425,8 +425,8 @@ func readmeDockerPull(data DocumentationData) []string {
 func readmeSettableProperties(data DocumentationData) []string {
 	effects := map[PropertyEffect]string{
 		EffectImmediately: "immediately",
-		EffectRebuild:     fmt.Sprintf("after `%s:stop` and `%s:start`", data.CommandPrefix, data.CommandPrefix),
-		EffectReexpose:    fmt.Sprintf("after `%s:reexpose`", data.CommandPrefix),
+		EffectRebuild:     fmt.Sprintf("after `%s` and `%s`", data.Command("stop"), data.Command("start")),
+		EffectReexpose:    fmt.Sprintf("after `%s`", data.Command("reexpose")),
 	}
 
 	// one block, since the sections are joined by blank lines and a table
@@ -455,11 +455,11 @@ func readmeSettableProperties(data DocumentationData) []string {
 
 	sections := []string{
 		"### Service properties",
-		fmt.Sprintf("Every setting a service has after it is created, other than its image, its mounts, its labels and its backup schedule, each of which has a command of its own, is changed with `dokku %s:set lollipop <key> <value>`, and cleared by giving no value. "+
-			"`dokku %s:info lollipop` reports each of them, with a credential reported as a fingerprint rather than its value. "+
+		fmt.Sprintf("Every setting a service has after it is created, other than its image, its mounts, its labels and its backup schedule, each of which has a command of its own, is changed with `dokku %s lollipop <key> <value>`, and cleared by giving no value. "+
+			"`dokku %s lollipop` reports each of them, with a credential reported as a fingerprint rather than its value. "+
 			"A setting the container is made with only reaches it once the container is built again, and `set` warns when that is the case: "+
-			"`dokku %s:restart` keeps the container the service has, so use `dokku %s:stop` and then `dokku %s:start`. "+
-			"Passing `--allow-restart` to `set` does that, or the `reexpose` an expose setting takes, whenever the value changed, and leaves the service alone when it did not.", data.CommandPrefix, data.CommandPrefix, data.CommandPrefix, data.CommandPrefix, data.CommandPrefix),
+			"`dokku %s` keeps the container the service has, so use `dokku %s` and then `dokku %s`. "+
+			"Passing `--allow-restart` to `set` does that, or the `reexpose` an expose setting takes, whenever the value changed, and leaves the service alone when it did not.", data.Command("set"), data.Command("info"), data.Command("restart"), data.Command("stop"), data.Command("start")),
 		strings.Join(table, "\n"),
 	}
 
@@ -517,8 +517,8 @@ func readmeExposeLimits(data DocumentationData) []string {
 	return []string{
 		"### Limiting where and to whom a service is exposed",
 		fmt.Sprintf("An exposed service's ports are published on every interface unless they are given an address of their own. "+
-			"To publish them on one address instead, set the service's `port-bind-address` property with `dokku %s:set`, and to accept connections only from clients in one IP address or CIDR, set its `port-source-range` property. "+
-			"Either reaches a running service with `dokku %s:reexpose`, which leaves the service running when its ports are published through an ambassador.", data.CommandPrefix, data.CommandPrefix),
+			"To publish them on one address instead, set the service's `port-bind-address` property with `dokku %s`, and to accept connections only from clients in one IP address or CIDR, set its `port-source-range` property. "+
+			"Either reaches a running service with `dokku %s`, which leaves the service running when its ports are published through an ambassador.", data.Command("set"), data.Command("reexpose")),
 		"Only one source range can be given. The range is checked against the address a connection reaches the service from, which for a connection to the exposed port on the loopback interface, or an IPv6 connection to a service network without IPv6, is the docker network's gateway rather than the client, " +
 			"so with a range that leaves the gateway out, connecting to `127.0.0.1` from the dokku host itself is refused.",
 	}
@@ -531,10 +531,10 @@ func readmeExposeMode(data DocumentationData) []string {
 		"### Exposing a service without an ambassador",
 		"An exposed service's ports are published by an ambassador, a container that relays every connection on to the service. " +
 			"The ambassador can be replaced without touching the service and can hold clients to a `port-source-range`, but relaying adds latency to every request.",
-		fmt.Sprintf("To publish the ports on the service container itself instead, set the service's `expose-mode` property to `direct` with `dokku %s:set`. "+
+		fmt.Sprintf("To publish the ports on the service container itself instead, set the service's `expose-mode` property to `direct` with `dokku %s`. "+
 			"Docker has no way of changing the ports a container publishes, so the container is made again whenever what it publishes changes: when the service is exposed or unexposed, when its `port-bind-address` changes, and when it moves between expose modes. "+
-			"For a running service, `dokku %s:expose`, `dokku %s:unexpose` and `dokku %s:reexpose` ask before stopping and starting it, and change nothing if the answer is no. Pass `--force` to stop and start it without being asked. "+
-			"A change also reaches the service the next time it is restarted, or stopped and started.", data.CommandPrefix, data.CommandPrefix, data.CommandPrefix, data.CommandPrefix),
+			"For a running service, `dokku %s`, `dokku %s` and `dokku %s` ask before stopping and starting it, and change nothing if the answer is no. Pass `--force` to stop and start it without being asked. "+
+			"A change also reaches the service the next time it is restarted, or stopped and started.", data.Command("set"), data.Command("expose"), data.Command("unexpose"), data.Command("reexpose")),
 		"A `port-source-range` cannot be enforced on a port the service container publishes itself, so it cannot be set on a service exposed directly, and a service with one cannot be exposed directly.",
 	}
 }
@@ -544,10 +544,10 @@ func readmeExposeMode(data DocumentationData) []string {
 func readmeExposedDsn(data DocumentationData) []string {
 	return []string{
 		"### Connecting to an exposed service from outside the host",
-		fmt.Sprintf("`dokku %s:info lollipop --exposed-dsn` prints the dsn a client off the dokku host connects with. It is the dsn a linked app is handed, with the exposed ports in place of the container's and a public host in place of the service container's name, so it carries the same credentials. "+
-			"The host is the service's `expose-host` property, set with `dokku %s:set`, or the first global domain when it has none. "+
+		fmt.Sprintf("`dokku %s lollipop --exposed-dsn` prints the dsn a client off the dokku host connects with. It is the dsn a linked app is handed, with the exposed ports in place of the container's and a public host in place of the service container's name, so it carries the same credentials. "+
+			"The host is the service's `expose-host` property, set with `dokku %s`, or the first global domain when it has none. "+
 			"The `port-bind-address`, or an address given with a port, is never used as the host, since it is where the port is bound rather than where a client elsewhere reaches it. "+
-			"The dsn is empty until the service is exposed and there is a host to name.", data.CommandPrefix, data.CommandPrefix),
+			"The dsn is empty until the service is exposed and there is a host to name.", data.Command("info"), data.Command("set")),
 	}
 }
 
@@ -572,8 +572,8 @@ func readmeExtraArgs(data DocumentationData) []string {
 	return []string{
 		"### Passing extra arguments to export and import",
 		fmt.Sprintf("Arguments given to %s after `--` are appended to the ones the datastore's own tool is run with, for that run alone. "+
-			"To use them every time, set the service's %s property with `dokku %s:set`, giving the value after `--` so that its leading dash is not read as a flag. "+
-			"The property is split the way a shell would split it, so an argument with a space in it is quoted, and a variable in it is refused rather than expanded.", strings.Join(verbs, " or "), strings.Join(properties, " or "), data.CommandPrefix),
+			"To use them every time, set the service's %s property with `dokku %s`, giving the value after `--` so that its leading dash is not read as a flag. "+
+			"The property is split the way a shell would split it, so an argument with a space in it is quoted, and a variable in it is refused rather than expanded.", strings.Join(verbs, " or "), strings.Join(properties, " or "), data.Command("set")),
 		"Arguments given after `--` replace the property rather than adding to it. " +
 			"Backups and clones are made with the property, and a clone is given the source's.",
 	}
@@ -600,12 +600,12 @@ func readmeVolumeTargets(data DocumentationData) []string {
 	return []string{
 		"### Moving where a service's volumes are mounted",
 		fmt.Sprintf("Each volume a service mounts is named by the directory it lives in under the service's own directory, and is mounted where the datastore's definition says. "+
-			"To mount one somewhere else in the container, for an image that keeps its data at another path, set the service's `volume-targets` property with `dokku %s:set`, or pass `--volume-target` to `create`, `clone` or `upgrade`. "+
-			"Each is written as `<volume>=<container-path>`, several separated by spaces, and `dokku %s:info lollipop --volume-targets` shows the ones a service moved.", data.CommandPrefix, data.CommandPrefix),
+			"To mount one somewhere else in the container, for an image that keeps its data at another path, set the service's `volume-targets` property with `dokku %s`, or pass `--volume-target` to `create`, `clone` or `upgrade`. "+
+			"Each is written as `<volume>=<container-path>`, several separated by spaces, and `dokku %s lollipop --volume-targets` shows the ones a service moved.", data.Command("set"), data.Command("info")),
 		strings.Join(table, "\n"),
 		"Moving a volume changes where it is mounted, not where the image reads and writes. " +
 			"The datastore's own commands and the paths it is started with follow the volume, but an image that keeps writing to its own path writes into the container rather than into the volume, and what it writes is lost when the container is rebuilt, so only move a volume to where the image expects its data. " +
-			fmt.Sprintf("The data stays in the same directory on the host, and a move reaches the container the next time one is built, so use `dokku %s:stop` and then `dokku %s:start` on a running service. ", data.CommandPrefix, data.CommandPrefix) +
+			fmt.Sprintf("The data stays in the same directory on the host, and a move reaches the container the next time one is built, so use `dokku %s` and then `dokku %s` on a running service. ", data.Command("stop"), data.Command("start")) +
 			"An upgrade onto a definition that does not mount a volume the service moved is refused until the move is cleared or replaced.",
 	}
 }
@@ -617,9 +617,9 @@ func readmeWaitTimeout(data DocumentationData) []string {
 		"### Waiting for a service to become ready",
 		"A service is waited on until it answers on its port after it is created, cloned, started, restarted, upgraded or exposed. " +
 			"If it takes longer than that to start - on a slow host, or with an image that does more on its first boot - the command fails with `ERROR: unable to connect`.",
-		fmt.Sprintf("To wait longer for every %s service on the host, set the `wait-timeout` global property to a number of seconds with `dokku %s:set --global wait-timeout 120`. "+
-			"To wait longer for a single service, set its `wait-timeout` property with `dokku %s:set` or pass `--wait-timeout` to `create`, `clone` or `upgrade`. "+
-			"The service's own setting is used first, then the global property, then the datastore's default.", data.CommandPrefix, data.CommandPrefix, data.CommandPrefix),
+		fmt.Sprintf("To wait longer for every %s service on the host, set the `wait-timeout` global property to a number of seconds with `dokku %s --global wait-timeout 120`. "+
+			"To wait longer for a single service, set its `wait-timeout` property with `dokku %s` or pass `--wait-timeout` to `create`, `clone` or `upgrade`. "+
+			"The service's own setting is used first, then the global property, then the datastore's default.", data.CommandPrefix, data.Command("set"), data.Command("set")),
 	}
 }
 
@@ -635,7 +635,7 @@ func readmeServiceMemory(data DocumentationData) []string {
 		given = fmt.Sprintf("A service is created with %d megabytes unless `--service-memory` is passed, and that value is kept for every container the service is given afterwards.", data.ServiceMemoryDefault)
 	}
 
-	takes := fmt.Sprintf("A change reaches the container the next time one is built, so use `dokku %s:stop` and then `dokku %s:start`, or pass `--allow-restart` to `set`.", data.CommandPrefix, data.CommandPrefix)
+	takes := fmt.Sprintf("A change reaches the container the next time one is built, so use `dokku %s` and then `dokku %s`, or pass `--allow-restart` to `set`.", data.Command("stop"), data.Command("start"))
 	if data.ServiceMemoryLive {
 		takes = "A change is told to a running service at once, without its container being built again, and a stopped service takes it when it is next started."
 	}
@@ -643,7 +643,7 @@ func readmeServiceMemory(data DocumentationData) []string {
 	return []string{
 		"### Datastore memory",
 		fmt.Sprintf("The memory %s itself is told to use, in megabytes, is the service's `service-memory`. "+
-			"It is set with `--service-memory` when a service is created or upgraded, changed with `dokku %s:set lollipop service-memory <megabytes>`, cleared by giving no value, and reported by `dokku %s:info lollipop --service-memory`. ", data.Title, data.CommandPrefix, data.CommandPrefix) +
+			"It is set with `--service-memory` when a service is created or upgraded, changed with `dokku %s lollipop service-memory <megabytes>`, cleared by giving no value, and reported by `dokku %s lollipop --service-memory`. ", data.Title, data.Command("set"), data.Command("info")) +
 			given + " " + takes,
 		"It is separate from the container's `memory` limit, which is unlimited unless it is set. " +
 			"When both are set, keep the service memory below the limit, since a datastore that grows past the limit has its container killed.",
@@ -666,8 +666,8 @@ func readmeReservedNames(data DocumentationData) []string {
 	return []string{
 		"### Reserved service names",
 		fmt.Sprintf("A service's database is named after the service, with hyphens replaced by underscores. "+
-			"So that an app is never handed a database %s keeps for itself, `dokku %s:create` and `dokku %s:clone` refuse a name that is, or whose database would be, one of %s, in any case. "+
-			"A service that already has such a name is not affected.", data.Title, data.CommandPrefix, data.CommandPrefix, strings.Join(names, ", ")),
+			"So that an app is never handed a database %s keeps for itself, `dokku %s` and `dokku %s` refuse a name that is, or whose database would be, one of %s, in any case. "+
+			"A service that already has such a name is not affected.", data.Title, data.Command("create"), data.Command("clone"), strings.Join(names, ", ")),
 	}
 }
 

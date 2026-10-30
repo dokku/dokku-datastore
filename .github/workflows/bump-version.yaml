@@ -30,23 +30,28 @@ jobs:
           fetch-depth: 0
           token: ${{ env.GITHUB_ACCESS_TOKEN }}
 
+      # releases are tagged v<version>, which is what go resolves a module
+      # version from, so that dokku can require this repository as a module.
+      # Tags from before that have no v, so the latest is read either way and
+      # the version is computed without it
       - name: Get Latest Tag
         id: latest-tag
         run: |
-          echo GIT_LATEST_TAG="$(git describe --tags "$(git rev-list --tags --max-count=1)")" >>"$GITHUB_OUTPUT"
+          latest="$(git describe --tags "$(git rev-list --tags --max-count=1)")"
+          echo GIT_LATEST_VERSION="${latest#v}" >>"$GITHUB_OUTPUT"
 
       - name: Compute Next Tag
         id: next-tag
         uses: docker://ghcr.io/dokku/semver-generator:latest
         with:
           bump: ${{ github.event.inputs.bump_type }}
-          input: ${{ steps.latest-tag.outputs.GIT_LATEST_TAG }}
+          input: ${{ steps.latest-tag.outputs.GIT_LATEST_VERSION }}
 
       - name: Create and Push Tag
         run: |
           git config --global user.name 'Dokku Bot'
           git config --global user.email no-reply@dokku.com
-          git tag "$GIT_NEXT_TAG"
-          git push origin "$GIT_NEXT_TAG"
+          git tag "v${GIT_NEXT_VERSION#v}"
+          git push origin "v${GIT_NEXT_VERSION#v}"
         env:
-          GIT_NEXT_TAG: ${{ steps.next-tag.outputs.version }}
+          GIT_NEXT_VERSION: ${{ steps.next-tag.outputs.version }}

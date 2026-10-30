@@ -2,6 +2,7 @@ package service
 
 import (
 	"io"
+	"sort"
 
 	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/registry"
@@ -164,6 +165,15 @@ var (
 // Datastores is the map of datastores
 var Datastores = map[string]*Datastore{}
 
+// LoadError is why the datastores could not be loaded, or nil when they were.
+//
+// A definition that does not parse is a datastore that cannot be operated, and
+// carrying on would report it as an unsupported type rather than as the broken
+// definition it is, so every command reports this before anything else. It is
+// kept rather than panicked on because the first load happens before whatever
+// embeds the binary has had the chance to say where definitions come from.
+var LoadError error
+
 // init initializes the services
 func init() {
 	DokkuLibRoot = hostenv.LibRoot()
@@ -171,18 +181,28 @@ func init() {
 	PluginPath = hostenv.PluginPath()
 	PluginDataRoot = hostenv.DataRoot()
 
+	Load() //nolint:errcheck
+}
+
+// Load resolves every datastore again, from the embedded definitions and any
+// the plugin checkout overrides them with. It is run once on start, and again
+// by anything that changes where definitions come from, such as setting a
+// command namespace, which ignores plugin checkouts.
+func Load() error {
+	LoadError = nil
+	Datastores = map[string]*Datastore{}
+
 	loaded, err := registry.Load(registry.LoadInput{PluginDir: hostenv.PluginCheckout()})
 	if err != nil {
-		// a definition that does not parse is a datastore that cannot be
-		// operated, and continuing would report it as an unsupported type
-		// rather than as the broken definition it is
-		panic(err)
+		LoadError = err
+		return err
 	}
 
 	for _, name := range loaded.Plugins() {
 		found, err := loaded.For(name, "")
 		if err != nil {
-			panic(err)
+			LoadError = err
+			return err
 		}
 
 		// the registry is kept rather than discarded here: a datastore split by
@@ -190,4 +210,17 @@ func init() {
 		// otherwise, and the service is not known yet
 		Datastores[name] = &Datastore{Definition: found, registry: loaded}
 	}
+
+	return nil
+}
+
+// Types returns every datastore type, sorted.
+func Types() []string {
+	types := make([]string, 0, len(Datastores))
+	for name := range Datastores {
+		types = append(types, name)
+	}
+
+	sort.Strings(types)
+	return types
 }

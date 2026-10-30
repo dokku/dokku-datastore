@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
 
@@ -120,7 +121,7 @@ func (c *InfoCommand) selectedInfoFlag(datastoreType string) (string, error) {
 	}
 
 	if len(selected) > 1 {
-		return "", fmt.Errorf("%s:info command allows only a single flag", datastoreType)
+		return "", fmt.Errorf("%s command allows only a single flag", hostenv.Invocation(datastoreType, "info"))
 	}
 
 	if len(selected) == 0 {
@@ -176,11 +177,8 @@ func (c *InfoCommand) Run(args []string) int {
 		return 1
 	}
 
-	datastore, ok := service.Datastores[datastoreType]
+	datastore, ok := lookupDatastore(logger, datastoreType)
 	if !ok {
-		logger.Error(internal.ErrorInput{
-			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
-		})
 		return 1
 	}
 

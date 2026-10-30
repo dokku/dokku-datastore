@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku-datastore/internal/verb"
 	"github.com/dokku/dokku/plugins/common"
@@ -118,9 +119,9 @@ func (p SettableProperty) Effect(d definition.Definition) PropertyEffect {
 func (p SettableProperty) Warning(d definition.Definition, commandPrefix string, serviceName string) string {
 	switch p.Effect(d) {
 	case EffectRebuild:
-		return fmt.Sprintf("%s takes effect the next time the container is built: run `dokku %s:stop %s` then `dokku %s:start %s`", p.Name, commandPrefix, serviceName, commandPrefix, serviceName)
+		return fmt.Sprintf("%s takes effect the next time the container is built: run `%s` then `%s`", p.Name, hostenv.DokkuCommand(commandPrefix, "stop", serviceName), hostenv.DokkuCommand(commandPrefix, "start", serviceName))
 	case EffectReexpose:
-		return fmt.Sprintf("%s takes effect on an exposed service once it is reexposed: run `dokku %s:reexpose %s`", p.Name, commandPrefix, serviceName)
+		return fmt.Sprintf("%s takes effect on an exposed service once it is reexposed: run `%s`", p.Name, hostenv.DokkuCommand(commandPrefix, "reexpose", serviceName))
 	}
 
 	return ""
@@ -874,7 +875,7 @@ func writeBackupBucket(s *service.Datastore, serviceName string, value string) e
 func regenerateCrontabIfScheduled(ctx context.Context, s *service.Datastore, serviceName string) error {
 	schedules, err := ReadBackupSchedules(s, serviceName)
 	if len(schedules) > 0 {
-		if regenErr := regenerateCrontab(ctx); regenErr != nil {
+		if regenErr := RegenerateCrontab(ctx); regenErr != nil {
 			return regenErr
 		}
 	}

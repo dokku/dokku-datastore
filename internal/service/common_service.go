@@ -888,8 +888,8 @@ func Start(ctx context.Context, input StartInput) error {
 	// it does: the missing half would come from the definition, which is the
 	// drift this is here to stop
 	if !recorded.Complete() {
-		return fmt.Errorf("service %s has no recorded image version and no container to recover one from; run `dokku %s:upgrade %s --image-version <version>` to choose the version it runs",
-			input.ServiceName, input.Datastore.Properties().CommandPrefix, input.ServiceName)
+		return fmt.Errorf("service %s has no recorded image version and no container to recover one from; run `%s` to choose the version it runs",
+			input.ServiceName, hostenv.DokkuCommand(input.Datastore.Properties().CommandPrefix, "upgrade", input.ServiceName, "--image-version", "<version>"))
 	}
 
 	taggedImage := recorded.Tagged()
