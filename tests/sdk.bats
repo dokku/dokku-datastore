@@ -68,8 +68,12 @@ schedule_backup() {
 
 # install is a root step, as dokku runs it: it manages /etc/sudoers.d and
 # /usr/local/bin. The environment is kept, and the path with it, so it works on
-# this run's data root and reaches this run's fake plugn
+# this run's data root and reaches this run's fake plugn. The directories every
+# datastore is installed into are made first, as a dokku install has them, so
+# root does not own them and the data root can be removed afterwards
 run_install() {
+  mkdir -p "$DOKKU_LIB_ROOT/config" "$DOKKU_LIB_ROOT/data" "$DOKKU_LIB_ROOT/services"
+
   if [[ "$EUID" -eq 0 ]]; then
     run "$PLUGIN_DIR/install"
   else
