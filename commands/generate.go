@@ -128,11 +128,8 @@ func (c *GenerateCommand) Run(args []string) int {
 	}
 
 	datastoreType := arguments["datastore-type"].StringValue()
-	datastore, ok := service.Datastores[datastoreType]
+	datastore, ok := lookupDatastore(logger, datastoreType)
 	if !ok {
-		logger.Error(internal.ErrorInput{
-			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
-		})
 		return 1
 	}
 

@@ -1019,7 +1019,7 @@ func backupCommand(commandPrefix string, serviceName string, schedule BackupSche
 		id = BackupScheduleIDDefault
 	}
 
-	command := fmt.Sprintf("dokku %s:backup %s %s --id %s", commandPrefix, serviceName, schedule.BucketName, id)
+	command := hostenv.DokkuCommand(commandPrefix, "backup", serviceName, schedule.BucketName, "--id", id)
 	if schedule.UseIAM {
 		command = fmt.Sprintf("%s --use-iam", command)
 	}
@@ -1386,11 +1386,11 @@ func writeBackupSchedule(s *service.Datastore, serviceName string, schedule Back
 	return nil
 }
 
-// regenerateCrontab has dokku write its crontab again, which is where the
+// RegenerateCrontab has dokku write its crontab again, which is where the
 // cron-entries trigger is read. Dokku 0.36.0 and later do that on
 // scheduler-cron-write, and earlier versions on cron-write. Each is a trigger
 // nothing acts on in the versions that use the other, so both are fired.
-func regenerateCrontab(ctx context.Context) error {
+func RegenerateCrontab(ctx context.Context) error {
 	for _, trigger := range []string{"scheduler-cron-write", "cron-write"} {
 		if _, err := execx.PlugnTrigger(ctx, common.PlugnTriggerInput{
 			Trigger:      trigger,
@@ -1401,6 +1401,29 @@ func regenerateCrontab(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// HasScheduledBackups reports whether any service of a datastore has a
+// scheduled backup, which is what decides whether the crontab carries anything
+// of the datastore's at all
+func HasScheduledBackups(ctx context.Context, s *service.Datastore) (bool, error) {
+	services, err := ListServices(ctx, ListServicesInput{Datastore: s})
+	if err != nil {
+		return false, fmt.Errorf("failed to list services: %w", err)
+	}
+
+	for _, serviceName := range services {
+		schedules, err := ReadBackupSchedules(s, serviceName)
+		if err != nil {
+			return false, err
+		}
+
+		if len(schedules) > 0 {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // ScheduleBackupInput is the input for the ScheduleBackup function
@@ -1455,7 +1478,7 @@ func ScheduleBackup(ctx context.Context, input ScheduleBackupInput) error {
 		// step with them fails the command when the file cannot be read, after
 		// the properties and the crontab already name the new schedule.
 		syncErr := syncDefaultScheduleIdentity(input.Datastore, input.ServiceName, schedule)
-		if err := regenerateCrontab(ctx); err != nil {
+		if err := RegenerateCrontab(ctx); err != nil {
 			return err
 		}
 
@@ -1466,7 +1489,7 @@ func ScheduleBackup(ctx context.Context, input ScheduleBackupInput) error {
 		return err
 	}
 
-	return regenerateCrontab(ctx)
+	return RegenerateCrontab(ctx)
 }
 
 // UnscheduleBackupInput is the input for the UnscheduleBackup function
@@ -1525,7 +1548,7 @@ func UnscheduleBackup(ctx context.Context, input UnscheduleBackupInput) error {
 		return err
 	}
 
-	return regenerateCrontab(ctx)
+	return RegenerateCrontab(ctx)
 }
 
 // removeBackupSchedule removes one schedule. The schedules file is rewritten
@@ -1581,7 +1604,7 @@ func removeAllBackupSchedules(ctx context.Context, s *service.Datastore, service
 		return nil
 	}
 
-	return regenerateCrontab(ctx)
+	return RegenerateCrontab(ctx)
 }
 
 // BackupArgsInput is the input for BackupArgs. Every value is already resolved,

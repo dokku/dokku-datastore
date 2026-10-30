@@ -144,11 +144,8 @@ func (c *InvokeCommand) Run(args []string) int {
 	}
 
 	datastoreType := arguments["datastore-type"].StringValue()
-	datastore, ok := service.Datastores[datastoreType]
+	datastore, ok := lookupDatastore(logger, datastoreType)
 	if !ok {
-		logger.Error(internal.ErrorInput{
-			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
-		})
 		return 1
 	}
 
@@ -158,7 +155,7 @@ func (c *InvokeCommand) Run(args []string) int {
 	// plugin that does not handle one, so another datastore's command is not a
 	// command here
 	if !datastore.ImplementsCustom(commandName) {
-		return notImplementedExit()
+		return NotImplementedExit()
 	}
 
 	serviceName := arguments["service-name"].StringValue()

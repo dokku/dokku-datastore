@@ -119,7 +119,7 @@ func TestAccountCommandsRender(t *testing.T) {
 				}
 			}
 
-			if !strings.Contains(documenter.Documentation(), "dokku {{.CommandPrefix}}:"+documenter.Name()+" lollipop") {
+			if !strings.Contains(documenter.Documentation(), `dokku {{.Command "`+documenter.Name()+`"}} lollipop`) {
 				t.Errorf("expected %s to document an example of itself", documenter.Name())
 			}
 		})

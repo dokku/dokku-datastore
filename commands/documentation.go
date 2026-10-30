@@ -22,7 +22,7 @@ func (c *AppLinksCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *AppLinksCommand) Documentation() string {
 	return `list all {{.CommandPrefix}} services that are linked to the 'playground' app.
-dokku {{.CommandPrefix}}:app-links playground`
+dokku {{.Command "app-links"}} playground`
 }
 
 // Group is the readme usage section the command is documented under
@@ -45,19 +45,19 @@ func (c *BackupCommand) Usage() string {
 func (c *BackupCommand) Documentation() string {
 	return `backup the 'lollipop' service to the 'my-s3-bucket' bucket on AWS
 > once a backup ends, scheduled or not, the service-action plugin trigger is fired with "post-backup {{.CommandPrefix}} <service> <bucket-name> <success|failure>", and a trigger that fails is only warned about
-dokku {{.CommandPrefix}}:backup lollipop my-s3-bucket --use-iam
+dokku {{.Command "backup"}} lollipop my-s3-bucket --use-iam
 backup with the settings recorded on one schedule. the bucket and --use-iam still come from this command
-dokku {{.CommandPrefix}}:backup lollipop my-s3-bucket --id monthly
+dokku {{.Command "backup"}} lollipop my-s3-bucket --id monthly
 backup the 'lollipop' service under a path in the bucket
-dokku {{.CommandPrefix}}:backup lollipop my-s3-bucket/{{.CommandPrefix}}-backups
+dokku {{.Command "backup"}} lollipop my-s3-bucket/{{.CommandPrefix}}-backups
 {{- if .AllDatabases}}
 a backup holds every database in the service, so it is restored with --all-databases (assuming it was extracted via 'tar -xf backup.tgz')
-dokku {{.CommandPrefix}}:import lollipop --all-databases < backup-folder/export
+dokku {{.Command "import"}} lollipop --all-databases < backup-folder/export
 a backup made by an older version of the plugin holds only the database named for the service, and is restored without it
-dokku {{.CommandPrefix}}:import lollipop < backup-folder/export
+dokku {{.Command "import"}} lollipop < backup-folder/export
 {{- else}}
 restore a backup file (assuming it was extracted via 'tar -xf backup.tgz')
-dokku {{.CommandPrefix}}:import lollipop < backup-folder/export
+dokku {{.Command "import"}} lollipop < backup-folder/export
 {{- end}}`
 }
 
@@ -81,17 +81,17 @@ func (c *BackupAuthCommand) Usage() string {
 func (c *BackupAuthCommand) Documentation() string {
 	return `setup s3 backup authentication
 > NOTE: each call replaces the stored credentials as a whole, so a region, signature version or endpoint url that is not passed is removed
-dokku {{.CommandPrefix}}:backup-auth lollipop AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+dokku {{.Command "backup-auth"}} lollipop AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 setup s3 backup authentication with different region
-dokku {{.CommandPrefix}}:backup-auth lollipop AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION
+dokku {{.Command "backup-auth"}} lollipop AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION
 setup s3 backup authentication with different signature version and endpoint
-dokku {{.CommandPrefix}}:backup-auth lollipop AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION AWS_SIGNATURE_VERSION ENDPOINT_URL
+dokku {{.Command "backup-auth"}} lollipop AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION AWS_SIGNATURE_VERSION ENDPOINT_URL
 more specific example for minio auth
-dokku {{.CommandPrefix}}:backup-auth lollipop MINIO_ACCESS_KEY_ID MINIO_SECRET_ACCESS_KEY us-east-1 s3v4 https://YOURMINIOSERVICE
+dokku {{.Command "backup-auth"}} lollipop MINIO_ACCESS_KEY_ID MINIO_SECRET_ACCESS_KEY us-east-1 s3v4 https://YOURMINIOSERVICE
 more specific example for digitalocean spaces auth, where the endpoint does not include the space name
-dokku {{.CommandPrefix}}:backup-auth lollipop SPACES_ACCESS_KEY SPACES_SECRET_KEY nyc3 s3v4 https://nyc3.digitaloceanspaces.com
+dokku {{.Command "backup-auth"}} lollipop SPACES_ACCESS_KEY SPACES_SECRET_KEY nyc3 s3v4 https://nyc3.digitaloceanspaces.com
 record credentials on one schedule. the schedule is created first with backup-schedule --id. a region, signature version or endpoint url that is not passed is cleared on that schedule, so it inherits the service's value
-dokku {{.CommandPrefix}}:backup-auth lollipop AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY us-east-1 --id monthly`
+dokku {{.Command "backup-auth"}} lollipop AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY us-east-1 --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -113,9 +113,9 @@ func (c *BackupDeauthCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *BackupDeauthCommand) Documentation() string {
 	return `remove s3 authentication
-dokku {{.CommandPrefix}}:backup-deauth lollipop
+dokku {{.Command "backup-deauth"}} lollipop
 remove the credentials recorded on one schedule. the service's credentials stay, and that schedule uses them again
-dokku {{.CommandPrefix}}:backup-deauth lollipop --id monthly`
+dokku {{.Command "backup-deauth"}} lollipop --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -138,16 +138,16 @@ func (c *BackupScheduleCommand) Usage() string {
 func (c *BackupScheduleCommand) Documentation() string {
 	return `schedule a backup
 > 'schedule' is a crontab expression, eg. "0 3 * * *" for each day at 3am, or a descriptor such as "@daily". A schedule cron cannot run is refused.
-> the backup is added to the dokku crontab through the cron-entries plugin trigger, so it is listed by "dokku cron:list --global" and its output is appended to /var/log/dokku/{{.CommandPrefix}}.<service>.backup.log, which "dokku {{.CommandPrefix}}:backup-logs <service>" prints
-> each scheduled backup fires the same service-action post-backup trigger as "dokku {{.CommandPrefix}}:backup", so a plugin can report whether it succeeded
+> the backup is added to the dokku crontab through the cron-entries plugin trigger, so it is listed by "dokku cron:list --global" and its output is appended to /var/log/dokku/{{.CommandPrefix}}.<service>.backup.log, which "dokku {{.Command "backup-logs"}} <service>" prints
+> each scheduled backup fires the same service-action post-backup trigger as "dokku {{.Command "backup"}}", so a plugin can report whether it succeeded
 > NOTE: dokku only writes a crontab when the global scheduler or at least one app uses the docker-local scheduler, so a scheduled backup does not run on a host that only uses k3s or null
 > calling it again without --id replaces that schedule's cron expression, bucket and instance role, and leaves every other schedule in place
 > --id names another schedule, or replaces the one that id already names. --id default is the schedule made without --id
-dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket
+dokku {{.Command "backup-schedule"}} lollipop "0 3 * * *" my-s3-bucket
 schedule a backup and authenticate via iam
-dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 * * *" my-s3-bucket --use-iam
+dokku {{.Command "backup-schedule"}} lollipop "0 3 * * *" my-s3-bucket --use-iam
 schedule a second backup under its own id
-dokku {{.CommandPrefix}}:backup-schedule lollipop "0 3 1 * *" my-s3-bucket --id monthly`
+dokku {{.Command "backup-schedule"}} lollipop "0 3 1 * *" my-s3-bucket --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -169,9 +169,9 @@ func (c *BackupScheduleCatCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *BackupScheduleCatCommand) Documentation() string {
 	return `cat the crontab line of the scheduled backup for the service. with more than one schedule, each line is preceded by its id
-dokku {{.CommandPrefix}}:backup-schedule-cat lollipop
+dokku {{.Command "backup-schedule-cat"}} lollipop
 cat one schedule
-dokku {{.CommandPrefix}}:backup-schedule-cat lollipop --id monthly`
+dokku {{.Command "backup-schedule-cat"}} lollipop --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -194,11 +194,11 @@ func (c *BackupLogsCommand) Usage() string {
 func (c *BackupLogsCommand) Documentation() string {
 	return `print the most recent output of the scheduled backups of the service
 > each service's scheduled backups append their output to /var/log/dokku/{{.CommandPrefix}}.<service>.backup.log, or to the same file under DOKKU_LOGS_DIR when dokku keeps its logs elsewhere. Every run starts and ends with a line marked with the time in utc.
-dokku {{.CommandPrefix}}:backup-logs lollipop
+dokku {{.Command "backup-logs"}} lollipop
 by default, the log will not be tailed, but you can do this with the --tail flag:
-dokku {{.CommandPrefix}}:backup-logs lollipop --tail
+dokku {{.Command "backup-logs"}} lollipop --tail
 by default the last 100 lines are shown, but a different count can be specified
-dokku {{.CommandPrefix}}:backup-logs lollipop --tail=5`
+dokku {{.Command "backup-logs"}} lollipop --tail=5`
 }
 
 // Group is the readme usage section the command is documented under
@@ -220,10 +220,10 @@ func (c *BackupSetEncryptionCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *BackupSetEncryptionCommand) Documentation() string {
 	return `set the GPG-compatible passphrase for encrypting backups for backups
-dokku {{.CommandPrefix}}:backup-set-encryption lollipop
+dokku {{.Command "backup-set-encryption"}} lollipop
 public key encryption will take precendence over the passphrase encryption if both types are set.
 record the passphrase on one schedule. it replaces the service's passphrase and public key for that schedule
-dokku {{.CommandPrefix}}:backup-set-encryption lollipop --id monthly`
+dokku {{.Command "backup-set-encryption"}} lollipop --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -245,11 +245,11 @@ func (c *BackupSetPublicKeyEncryptionCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *BackupSetPublicKeyEncryptionCommand) Documentation() string {
 	return `set the GPG Public Key for encrypting backups
-dokku {{.CommandPrefix}}:backup-set-public-key-encryption lollipop
+dokku {{.Command "backup-set-public-key-encryption"}} lollipop
 the <public-key-id> is fetched from 'keyserver.ubuntu.com', unless the service names another one with the backup-keyserver property
-dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com
+dokku {{.Command "set"}} lollipop backup-keyserver hkp://keys.example.com
 record the public key on one schedule
-dokku {{.CommandPrefix}}:backup-set-public-key-encryption lollipop --id monthly`
+dokku {{.Command "backup-set-public-key-encryption"}} lollipop --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -271,11 +271,11 @@ func (c *BackupUnscheduleCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *BackupUnscheduleCommand) Documentation() string {
 	return `remove the scheduled backup from the dokku crontab. with one schedule, that schedule is removed. with several, name one with --id, or pass --all
-dokku {{.CommandPrefix}}:backup-unschedule lollipop
+dokku {{.Command "backup-unschedule"}} lollipop
 remove one schedule
-dokku {{.CommandPrefix}}:backup-unschedule lollipop --id monthly
+dokku {{.Command "backup-unschedule"}} lollipop --id monthly
 remove every schedule
-dokku {{.CommandPrefix}}:backup-unschedule lollipop --all`
+dokku {{.Command "backup-unschedule"}} lollipop --all`
 }
 
 // Group is the readme usage section the command is documented under
@@ -297,9 +297,9 @@ func (c *BackupUnsetEncryptionCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *BackupUnsetEncryptionCommand) Documentation() string {
 	return `unset the GPG encryption passphrase for backups
-dokku {{.CommandPrefix}}:backup-unset-encryption lollipop
+dokku {{.Command "backup-unset-encryption"}} lollipop
 clear the passphrase recorded on one schedule, so that schedule inherits the service's encryption again
-dokku {{.CommandPrefix}}:backup-unset-encryption lollipop --id monthly`
+dokku {{.Command "backup-unset-encryption"}} lollipop --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -321,9 +321,9 @@ func (c *BackupUnsetPublicKeyEncryptionCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *BackupUnsetPublicKeyEncryptionCommand) Documentation() string {
 	return `unset the GPG Public Key encryption for backups
-dokku {{.CommandPrefix}}:backup-unset-public-key-encryption lollipop
+dokku {{.Command "backup-unset-public-key-encryption"}} lollipop
 clear the public key recorded on one schedule
-dokku {{.CommandPrefix}}:backup-unset-public-key-encryption lollipop --id monthly`
+dokku {{.Command "backup-unset-public-key-encryption"}} lollipop --id monthly`
 }
 
 // Group is the readme usage section the command is documented under
@@ -345,21 +345,21 @@ func (c *CloneCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *CloneCommand) Documentation() string {
 	return `you can clone an existing service to a new one
-dokku {{.CommandPrefix}}:clone lollipop lollipop-2
+dokku {{.Command "clone"}} lollipop lollipop-2
 the new service starts from the settings of the one it copies: its config options,
 custom env, memory, service memory, shm size, networks, log driver, log options, restart policy,
 labels, mounts, volume targets, backup keyserver, backup storage class and backup timestamp. A flag passed to clone overrides that one setting, and a
 flag passed empty clears it
-dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --restart no --custom-env ""
+dokku {{.Command "clone"}} lollipop lollipop-2 --restart no --custom-env ""
 the new service runs the image and image version of the one it copies unless --image or
 --image-version say otherwise. These cannot be cleared, and an --image other than the one
 the definition ships needs an --image-version as well. An image that would run on another
 definition than the source's, such as another major version, is refused; upgrade the source
 onto it first
-dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --image-version <version>
+dokku {{.Command "clone"}} lollipop lollipop-2 --image-version <version>
 the password, exposed ports, links and backup credentials, schedule, encryption and object name
 are not copied. The clone's passwords are generated unless they are given.
-dokku {{.CommandPrefix}}:clone lollipop lollipop-2 --password <password>`
+dokku {{.Command "clone"}} lollipop lollipop-2 --password <password>`
 }
 
 // Group is the readme usage section the command is documented under
@@ -382,17 +382,17 @@ func (c *ConnectCommand) Usage() string {
 func (c *ConnectCommand) Documentation() string {
 	return `connect to the service via the {{.CommandPrefix}} connection tool
 > NOTE: disconnecting from ssh while running this command may leave zombie processes due to moby/moby#9098
-dokku {{.CommandPrefix}}:connect lollipop
+dokku {{.Command "connect"}} lollipop
 the connection tool only shows a prompt when it is given a terminal, which ssh allocates when run with -t.
 without a terminal, statements are read from stdin instead.
-dokku {{.CommandPrefix}}:connect lollipop < statements.txt
+dokku {{.Command "connect"}} lollipop < statements.txt
 {{- if .Databases}}
 connect to {{if .MakesDatabases}}a database made with create-database{{else}}another of the service's databases{{end}} rather than the one the service was created with
-dokku {{.CommandPrefix}}:connect lollipop --database {{if .MakesDatabases}}paintshop{{else}}3{{end}}
+dokku {{.Command "connect"}} lollipop --database {{if .MakesDatabases}}paintshop{{else}}3{{end}}
 {{- end}}
 {{- if .Users}}
 connect as a user made with create-user rather than as the service's own
-dokku {{.CommandPrefix}}:connect lollipop --user painter
+dokku {{.Command "connect"}} lollipop --user painter
 {{- end}}`
 }
 
@@ -415,18 +415,18 @@ func (c *CreateCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *CreateCommand) Documentation() string {
 	return `create a {{.CommandPrefix}} service named lollipop
-dokku {{.CommandPrefix}}:create lollipop
+dokku {{.Command "create"}} lollipop
 you can also specify the image and image version to use for the service.
 it *must* be compatible with the {{.Image}} image.
-dokku {{.CommandPrefix}}:create lollipop --image "{{.Image}}" --image-version "{{.ImageVersion}}"
+dokku {{.Command "create"}} lollipop --image "{{.Image}}" --image-version "{{.ImageVersion}}"
 an image other than {{.Image}} has no version to fall back on, because the
 version this plugin pins belongs to {{.Image}}, so name one alongside it.
-dokku {{.CommandPrefix}}:create lollipop --image <image> --image-version <version>
+dokku {{.Command "create"}} lollipop --image <image> --image-version <version>
 {{- if .Flavors}}
 these images each have definitions of their own, one per major version, so a
 service on one is placed by the major its tag carries and has a version to fall back on.
 {{- range .Flavors}}
-dokku {{$.CommandPrefix}}:create lollipop --image {{.Image}} --image-version {{.ImageVersion}}
+dokku {{$.Command "create"}} lollipop --image {{.Image}} --image-version {{.ImageVersion}}
 {{- end}}
 {{- end}}
 {{- if .Definitions}}
@@ -434,37 +434,37 @@ the definition a service runs on decides where its data is mounted, and is other
 worked out from the image and version. an image whose tags do not carry the major
 version can name one outright, and --image and --image-version are laid over the
 image and version it ships. the definitions are: {{range $index, $name := .Definitions}}{{if $index}}, {{end}}{{$name}}{{end}}.
-dokku {{.CommandPrefix}}:create lollipop --definition {{index .Definitions 0}} --image <image> --image-version <version>
+dokku {{.Command "create"}} lollipop --definition {{index .Definitions 0}} --image <image> --image-version <version>
 {{- end}}
 you can also specify custom environment variables to start
 the {{.CommandPrefix}} service in semicolon-separated form.
-dokku {{.CommandPrefix}}:create lollipop --custom-env "USER=alpha;HOST=beta"
+dokku {{.Command "create"}} lollipop --custom-env "USER=alpha;HOST=beta"
 the container log is bounded by whatever 'dokku logs:set --global max-size' says, and
 by dokku's own default where it says nothing, which a service may override for itself.
-dokku {{.CommandPrefix}}:create lollipop --log-opt max-size=20m,max-file=3
+dokku {{.Command "create"}} lollipop --log-opt max-size=20m,max-file=3
 the container is restarted by docker whenever it stops, which a service may change for itself.
-dokku {{.CommandPrefix}}:create lollipop --restart unless-stopped
+dokku {{.Command "create"}} lollipop --restart unless-stopped
 the container carries a docker label for each --label, which may be repeated, beyond the
 ones dokku puts on it. keys starting with 'dokku.' or 'com.dokku.' are dokku's own and are refused.
-dokku {{.CommandPrefix}}:create lollipop --label traefik.enable=true --label com.example.team=data
+dokku {{.Command "create"}} lollipop --label traefik.enable=true --label com.example.team=data
 the service is waited on until it answers, for as long as the datastore's own default,
-which a slow host may raise for every service with 'dokku {{.CommandPrefix}}:set --global wait-timeout' or a service may raise for itself.
-dokku {{.CommandPrefix}}:create lollipop --wait-timeout 120
+which a slow host may raise for every service with 'dokku {{.Command "set"}} --global wait-timeout' or a service may raise for itself.
+dokku {{.Command "create"}} lollipop --wait-timeout 120
 {{- if .ServiceMemory}}
 the memory the datastore itself is told to use, in megabytes, is {{if .ServiceMemoryDefault}}{{.ServiceMemoryDefault}} unless it is given, and is kept apart from the container's memory limit.{{else}}left to the datastore unless it is given, and is kept apart from the container's memory limit.{{end}}
-dokku {{.CommandPrefix}}:create lollipop --service-memory 256
+dokku {{.Command "create"}} lollipop --service-memory 256
 {{- end}}
 the config options are handed to the process the container runs, not to docker, so
 a host path or docker volume is mounted with --volume, which may be repeated.
-dokku {{.CommandPrefix}}:create lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro
+dokku {{.Command "create"}} lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro
 {{- if .VolumeKey}}
 the definition's own volumes can be mounted at another path in the container, for an
 image that keeps its data somewhere else, with --volume-target, which may be repeated.
-dokku {{.CommandPrefix}}:create lollipop --volume-target {{.VolumeKey}}=/srv/{{.CommandPrefix}}
+dokku {{.Command "create"}} lollipop --volume-target {{.VolumeKey}}=/srv/{{.CommandPrefix}}
 {{- end}}
 the service passwords are generated unless they are given. A datastore without a
 root password refuses --root-password rather than dropping it.
-dokku {{.CommandPrefix}}:create lollipop --password <password> --root-password <root-password>`
+dokku {{.Command "create"}} lollipop --password <password> --root-password <root-password>`
 }
 
 // Group is the readme usage section the command is documented under
@@ -486,7 +486,7 @@ func (c *DestroyCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *DestroyCommand) Documentation() string {
 	return `destroy the service, it's data, and the running container
-dokku {{.CommandPrefix}}:destroy lollipop
+dokku {{.Command "destroy"}} lollipop
 a service that is still linked to an app is not destroyed, and the apps it
 is linked to are named. unlink them first.`
 }
@@ -512,10 +512,10 @@ func (c *EnterCommand) Documentation() string {
 	return `a shell can be opened against a running service.
 filesystem changes will not be saved to disk.
 > NOTE: disconnecting from ssh while running this command may leave zombie processes due to moby/moby#9098
-dokku {{.CommandPrefix}}:enter lollipop
+dokku {{.Command "enter"}} lollipop
 you may also run a command directly against the service.
 filesystem changes will not be saved to disk.
-dokku {{.CommandPrefix}}:enter lollipop touch /tmp/test`
+dokku {{.Command "enter"}} lollipop touch /tmp/test`
 }
 
 // Group is the readme usage section the command is documented under
@@ -537,7 +537,7 @@ func (c *ExistsCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *ExistsCommand) Documentation() string {
 	return `here we check if the lollipop {{.CommandPrefix}} service exists.
-dokku {{.CommandPrefix}}:exists lollipop`
+dokku {{.Command "exists"}} lollipop`
 }
 
 // Group is the readme usage section the command is documented under
@@ -559,28 +559,28 @@ func (c *ExportCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *ExportCommand) Documentation() string {
 	return `by default, datastore output is exported to stdout
-dokku {{.CommandPrefix}}:export lollipop
+dokku {{.Command "export"}} lollipop
 you can redirect this output to a file
-dokku {{.CommandPrefix}}:export lollipop > data.dump
+dokku {{.Command "export"}} lollipop > data.dump
 a dump can be written to a file on the dokku host with --file.
 the path is on the dokku host, not on the machine running ssh.
-dokku {{.CommandPrefix}}:export lollipop --file /var/lib/dokku/data/storage/data.dump
+dokku {{.Command "export"}} lollipop --file /var/lib/dokku/data/storage/data.dump
 a file that already exists is not overwritten unless --force is given
-dokku {{.CommandPrefix}}:export lollipop --file /var/lib/dokku/data/storage/data.dump --force
+dokku {{.Command "export"}} lollipop --file /var/lib/dokku/data/storage/data.dump --force
 {{- if .AllDatabases}}
 only the database named for the service is exported unless --all-databases is given, which exports every database in the service, leaving out the ones the server keeps for itself.
 it is imported again with import --all-databases, into the databases it was exported from.
-dokku {{.CommandPrefix}}:export lollipop --all-databases > all.dump
+dokku {{.Command "export"}} lollipop --all-databases > all.dump
 {{- end}}
 {{- if .MakesDatabases}}
 a database made with create-database is exported with --database in place of the one named for the service
-dokku {{.CommandPrefix}}:export lollipop --database paintshop > paintshop.dump
+dokku {{.Command "export"}} lollipop --database paintshop > paintshop.dump
 {{- end}}
 {{- if .ExportArgs}}
 arguments after -- are passed to the tool that makes the dump, in place of the export-args property
-dokku {{.CommandPrefix}}:export lollipop -- <export-args...>
+dokku {{.Command "export"}} lollipop -- <export-args...>
 the export-args property holds the arguments every export, backup and clone of the service is made with
-dokku {{.CommandPrefix}}:set lollipop export-args -- "<export-args...>"
+dokku {{.Command "set"}} lollipop export-args -- "<export-args...>"
 {{- end}}`
 }
 
@@ -603,18 +603,18 @@ func (c *ExposeCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *ExposeCommand) Documentation() string {
 	return `expose the service on the service's normal ports, allowing access to it from the public interface (0.0.0.0)
-dokku {{.CommandPrefix}}:expose lollipop {{.PortList}}
+dokku {{.Command "expose"}} lollipop {{.PortList}}
 expose the service on the service's normal ports, with the first on a specified ip address (127.0.0.1)
-dokku {{.CommandPrefix}}:expose lollipop 127.0.0.1:{{.PortList}}
+dokku {{.Command "expose"}} lollipop 127.0.0.1:{{.PortList}}
 expose the service on random ports on a single address, and only to clients in one network
-dokku {{.CommandPrefix}}:set lollipop port-bind-address 10.0.0.5
-dokku {{.CommandPrefix}}:set lollipop port-source-range 10.0.0.0/8
-dokku {{.CommandPrefix}}:expose lollipop
+dokku {{.Command "set"}} lollipop port-bind-address 10.0.0.5
+dokku {{.Command "set"}} lollipop port-source-range 10.0.0.0/8
+dokku {{.Command "expose"}} lollipop
 expose the service by publishing its ports on the service container itself rather than through an ambassador container. a running service is stopped and started to publish them, after asking, or without asking when --force is given
-dokku {{.CommandPrefix}}:set lollipop expose-mode direct
-dokku {{.CommandPrefix}}:expose lollipop --force
+dokku {{.Command "set"}} lollipop expose-mode direct
+dokku {{.Command "expose"}} lollipop --force
 print the dsn a client off the host connects with, which names the expose-host or the first global domain
-dokku {{.CommandPrefix}}:info lollipop --exposed-dsn`
+dokku {{.Command "info"}} lollipop --exposed-dsn`
 }
 
 // Group is the readme usage section the command is documented under
@@ -636,24 +636,24 @@ func (c *ImportCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *ImportCommand) Documentation() string {
 	return `import a datastore dump
-dokku {{.CommandPrefix}}:import lollipop < data.dump
+dokku {{.Command "import"}} lollipop < data.dump
 a dump that is already on the dokku host can be imported with --file.
 the path is on the dokku host, not on the machine running ssh.
-dokku {{.CommandPrefix}}:import lollipop --file /var/lib/dokku/data/storage/data.dump
+dokku {{.Command "import"}} lollipop --file /var/lib/dokku/data/storage/data.dump
 {{- if .AllDatabases}}
 a dump of every database, as written by export --all-databases or a backup, is imported with --all-databases.
 each database in the dump is replaced under the name it was exported from, and any other database is left alone.
-dokku {{.CommandPrefix}}:import lollipop --all-databases < all.dump
+dokku {{.Command "import"}} lollipop --all-databases < all.dump
 {{- end}}
 {{- if .MakesDatabases}}
 a dump is imported into a database made with create-database with --database in place of the one named for the service
-dokku {{.CommandPrefix}}:import lollipop --database paintshop < paintshop.dump
+dokku {{.Command "import"}} lollipop --database paintshop < paintshop.dump
 {{- end}}
 {{- if .ImportArgs}}
 arguments after -- are passed to the tool that loads the dump, in place of the import-args property
-dokku {{.CommandPrefix}}:import lollipop -- <import-args...> < data.dump
+dokku {{.Command "import"}} lollipop -- <import-args...> < data.dump
 the import-args property holds the arguments every import into the service is made with, a clone's included
-dokku {{.CommandPrefix}}:set lollipop import-args -- "<import-args...>"
+dokku {{.Command "set"}} lollipop import-args -- "<import-args...>"
 {{- end}}`
 }
 
@@ -676,40 +676,40 @@ func (c *InfoCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *InfoCommand) Documentation() string {
 	return `get connection information as follows:
-dokku {{.CommandPrefix}}:info lollipop
+dokku {{.Command "info"}} lollipop
 alongside the connection information this reports the properties set on the service, the state it was created with, and its backup settings.
 a property that was never set, or that was unset, reports as empty.
 omit the service to report on every {{.CommandPrefix}} service:
-dokku {{.CommandPrefix}}:info
+dokku {{.Command "info"}}
 the information can be read by machine, one json object per service:
-dokku {{.CommandPrefix}}:info lollipop --format json
+dokku {{.Command "info"}} lollipop --format json
 you can also retrieve a specific piece of service info via a flag, which prints it on its own:
-dokku {{.CommandPrefix}}:info lollipop --dsn
-dokku {{.CommandPrefix}}:info lollipop --status
-dokku {{.CommandPrefix}}:info lollipop --internal-ip
-dokku {{.CommandPrefix}}:info lollipop --initial-network
+dokku {{.Command "info"}} lollipop --dsn
+dokku {{.Command "info"}} lollipop --status
+dokku {{.Command "info"}} lollipop --internal-ip
+dokku {{.Command "info"}} lollipop --initial-network
 {{- if .Databases}}
-dokku {{.CommandPrefix}}:info lollipop --databases
+dokku {{.Command "info"}} lollipop --databases
 {{- end}}
 {{- if .Users}}
-dokku {{.CommandPrefix}}:info lollipop --users
+dokku {{.Command "info"}} lollipop --users
 {{- end}}
 > NOTE: a flag cannot be combined with --format, and only one may be given
 the exposed dsn is the one a client off the host connects with. it names the expose-host, or the first global domain without one, and is empty until the service is exposed and there is a host to name:
-dokku {{.CommandPrefix}}:info lollipop --exposed-dsn
-the properties {{.CommandPrefix}}:set writes are reported under the names it takes, so a value read here can be written back:
-dokku {{.CommandPrefix}}:set lollipop initial-network my-network
+dokku {{.Command "info"}} lollipop --exposed-dsn
+the properties {{.Command "set"}} writes are reported under the names it takes, so a value read here can be written back:
+dokku {{.Command "set"}} lollipop initial-network my-network
 the stored backup credentials and passphrase are never printed. each is reported as a lowercase hex sha256 fingerprint of that stored value, with surrounding whitespace trimmed, so a copy of one value can be compared against it:
-dokku {{.CommandPrefix}}:info lollipop --backup-access-key-id-fingerprint
-dokku {{.CommandPrefix}}:info lollipop --backup-secret-access-key-fingerprint
-dokku {{.CommandPrefix}}:info lollipop --backup-encryption-fingerprint
+dokku {{.Command "info"}} lollipop --backup-access-key-id-fingerprint
+dokku {{.Command "info"}} lollipop --backup-secret-access-key-fingerprint
+dokku {{.Command "info"}} lollipop --backup-encryption-fingerprint
 a fingerprint is empty when that value is not stored. the access key id and the secret are also reported as one fingerprint of the pair, which is empty until both are stored and is what backup-auth writes in one call:
-dokku {{.CommandPrefix}}:info lollipop --backup-auth-fingerprint
+dokku {{.Command "info"}} lollipop --backup-auth-fingerprint
 {{- if .Password}}
 the service's passwords are reported the same way, and are empty for a password the datastore does not have:
-dokku {{.CommandPrefix}}:info lollipop --password-fingerprint
+dokku {{.Command "info"}} lollipop --password-fingerprint
 {{- if .RootPassword}}
-dokku {{.CommandPrefix}}:info lollipop --root-password-fingerprint
+dokku {{.Command "info"}} lollipop --root-password-fingerprint
 {{- end}}
 {{- end}}
 the same fingerprints can be computed from the values that were passed to set, backup-auth and backup-set-encryption:
@@ -740,12 +740,12 @@ func (c *LabelCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *LabelCommand) Documentation() string {
 	return `add a label to the service container
-dokku {{.CommandPrefix}}:label lollipop traefik.enable=true
+dokku {{.Command "label"}} lollipop traefik.enable=true
 several may be given at once, and a value may hold commas and spaces
-dokku {{.CommandPrefix}}:label lollipop com.example.team=data "traefik.http.routers.lollipop.middlewares=auth,compress"
+dokku {{.Command "label"}} lollipop com.example.team=data "traefik.http.routers.lollipop.middlewares=auth,compress"
 labelling a key the service already has replaces its value. keys starting with 'dokku.' or
 'com.dokku.' are dokku's own and are refused.
-> NOTE: a label reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.`
+> NOTE: a label reaches the container the next time one is built. {{.Command "restart"}} keeps the container it has, so use {{.Command "stop"}} and then {{.Command "start"}} on a service that is already running.`
 }
 
 // Group is the readme usage section the command is documented under
@@ -774,7 +774,7 @@ running containers join it straight away, and the containers it is built, deploy
 and run in from then on join it when they are made. here we link it to our
 'playground' app.
 > NOTE: this will restart your app
-dokku {{.CommandPrefix}}:link lollipop playground
+dokku {{.Command "link"}} lollipop playground
 the following will be set on the linked application by default:
 
     {{.DefaultAlias}}_URL={{.Scheme}}://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}
@@ -790,10 +790,10 @@ each app's containers once they are restarted.
 > NOTE: every link uses a docker network of its own. docker's default address pools hold about 31 networks, so a server with many links may need a larger default-address-pools setting in /etc/docker/daemon.json.
 
 another service can be linked to your app:
-dokku {{.CommandPrefix}}:link other_service playground
+dokku {{.Command "link"}} other_service playground
 the url can be set under another name with the '--alias' flag. the value given is
 the prefix of the config variable, which is suffixed with _URL and holds the same url
-dokku {{.CommandPrefix}}:link lollipop playground --alias BLUE_{{.DefaultAlias}}
+dokku {{.Command "link"}} lollipop playground --alias BLUE_{{.DefaultAlias}}
 this will set the following on the linked application instead of {{.DefaultAlias}}_URL:
 
     BLUE_{{.DefaultAlias}}_URL={{.Scheme}}://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}
@@ -802,14 +802,14 @@ an alias whose variable is already set on the app is refused, and unlink removes
 the variable whatever alias it was set under. an app that expects the url under a name
 that does not end in _URL can be given that name in full with the '--env-var' flag,
 which cannot be combined with '--alias':
-dokku {{.CommandPrefix}}:link lollipop playground --env-var MB_DB_CONNECTION_URI
+dokku {{.Command "link"}} lollipop playground --env-var MB_DB_CONNECTION_URI
 this will set the following on the linked application instead of {{.DefaultAlias}}_URL:
 
     MB_DB_CONNECTION_URI={{.Scheme}}://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}
 
 a name already set on the app is refused. arguments can be appended to the url as a
 querystring with the '--querystring' flag:
-dokku {{.CommandPrefix}}:link lollipop playground --querystring "foo=bar&baz=qux"
+dokku {{.Command "link"}} lollipop playground --querystring "foo=bar&baz=qux"
 this will cause {{.DefaultAlias}}_URL to be set as:
 
     {{.Scheme}}://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}?foo=bar&baz=qux
@@ -821,7 +821,7 @@ on it changes. a link made by an earlier version of the plugin is recorded the
 next time link or promote runs for it, and until then we advise you to unlink
 before changing the scheme.
 dokku config:set playground {{.PluginVariable}}_DATABASE_SCHEME={{.Scheme}}2
-dokku {{.CommandPrefix}}:link lollipop playground
+dokku {{.Command "link"}} lollipop playground
 this will cause {{.DefaultAlias}}_URL to be set as:
 
     {{.Scheme}}2://:SOME_PASSWORD@dokku-{{.CommandPrefix}}-lollipop:{{.Port}}
@@ -829,7 +829,7 @@ this will cause {{.DefaultAlias}}_URL to be set as:
 
 a java app whose jdbc driver cannot read {{.DefaultAlias}}_URL can also be given a jdbc
 url and the credentials it names with the '--jdbc' flag:
-dokku {{.CommandPrefix}}:link lollipop playground --jdbc
+dokku {{.Command "link"}} lollipop playground --jdbc
 this will set the following on the linked application alongside {{.DefaultAlias}}_URL:
 
     JDBC_{{.DefaultAlias}}_URL={{.JDBCURL}}
@@ -838,7 +838,7 @@ this will set the following on the linked application alongside {{.DefaultAlias}
 
 the jdbc variables are named after the one holding the url, whether it was named
 with the '--alias' or the '--env-var' flag:
-dokku {{.CommandPrefix}}:link lollipop playground --jdbc --env-var MB_DB_CONNECTION_URI
+dokku {{.Command "link"}} lollipop playground --jdbc --env-var MB_DB_CONNECTION_URI
 this will set the following on the linked application alongside MB_DB_CONNECTION_URI:
 
     JDBC_MB_DB_CONNECTION_URI={{.JDBCURL}}
@@ -853,17 +853,17 @@ again to be given the jdbc variables.
 
 {{if .MakesDatabases}}an app can be linked to a database made with create-database rather than the one
 named for the service with the '--database' flag:
-dokku {{.CommandPrefix}}:link lollipop playground --database paintshop
+dokku {{.Command "link"}} lollipop playground --database paintshop
 {{- else}}an app can be linked to another of the service's {{.FixedDatabases}} databases, numbered from 0, with
 the '--database' flag:
-dokku {{.CommandPrefix}}:link lollipop playground --database 3
+dokku {{.Command "link"}} lollipop playground --database 3
 {{- end}}
 {{- end}}
 {{- if .Users}}
 
 an app can be linked as a user made with create-user rather than as the service's own
 with the '--user' flag, which can be combined with the '--database' flag:
-dokku {{.CommandPrefix}}:link lollipop playground --user painter
+dokku {{.Command "link"}} lollipop playground --user painter
 {{- end}}
 {{- if or .Databases .Users}}
 
@@ -892,7 +892,7 @@ func (c *LinkedCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *LinkedCommand) Documentation() string {
 	return `here we check if the lollipop {{.CommandPrefix}} service is linked to the 'playground' app.
-dokku {{.CommandPrefix}}:linked lollipop playground`
+dokku {{.Command "linked"}} lollipop playground`
 }
 
 // Group is the readme usage section the command is documented under
@@ -914,7 +914,7 @@ func (c *LinksCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *LinksCommand) Documentation() string {
 	return `list all apps linked to the 'lollipop' {{.CommandPrefix}} service.
-dokku {{.CommandPrefix}}:links lollipop
+dokku {{.Command "links"}} lollipop
 renaming an app moves its link onto the new name, and cloning an app links the
 clone as well as the original.`
 }
@@ -938,7 +938,7 @@ func (c *ListCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *ListCommand) Documentation() string {
 	return `list all services
-dokku {{.CommandPrefix}}:list`
+dokku {{.Command "list"}}`
 }
 
 // Group is the readme usage section the command is documented under
@@ -960,11 +960,11 @@ func (c *LogsCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *LogsCommand) Documentation() string {
 	return `you can tail logs for a particular service:
-dokku {{.CommandPrefix}}:logs lollipop
+dokku {{.Command "logs"}} lollipop
 by default, logs will not be tailed, but you can do this with the --tail flag:
-dokku {{.CommandPrefix}}:logs lollipop --tail
+dokku {{.Command "logs"}} lollipop --tail
 by default the last 100 lines are shown, but a different count can be specified
-dokku {{.CommandPrefix}}:logs lollipop --tail=5`
+dokku {{.Command "logs"}} lollipop --tail=5`
 }
 
 // Group is the readme usage section the command is documented under
@@ -986,27 +986,27 @@ func (c *MountCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *MountCommand) Documentation() string {
 	return `mount a host directory into the service container
-dokku {{.CommandPrefix}}:mount lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra
+dokku {{.Command "mount"}} lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra
 the source is an absolute host path, which must already exist, or the name of a docker volume.
 options follow a second colon: ro or rw, docker's own mount options, volume-subpath=<path>
 and volume-chown=<option>
-dokku {{.CommandPrefix}}:mount lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra:ro,z
+dokku {{.Command "mount"}} lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra:ro,z
 a subpath mounts a directory within the source rather than the source itself. A docker volume
 mounted from a subpath needs Docker Engine 26.0 or newer, and takes no mount option but nocopy.
-dokku {{.CommandPrefix}}:mount lollipop my-volume:/opt/extra:volume-subpath=uploads
+dokku {{.Command "mount"}} lollipop my-volume:/opt/extra:volume-subpath=uploads
 a chown hands the mounted directory to a user before the container is made: herokuish, heroku,
 paketo, root or a uid. It is only taken for a host path inside the service's own directory.
-dokku {{.CommandPrefix}}:mount lollipop /var/lib/dokku/services/{{.CommandPrefix}}/lollipop/extra:/opt/extra:volume-chown=heroku
+dokku {{.Command "mount"}} lollipop /var/lib/dokku/services/{{.CommandPrefix}}/lollipop/extra:/opt/extra:volume-chown=heroku
 the same can be said with flags instead
-dokku {{.CommandPrefix}}:mount lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra --volume-readonly --volume-options z
+dokku {{.Command "mount"}} lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra --volume-readonly --volume-options z
 mounting the same source at the same directory again rewrites its options
-dokku {{.CommandPrefix}}:mount lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra
+dokku {{.Command "mount"}} lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra
 replace every mount the service has with the ones given
-dokku {{.CommandPrefix}}:mount --replace lollipop /srv/a:/opt/a:ro /srv/b:/opt/b
+dokku {{.Command "mount"}} --replace lollipop /srv/a:/opt/a:ro /srv/b:/opt/b
 {{- if .VolumeKey}}
 > NOTE: a mount cannot land where one of the definition's volumes is mounted, which for a volume moved with the volume-targets property is where it was moved to.
 {{- end}}
-> NOTE: a mount reaches the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.`
+> NOTE: a mount reaches the container the next time one is built. {{.Command "restart"}} keeps the container it has, so use {{.Command "stop"}} and then {{.Command "start"}} on a service that is already running.`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1028,7 +1028,7 @@ func (c *PauseCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *PauseCommand) Documentation() string {
 	return `pause the running container for the service
-dokku {{.CommandPrefix}}:pause lollipop`
+dokku {{.Command "pause"}} lollipop`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1056,7 +1056,7 @@ another link environment variable will be generated automatically:
 
 you can promote the new service to be the primary one
 > NOTE: this will restart your app
-dokku {{.CommandPrefix}}:promote other_service playground
+dokku {{.Command "promote"}} other_service playground
 this will replace {{.DefaultAlias}}_URL with the url from other_service and generate
 another environment variable to hold the previous value if necessary.
 you could end up with the following for example:
@@ -1087,12 +1087,12 @@ func (c *ResetCommand) Documentation() string {
 	return `delete all data in the service, leaving it as empty as a newly created one.
 the service, its credentials, and the apps it is linked to are kept, so linked apps do not need to be relinked.
 connections the apps hold open may be closed.
-dokku {{.CommandPrefix}}:reset lollipop
+dokku {{.Command "reset"}} lollipop
 the service name is asked for before anything is deleted, unless --force is given
-dokku {{.CommandPrefix}}:reset lollipop --force
+dokku {{.Command "reset"}} lollipop --force
 {{- if .MakesDatabases}}
 only the database named for the service is reset unless another is named with --database, which resets a database made with create-database and leaves every other alone
-dokku {{.CommandPrefix}}:reset lollipop --database paintshop
+dokku {{.Command "reset"}} lollipop --database paintshop
 {{- end}}`
 }
 
@@ -1115,7 +1115,7 @@ func (c *RestartCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *RestartCommand) Documentation() string {
 	return `restart the service
-dokku {{.CommandPrefix}}:restart lollipop`
+dokku {{.Command "restart"}} lollipop`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1137,120 +1137,120 @@ func (c *SetCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *SetCommand) Documentation() string {
 	return `set the network to attach after the service container is started
-dokku {{.CommandPrefix}}:set lollipop post-create-network custom-network
+dokku {{.Command "set"}} lollipop post-create-network custom-network
 set multiple networks
-dokku {{.CommandPrefix}}:set lollipop post-create-network custom-network,other-network
+dokku {{.Command "set"}} lollipop post-create-network custom-network,other-network
 unset the post-create-network value
-dokku {{.CommandPrefix}}:set lollipop post-create-network
+dokku {{.Command "set"}} lollipop post-create-network
 limit the container to 512 megabytes of memory, or go back to no limit with 0
-dokku {{.CommandPrefix}}:set lollipop memory 512
+dokku {{.Command "set"}} lollipop memory 512
 {{- if .ServiceMemory}}
 tell the datastore itself to use 256 megabytes, or go back to its own default by giving no value
-dokku {{.CommandPrefix}}:set lollipop service-memory 256
+dokku {{.Command "set"}} lollipop service-memory 256
 {{- end}}
 give the container a shared memory size of its own
-dokku {{.CommandPrefix}}:set lollipop shm-size 256m
+dokku {{.Command "set"}} lollipop shm-size 256m
 start the container with semi-colon delimited environment variables of your own
-dokku {{.CommandPrefix}}:set lollipop custom-env "TZ=UTC;LANG=C.UTF-8"
+dokku {{.Command "set"}} lollipop custom-env "TZ=UTC;LANG=C.UTF-8"
 pass extra arguments to the process the service container runs. these are not docker flags, so use mount for mounts. the value follows -- so that its leading dash is not read as a flag
-dokku {{.CommandPrefix}}:set lollipop config-options -- "<config-options...>"
+dokku {{.Command "set"}} lollipop config-options -- "<config-options...>"
 go back to running the process with the datastore's own arguments alone
-dokku {{.CommandPrefix}}:set lollipop config-options
+dokku {{.Command "set"}} lollipop config-options
 {{- if .Password}}
 change the password in the datastore and in the url every linked app holds, restarting the apps. the value is never printed back, and info reports a fingerprint of it
-dokku {{.CommandPrefix}}:set{{if .PasswordRestarts}} --allow-restart{{end}} lollipop password "<new-password>"
+dokku {{.Command "set"}}{{if .PasswordRestarts}} --allow-restart{{end}} lollipop password "<new-password>"
 give the linked apps the new url without restarting them
-dokku {{.CommandPrefix}}:set{{if .PasswordRestarts}} --allow-restart{{end}} --no-restart lollipop password "<new-password>"
+dokku {{.Command "set"}}{{if .PasswordRestarts}} --allow-restart{{end}} --no-restart lollipop password "<new-password>"
 {{- end}}
 {{- if .RootPassword}}
 change the root password in the datastore
-dokku {{.CommandPrefix}}:set lollipop root-password "<new-root-password>"
+dokku {{.Command "set"}} lollipop root-password "<new-root-password>"
 {{- end}}
 {{- if .Backups}}
 change one of the settings backup-auth stores, such as the endpoint of an s3 compatible service, without passing the rest again
-dokku {{.CommandPrefix}}:set lollipop backup-endpoint-url https://nyc3.digitaloceanspaces.com
+dokku {{.Command "set"}} lollipop backup-endpoint-url https://nyc3.digitaloceanspaces.com
 rotate the credentials backups are shipped with one at a time. the value is never printed back, and info reports a fingerprint of that value
-dokku {{.CommandPrefix}}:set lollipop backup-access-key-id AKIAIOSFODNN7EXAMPLE
-dokku {{.CommandPrefix}}:set lollipop backup-secret-access-key "<secret-access-key>"
+dokku {{.Command "set"}} lollipop backup-access-key-id AKIAIOSFODNN7EXAMPLE
+dokku {{.Command "set"}} lollipop backup-secret-access-key "<secret-access-key>"
 encrypt backups with a passphrase, or with a gpg public key
-dokku {{.CommandPrefix}}:set lollipop backup-encryption-passphrase "<passphrase>"
-dokku {{.CommandPrefix}}:set lollipop backup-public-key-id "<public-key-id>"
+dokku {{.Command "set"}} lollipop backup-encryption-passphrase "<passphrase>"
+dokku {{.Command "set"}} lollipop backup-public-key-id "<public-key-id>"
 ship the default scheduled backup to another bucket, or have it authenticate with an instance role, when that is the only schedule. both rewrite the crontab entry. with more than one schedule, change a schedule with backup-schedule --id
-dokku {{.CommandPrefix}}:set lollipop backup-bucket other-bucket
-dokku {{.CommandPrefix}}:set lollipop backup-use-iam true
+dokku {{.Command "set"}} lollipop backup-bucket other-bucket
+dokku {{.Command "set"}} lollipop backup-use-iam true
 record a backup setting on one schedule. an empty value clears that schedule's own value and leaves the service's. the bucket and the instance role cannot be set this way
-dokku {{.CommandPrefix}}:set lollipop backup-storage-class STANDARD_IA --id monthly
+dokku {{.Command "set"}} lollipop backup-storage-class STANDARD_IA --id monthly
 give one schedule its own endpoint. the access key and the secret are set with backup-auth --id, and set rotates one of them once both are stored
-dokku {{.CommandPrefix}}:set lollipop backup-endpoint-url https://nyc3.digitaloceanspaces.com --id monthly
+dokku {{.Command "set"}} lollipop backup-endpoint-url https://nyc3.digitaloceanspaces.com --id monthly
 set the keyserver a public key for backup encryption is fetched from
-dokku {{.CommandPrefix}}:set lollipop backup-keyserver hkp://keys.example.com
+dokku {{.Command "set"}} lollipop backup-keyserver hkp://keys.example.com
 set the s3 storage class backups are uploaded with, one of STANDARD, REDUCED_REDUNDANCY, STANDARD_IA, ONEZONE_IA, INTELLIGENT_TIERING, GLACIER, DEEP_ARCHIVE or GLACIER_IR
-dokku {{.CommandPrefix}}:set lollipop backup-storage-class STANDARD_IA
+dokku {{.Command "set"}} lollipop backup-storage-class STANDARD_IA
 go back to uploading backups with the bucket's default storage class
-dokku {{.CommandPrefix}}:set lollipop backup-storage-class
+dokku {{.Command "set"}} lollipop backup-storage-class
 upload backups under a name of your own rather than {{.CommandPrefix}}-lollipop
-dokku {{.CommandPrefix}}:set lollipop backup-object-name db/latest
+dokku {{.Command "set"}} lollipop backup-object-name db/latest
 upload every backup to the same key, without a timestamp, so bucket versioning and lifecycle rules can keep and rotate them
-dokku {{.CommandPrefix}}:set lollipop backup-timestamp false
+dokku {{.Command "set"}} lollipop backup-timestamp false
 go back to timestamped backups
-dokku {{.CommandPrefix}}:set lollipop backup-timestamp
+dokku {{.Command "set"}} lollipop backup-timestamp
 mail the output of scheduled backups to a comma-separated list of email addresses or local users rather than to the global cron MAILTO. requires a dokku version that reads json entries from the cron-entries plugin trigger, and a mail transfer agent on the host
-dokku {{.CommandPrefix}}:set lollipop backup-mailto ops@example.com,dba@example.com
+dokku {{.Command "set"}} lollipop backup-mailto ops@example.com,dba@example.com
 go back to mailing scheduled backup output to the global cron MAILTO
-dokku {{.CommandPrefix}}:set lollipop backup-mailto
+dokku {{.Command "set"}} lollipop backup-mailto
 {{- end}}
 cap the container log at a size of your own rather than the one it inherits
-dokku {{.CommandPrefix}}:set lollipop log-opt max-size=20m,max-file=3
+dokku {{.Command "set"}} lollipop log-opt max-size=20m,max-file=3
 keep the log unbounded, which is what a service had before there was anything to say here
-dokku {{.CommandPrefix}}:set lollipop log-opt max-size=unlimited
+dokku {{.Command "set"}} lollipop log-opt max-size=unlimited
 send the container log somewhere other than the daemon's own driver
-dokku {{.CommandPrefix}}:set lollipop log-driver journald
+dokku {{.Command "set"}} lollipop log-driver journald
 restart the container unless it was stopped on purpose, including across a docker restart
-dokku {{.CommandPrefix}}:set lollipop restart-policy unless-stopped
+dokku {{.Command "set"}} lollipop restart-policy unless-stopped
 go back to always restarting the container
-dokku {{.CommandPrefix}}:set lollipop restart-policy
+dokku {{.Command "set"}} lollipop restart-policy
 wait up to two minutes for the service to answer, used the next time it is started
-dokku {{.CommandPrefix}}:set lollipop wait-timeout 120
+dokku {{.Command "set"}} lollipop wait-timeout 120
 go back to the wait timeout the host or the datastore sets
-dokku {{.CommandPrefix}}:set lollipop wait-timeout
+dokku {{.Command "set"}} lollipop wait-timeout
 publish exposed ports that have no address of their own on one address rather than on every interface
-dokku {{.CommandPrefix}}:set lollipop port-bind-address 10.0.0.5
+dokku {{.Command "set"}} lollipop port-bind-address 10.0.0.5
 only accept connections to the exposed ports from clients in one IP address or CIDR
-dokku {{.CommandPrefix}}:set lollipop port-source-range 10.0.0.0/8
+dokku {{.Command "set"}} lollipop port-source-range 10.0.0.0/8
 go back to accepting every client
-dokku {{.CommandPrefix}}:set lollipop port-source-range
+dokku {{.Command "set"}} lollipop port-source-range
 name the host the exposed dsn points clients at, when they reach the server by a name or address other than its global domain. it does not change where the ports are bound
-dokku {{.CommandPrefix}}:set lollipop expose-host db.example.com
+dokku {{.Command "set"}} lollipop expose-host db.example.com
 go back to naming the first global domain
-dokku {{.CommandPrefix}}:set lollipop expose-host
+dokku {{.Command "set"}} lollipop expose-host
 publish the exposed ports on the service container itself rather than through an ambassador container, which relays every connection. a port-source-range cannot be used with it
-dokku {{.CommandPrefix}}:set lollipop expose-mode direct
+dokku {{.Command "set"}} lollipop expose-mode direct
 go back to publishing the exposed ports through an ambassador container
-dokku {{.CommandPrefix}}:set lollipop expose-mode
+dokku {{.Command "set"}} lollipop expose-mode
 {{- if .ExportArgs}}
 pass extra arguments to every export of the service, including the ones backups and clones make. the value follows -- so that its leading dash is not read as a flag, and an argument with a space in it is quoted
-dokku {{.CommandPrefix}}:set lollipop export-args -- "<export-args...>"
+dokku {{.Command "set"}} lollipop export-args -- "<export-args...>"
 go back to exporting with the datastore's own arguments alone
-dokku {{.CommandPrefix}}:set lollipop export-args
+dokku {{.Command "set"}} lollipop export-args
 {{- end}}
 {{- if .ImportArgs}}
 pass extra arguments to every import into the service, including the one a clone makes
-dokku {{.CommandPrefix}}:set lollipop import-args -- "<import-args...>"
+dokku {{.Command "set"}} lollipop import-args -- "<import-args...>"
 go back to importing with the datastore's own arguments alone
-dokku {{.CommandPrefix}}:set lollipop import-args
+dokku {{.Command "set"}} lollipop import-args
 {{- end}}
 {{- if .VolumeKey}}
 mount one of the definition's volumes at another path in the container, for an image that keeps its data somewhere else. each volume is named by where it lives in the service directory ({{range $index, $key := .VolumeKeys}}{{if $index}}, {{end}}{{$key}}{{end}}), and several are separated by spaces
-dokku {{.CommandPrefix}}:set lollipop volume-targets {{.VolumeKey}}=/srv/{{.CommandPrefix}}
+dokku {{.Command "set"}} lollipop volume-targets {{.VolumeKey}}=/srv/{{.CommandPrefix}}
 go back to mounting every volume where the definition does
-dokku {{.CommandPrefix}}:set lollipop volume-targets
+dokku {{.Command "set"}} lollipop volume-targets
 {{- end}}
-> NOTE: a network, a log setting, a restart policy, a volume target, the config options, the custom environment, the memory limit{{if and .ServiceMemory (not .ServiceMemoryLive)}}, the service memory{{end}} or the shared memory size reaches the container the next time one is built, and set warns that it does. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.
+> NOTE: a network, a log setting, a restart policy, a volume target, the config options, the custom environment, the memory limit{{if and .ServiceMemory (not .ServiceMemoryLive)}}, the service memory{{end}} or the shared memory size reaches the container the next time one is built, and set warns that it does. {{.Command "restart"}} keeps the container it has, so use {{.Command "stop"}} and then {{.Command "start"}} on a service that is already running.
 {{- if .ServiceMemoryLive}}
 > NOTE: a service memory is told to a running service at once, without its container being built again.
 {{- end}}
-> NOTE: a port-bind-address or port-source-range reaches an exposed service with {{.CommandPrefix}}:reexpose, which replaces the container publishing its ports and leaves the service container running.
-> NOTE: an expose-mode, or a port-bind-address for a service exposed directly, reaches an exposed service with {{.CommandPrefix}}:reexpose, which stops and starts a running service after asking. It also reaches the service the next time it is restarted, or stopped and started.`
+> NOTE: a port-bind-address or port-source-range reaches an exposed service with {{.Command "reexpose"}}, which replaces the container publishing its ports and leaves the service container running.
+> NOTE: an expose-mode, or a port-bind-address for a service exposed directly, reaches an exposed service with {{.Command "reexpose"}}, which stops and starts a running service after asking. It also reaches the service the next time it is restarted, or stopped and started.`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1272,9 +1272,9 @@ func (c *StartCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *StartCommand) Documentation() string {
 	return `start the service
-dokku {{.CommandPrefix}}:start lollipop
+dokku {{.Command "start"}} lollipop
 A service comes back on the version it was created with, or was last upgraded to, whatever version the plugin ships now. The image is fetched if the host no longer has it.
-A service that has never recorded a version and has no container left to read one from cannot be placed, and is reported rather than started on a guess. Use {{.CommandPrefix}}:upgrade to say which version it should run.`
+A service that has never recorded a version and has no container left to read one from cannot be placed, and is reported rather than started on a guess. Use {{.Command "upgrade"}} to say which version it should run.`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1296,7 +1296,7 @@ func (c *StopCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *StopCommand) Documentation() string {
 	return `stop the service and removes the running container
-dokku {{.CommandPrefix}}:stop lollipop`
+dokku {{.Command "stop"}} lollipop`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1318,9 +1318,9 @@ func (c *UnexposeCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *UnexposeCommand) Documentation() string {
 	return `unexpose the service, removing access to it from the public interface (0.0.0.0)
-dokku {{.CommandPrefix}}:unexpose lollipop
+dokku {{.Command "unexpose"}} lollipop
 unexpose a running service exposed directly, stopping and starting it without asking so that its container stops publishing the ports
-dokku {{.CommandPrefix}}:unexpose lollipop --force`
+dokku {{.Command "unexpose"}} lollipop --force`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1342,11 +1342,11 @@ func (c *ReexposeCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *ReexposeCommand) Documentation() string {
 	return `apply a changed port-bind-address or port-source-range to an exposed service, on the ports it is already exposed on
-dokku {{.CommandPrefix}}:set lollipop port-source-range 10.0.0.0/8
-dokku {{.CommandPrefix}}:reexpose lollipop
+dokku {{.Command "set"}} lollipop port-source-range 10.0.0.0/8
+dokku {{.Command "reexpose"}} lollipop
 move an exposed service between being published through an ambassador and directly, stopping and starting it without asking
-dokku {{.CommandPrefix}}:set lollipop expose-mode direct
-dokku {{.CommandPrefix}}:reexpose lollipop --force
+dokku {{.Command "set"}} lollipop expose-mode direct
+dokku {{.Command "reexpose"}} lollipop --force
 > NOTE: a service published through an ambassador only has the ambassador replaced, so the service keeps running, though connections made through the exposed ports are dropped. An ambassador that already matches the service's settings and is publishing is left alone.
 > NOTE: a service whose container has to publish other ports, because it is exposed directly or is being moved between expose modes, is stopped and started. A running service is asked about first, and nothing is changed if the answer is no.
 > NOTE: A service that is not exposed is refused, as is one published through an ambassador that is not running.`
@@ -1371,10 +1371,10 @@ func (c *UnlabelCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *UnlabelCommand) Documentation() string {
 	return `remove a label, naming it by its key
-dokku {{.CommandPrefix}}:unlabel lollipop traefik.enable
+dokku {{.Command "unlabel"}} lollipop traefik.enable
 remove every label the service was given
-dokku {{.CommandPrefix}}:unlabel --all lollipop
-> NOTE: the label is removed from the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.`
+dokku {{.Command "unlabel"}} --all lollipop
+> NOTE: the label is removed from the container the next time one is built. {{.Command "restart"}} keeps the container it has, so use {{.Command "stop"}} and then {{.Command "start"}} on a service that is already running.`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1397,7 +1397,7 @@ func (c *UnlinkCommand) Usage() string {
 func (c *UnlinkCommand) Documentation() string {
 	return `you can unlink a {{.CommandPrefix}} service
 > NOTE: this will restart your app and unset related environment variables
-dokku {{.CommandPrefix}}:unlink lollipop playground
+dokku {{.Command "unlink"}} lollipop playground
 the network the link ran over is removed straight away, so the app's running
 containers can no longer reach the service, even with '--no-restart'.
 an app is still linked after its {{.DefaultAlias}}_URL is changed to point
@@ -1430,10 +1430,10 @@ func (c *UnmountCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *UnmountCommand) Documentation() string {
 	return `remove a mount, naming it the way it was mounted
-dokku {{.CommandPrefix}}:unmount lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra
+dokku {{.Command "unmount"}} lollipop /var/lib/dokku/data/storage/lollipop:/opt/extra
 remove every mount the service has
-dokku {{.CommandPrefix}}:unmount --all lollipop
-> NOTE: the mount is removed from the container the next time one is built. {{.CommandPrefix}}:restart keeps the container it has, so use {{.CommandPrefix}}:stop and then {{.CommandPrefix}}:start on a service that is already running.`
+dokku {{.Command "unmount"}} --all lollipop
+> NOTE: the mount is removed from the container the next time one is built. {{.Command "restart"}} keeps the container it has, so use {{.Command "stop"}} and then {{.Command "start"}} on a service that is already running.`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1455,31 +1455,31 @@ func (c *UpgradeCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *UpgradeCommand) Documentation() string {
 	return `you can upgrade an existing service to a new image or image-version
-dokku {{.CommandPrefix}}:upgrade lollipop
+dokku {{.Command "upgrade"}} lollipop
 This is the only command that changes the version a service runs. With no version named it moves to the newest the service's own major version ships, which leaves the data where it is.
-dokku {{.CommandPrefix}}:upgrade lollipop --image-version 1.2.3
+dokku {{.Command "upgrade"}} lollipop --image-version 1.2.3
 Moving across a major version has to be asked for by name, because it is not a tag change: the data is mounted somewhere different under the new one, and pointing the version back does not undo it.
 {{- if .Definitions}}
 A service can also be moved onto a definition by name, with --image and --image-version laid over the image and version it ships. This moves where the data is mounted in the same way, even when the image stays the same.
-dokku {{.CommandPrefix}}:upgrade lollipop --definition {{index .Definitions 0}}
+dokku {{.Command "upgrade"}} lollipop --definition {{index .Definitions 0}}
 {{- end}}
 {{- if .Migrates}}
 An upgrade that moves a service onto another of its definitions carries the data across rather than leaving it where the new one would not read it, which needs --restart-apps so that the linked apps write nothing while it is copied. The old data is kept beside the new, and a move that fails puts the service back on what it ran.
-dokku {{.CommandPrefix}}:upgrade lollipop --definition {{index .Definitions 0}} --restart-apps
+dokku {{.Command "upgrade"}} lollipop --definition {{index .Definitions 0}} --restart-apps
 A service whose data is already where another definition mounts it, such as one pinned to a definition that never matched where its container kept the data, is placed on that definition with --no-migrate, which makes its container again with the data left where it is. It does not check where the data is, so pointing it at the wrong definition starts the service on an empty directory with its data still beside it.
-dokku {{.CommandPrefix}}:upgrade lollipop --definition {{index .Definitions 0}} --no-migrate
+dokku {{.Command "upgrade"}} lollipop --definition {{index .Definitions 0}} --no-migrate
 {{- end}}
 A service keeps the mounts it has unless --volume is passed, which replaces them, and each one is checked against the new container before the old one is taken away.
-dokku {{.CommandPrefix}}:upgrade lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro
+dokku {{.Command "upgrade"}} lollipop --volume /var/lib/dokku/data/storage/lollipop:/opt/extra:ro
 {{- if .VolumeKey}}
 A service keeps the volume targets it has unless --volume-target is passed, which replaces them, and an upgrade onto a definition that does not mount a volume the service moved is refused before the old container is taken away. --volume-target "" puts every volume back where the new definition mounts it.
-dokku {{.CommandPrefix}}:upgrade lollipop --volume-target ""
+dokku {{.Command "upgrade"}} lollipop --volume-target ""
 {{- end}}
 A service keeps its memory limit unless --memory is passed, and --memory 0 removes it.
-dokku {{.CommandPrefix}}:upgrade lollipop --memory 512
+dokku {{.Command "upgrade"}} lollipop --memory 512
 {{- if .ServiceMemory}}
 A service keeps its service memory unless --service-memory is passed, and --service-memory "" leaves it to the datastore.
-dokku {{.CommandPrefix}}:upgrade lollipop --service-memory 256
+dokku {{.Command "upgrade"}} lollipop --service-memory 256
 {{- end}}`
 }
 
@@ -1502,13 +1502,13 @@ func (c *CreateDatabaseCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *CreateDatabaseCommand) Documentation() string {
 	return `create a database named 'paintshop' in the running 'lollipop' service, beside the one it was created with
-dokku {{.CommandPrefix}}:create-database lollipop paintshop
+dokku {{.Command "create-database"}} lollipop paintshop
 {{- if .Users}}
 every user the service holds is given access to it.
 {{- end}}
 a database name may only contain lowercase letters, digits and '_', start with a letter or '_', and be at most 32 characters long.
 link an app to it with the '--database' flag
-dokku {{.CommandPrefix}}:link lollipop playground --database paintshop`
+dokku {{.Command "link"}} lollipop playground --database paintshop`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1530,10 +1530,10 @@ func (c *DestroyDatabaseCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *DestroyDatabaseCommand) Documentation() string {
 	return `destroy the 'paintshop' database made in the running 'lollipop' service, along with all of its data
-dokku {{.CommandPrefix}}:destroy-database lollipop paintshop
+dokku {{.Command "destroy-database"}} lollipop paintshop
 the database name is asked for before anything is deleted, unless --force is given.
 a database an app is still linked to is refused, and the one the service was created with is only removed with the service.
-dokku {{.CommandPrefix}}:destroy-database lollipop paintshop --force`
+dokku {{.Command "destroy-database"}} lollipop paintshop --force`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1555,14 +1555,14 @@ func (c *CreateUserCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *CreateUserCommand) Documentation() string {
 	return `create a user named 'painter' in the running 'lollipop' service, with a generated password
-dokku {{.CommandPrefix}}:create-user lollipop painter
+dokku {{.Command "create-user"}} lollipop painter
 the user is given access to every database the service holds, and to every database made in it later.
 a password of your own may be given instead.
 it may only contain letters, digits, '.', '_', '~' and '-'.
-dokku {{.CommandPrefix}}:create-user lollipop painter SOME_PASSWORD
+dokku {{.Command "create-user"}} lollipop painter SOME_PASSWORD
 a user name may only contain lowercase letters, digits and '_', start with a letter or '_', and be at most 32 characters long.
 link an app as the user with the '--user' flag, which hands it the password in its url
-dokku {{.CommandPrefix}}:link lollipop playground --user painter`
+dokku {{.Command "link"}} lollipop playground --user painter`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1584,10 +1584,10 @@ func (c *DestroyUserCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *DestroyUserCommand) Documentation() string {
 	return `destroy the 'painter' user made in the running 'lollipop' service
-dokku {{.CommandPrefix}}:destroy-user lollipop painter
+dokku {{.Command "destroy-user"}} lollipop painter
 the user name is asked for before it is destroyed, unless --force is given.
 a user an app is still linked as is refused, and the one the service was created with is only removed with the service.
-dokku {{.CommandPrefix}}:destroy-user lollipop painter --force`
+dokku {{.Command "destroy-user"}} lollipop painter --force`
 }
 
 // Group is the readme usage section the command is documented under
@@ -1609,14 +1609,14 @@ func (c *SetUserPasswordCommand) Usage() string {
 // Documentation returns the long form documentation for the command
 func (c *SetUserPasswordCommand) Documentation() string {
 	return `give the 'painter' user made in the running 'lollipop' service a generated password
-dokku {{.CommandPrefix}}:set-user-password lollipop painter
+dokku {{.Command "set-user-password"}} lollipop painter
 or a password of your own
-dokku {{.CommandPrefix}}:set-user-password lollipop painter SOME_PASSWORD
+dokku {{.Command "set-user-password"}} lollipop painter SOME_PASSWORD
 every app linked as the user is given the new url and restarted, unless --no-restart is given, and the apps linked as any other user are left alone.
-dokku {{.CommandPrefix}}:set-user-password lollipop painter --no-restart
+dokku {{.Command "set-user-password"}} lollipop painter --no-restart
 {{- if .Password}}
 the password of the user the service was created with is changed with set instead
-dokku {{.CommandPrefix}}:set lollipop password SOME_PASSWORD
+dokku {{.Command "set"}} lollipop password SOME_PASSWORD
 {{- end}}`
 }
 

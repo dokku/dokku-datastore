@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/dokku/dokku-datastore/internal"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -157,5 +158,5 @@ func (c *LabelCommand) Run(args []string) int {
 // labels of a container it has already made
 func labelsRebuildNote(datastore *service.Datastore) string {
 	commandPrefix := datastore.Properties().CommandPrefix
-	return fmt.Sprintf("Labels reach the container the next time one is built; on a running service use %s:stop and then %s:start", commandPrefix, commandPrefix)
+	return fmt.Sprintf("Labels reach the container the next time one is built; on a running service use %s and then %s", hostenv.Invocation(commandPrefix, "stop"), hostenv.Invocation(commandPrefix, "start"))
 }

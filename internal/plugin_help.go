@@ -4,6 +4,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 )
 
 // maxListedArguments is how many arguments the one line per command listing
@@ -86,7 +88,7 @@ func PluginCommandLines(input PluginHelpInput) ([]string, error) {
 			return nil, err
 		}
 
-		invocation := strings.TrimSpace(input.Data.CommandPrefix + ":" + c.Name() + " " + elideArguments(usage))
+		invocation := strings.TrimSpace(input.Data.Command(c.Name()) + " " + elideArguments(usage))
 		lines = append(lines, "    "+invocation+","+colors.paint(colors.lightGray, description))
 	}
 
@@ -105,20 +107,26 @@ func PluginHelpOverview(input PluginHelpInput) (string, error) {
 		return "", err
 	}
 
+	// under a namespace the datastore follows the command rather than naming it
+	usage := data.CommandPrefix + "[:COMMAND]"
+	if namespace := hostenv.CommandNamespace(); namespace != "" {
+		usage = namespace + "[:COMMAND] " + data.CommandPrefix
+	}
+
 	out := []string{
-		colors.paint(colors.bold, "usage") + ": dokku " + data.CommandPrefix + "[:COMMAND]",
+		colors.paint(colors.bold, "usage") + ": dokku " + usage,
 		"",
 		colors.paint(colors.bold, "List your "+data.CommandPrefix+" services."),
 		"",
 		colors.paint(colors.blue, "Example:"),
 		"",
-		"    $ dokku " + data.CommandPrefix + ":list",
+		"    $ dokku " + data.Command("list"),
 		"",
 		"      " + data.Title + " services",
 		"      service-name",
 		"",
 		"dokku " + colors.paint(colors.bold, data.CommandPrefix) + " commands: (get help with " +
-			colors.paint(colors.cyan, "dokku "+data.CommandPrefix+":help SUBCOMMAND") + ")",
+			colors.paint(colors.cyan, "dokku "+data.Command("help")+" SUBCOMMAND") + ")",
 		"",
 	}
 	out = append(out, alignColumns(lines, ",")...)
@@ -141,7 +149,7 @@ func PluginCommandHelp(c PluginCommand, data DocumentationData) (string, error) 
 		return "", err
 	}
 
-	invocation := strings.TrimSpace("dokku " + data.CommandPrefix + ":" + c.Name() + " " + usage)
+	invocation := strings.TrimSpace("dokku " + data.Command(c.Name()) + " " + usage)
 	out := []string{
 		colors.paint(colors.bold, "usage:") + " " + invocation,
 		"",
@@ -294,4 +302,74 @@ func alignColumns(lines []string, separator string) []string {
 	}
 
 	return aligned
+}
+
+// NamespaceTypePlaceholder stands in for the datastore type in help that is not
+// about any one datastore
+const NamespaceTypePlaceholder = "<datastore-type>"
+
+// NamespaceDocumentationData is what help about every datastore at once renders
+// against: the type is left as a placeholder and the datastore is called a
+// datastore, since no one datastore's name or settings apply
+func NamespaceDocumentationData() DocumentationData {
+	return DocumentationData{
+		CommandPrefix: NamespaceTypePlaceholder,
+		DefaultAlias:  "DATABASE",
+		Title:         "datastore",
+	}
+}
+
+// NamespaceHelpInput is the input for the help of a plugin serving every
+// datastore under one command
+type NamespaceHelpInput struct {
+	// Commands are the commands every datastore may implement
+	Commands []PluginCommand
+
+	// Types are the datastores the plugin serves
+	Types []string
+}
+
+// NamespaceSummaryLine is the single entry a plugin serving every datastore
+// contributes to dokku's top level command listing
+func NamespaceSummaryLine() string {
+	return "    " + hostenv.CommandNamespace() + ", Manage datastore services"
+}
+
+// NamespaceCommandLines returns one comma delimited line per command, with the
+// datastore type left as a placeholder, for dokku's top level command listing
+func NamespaceCommandLines(input NamespaceHelpInput) ([]string, error) {
+	return PluginCommandLines(PluginHelpInput{
+		Commands: input.Commands,
+		Data:     NamespaceDocumentationData(),
+	})
+}
+
+// NamespaceHelpOverview is the help shown for a plugin serving every datastore,
+// listing the datastores it serves and the commands each may implement
+func NamespaceHelpOverview(input NamespaceHelpInput) (string, error) {
+	colors := newHelpColors()
+	namespace := hostenv.CommandNamespace()
+
+	lines, err := NamespaceCommandLines(input)
+	if err != nil {
+		return "", err
+	}
+
+	out := []string{
+		colors.paint(colors.bold, "usage") + ": dokku " + namespace + "[:COMMAND] " + NamespaceTypePlaceholder,
+		"",
+		colors.paint(colors.bold, "Manage datastore services."),
+		"",
+		colors.paint(colors.blue, "Datastore types:"),
+		"",
+		"    " + strings.Join(input.Types, ", "),
+		"",
+		"dokku " + colors.paint(colors.bold, namespace) + " commands: (get help with " +
+			colors.paint(colors.cyan, "dokku "+namespace+":help "+NamespaceTypePlaceholder+" [SUBCOMMAND]") + ")",
+		"",
+	}
+	out = append(out, alignColumns(lines, ",")...)
+	out = append(out, "")
+
+	return strings.Join(out, "\n") + "\n", nil
 }

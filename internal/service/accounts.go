@@ -281,7 +281,7 @@ func ValidateCreatedUser(s *Datastore, serviceName string, name string) error {
 	}
 
 	if name == s.DefaultUsername(serviceName) {
-		return fmt.Errorf("user %s is the one service %s was created with, which is only removed with the service, and whose password is changed with `dokku %s:set %s password`", name, serviceName, s.Properties().CommandPrefix, serviceName)
+		return fmt.Errorf("user %s is the one service %s was created with, which is only removed with the service, and whose password is changed with `%s`", name, serviceName, hostenv.DokkuCommand(s.Properties().CommandPrefix, "set", serviceName, "password"))
 	}
 
 	if !slices.Contains(CreatedUsers(s, serviceName), name) {
@@ -351,7 +351,7 @@ func (s *Datastore) runAccountCommand(ctx context.Context, serviceName string, n
 	switch Status(ctx, StatusInput{Datastore: s, ServiceName: serviceName}) {
 	case "running", "restarting":
 	default:
-		return fmt.Errorf("service %s is not running: start it with `dokku %s:start %s`", serviceName, s.Properties().CommandPrefix, serviceName)
+		return fmt.Errorf("service %s is not running: start it with `%s`", serviceName, hostenv.DokkuCommand(s.Properties().CommandPrefix, "start", serviceName))
 	}
 
 	return s.run(ctx, serviceName, name, runOptions{

@@ -9,6 +9,7 @@ import (
 	"text/template"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 
 	"github.com/josegonzalez/cli-skeleton/command"
@@ -153,6 +154,15 @@ type DocumentationData struct {
 	// Users is whether a service can be given users beside its own, which an
 	// app can be linked as
 	Users bool
+}
+
+// Command is one of the datastore's commands as dokku is asked for it, which
+// templates write as {{.Command "create"}}: postgres:create for a plugin of its
+// own, and datastore:create postgres under a command namespace. Writing the
+// prefix and the name out by hand instead would document a command that does
+// not exist under a namespace.
+func (d DocumentationData) Command(name string) string {
+	return hostenv.Invocation(d.CommandPrefix, name)
 }
 
 // DocumentedImage is an image and the version a definition pins for it.

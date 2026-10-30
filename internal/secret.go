@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 )
 
@@ -142,7 +143,7 @@ func ChangeServiceSecret(ctx context.Context, input ChangeServiceSecretInput) er
 		switch service.Status(ctx, service.StatusInput{Datastore: input.Datastore, ServiceName: input.ServiceName}) {
 		case "running", "restarting":
 		default:
-			return fmt.Errorf("service %s is not running, and the datastore can only be told its new %s while it is: start it with `dokku %s:start %s`", input.ServiceName, property.Name, input.Datastore.Properties().CommandPrefix, input.ServiceName)
+			return fmt.Errorf("service %s is not running, and the datastore can only be told its new %s while it is: start it with `%s`", input.ServiceName, property.Name, hostenv.DokkuCommand(input.Datastore.Properties().CommandPrefix, "start", input.ServiceName))
 		}
 	}
 

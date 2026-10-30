@@ -244,7 +244,7 @@ x-dokku:
       documentation: |
         connect to the {{.Title}} service as the admin user
         > NOTE: the admin user acts across every database, where the service user is limited to the one the service was created with
-        dokku {{.CommandPrefix}}:connect-admin lollipop
+        dokku {{.Command "connect-admin"}} lollipop
       exec:
         - mongosh
         - -u

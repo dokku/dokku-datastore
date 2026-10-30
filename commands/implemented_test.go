@@ -157,18 +157,18 @@ func TestRequireImplemented(t *testing.T) {
 // The code tells dokku to keep looking for a plugin that handles the command,
 // and dokku is what says which code that is.
 func TestTriggerHelpExitCodes(t *testing.T) {
-	if actual := notImplementedExit(); actual != defaultNotImplementedExit {
+	if actual := NotImplementedExit(); actual != defaultNotImplementedExit {
 		t.Errorf("expected %d by default, got %d", defaultNotImplementedExit, actual)
 	}
 
 	t.Setenv("DOKKU_NOT_IMPLEMENTED_EXIT", "27")
-	if actual := notImplementedExit(); actual != 27 {
+	if actual := NotImplementedExit(); actual != 27 {
 		t.Errorf("expected dokku's own code to be honoured, got %d", actual)
 	}
 
 	// a value that is not a number is not an instruction, so the default stands
 	t.Setenv("DOKKU_NOT_IMPLEMENTED_EXIT", "nonsense")
-	if actual := notImplementedExit(); actual != defaultNotImplementedExit {
+	if actual := NotImplementedExit(); actual != defaultNotImplementedExit {
 		t.Errorf("expected the default for an unreadable value, got %d", actual)
 	}
 

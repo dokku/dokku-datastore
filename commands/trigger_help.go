@@ -120,42 +120,13 @@ func (c *TriggerHelpCommand) Run(args []string) int {
 	}
 
 	datastoreType := arguments["datastore-type"].StringValue()
-	datastore, ok := service.Datastores[datastoreType]
+	datastore, ok := lookupDatastore(logger, datastoreType)
 	if !ok {
-		logger.Error(internal.ErrorInput{
-			Error: fmt.Errorf("datastore type %s is not supported", datastoreType),
-		})
 		return 1
 	}
 
-	data := internal.NewDocumentationData(internal.DocumentationDataInput{
-		Datastore: datastore,
-		PluginDir: hostenv.PluginCheckout(),
-	})
-
-	// the listing is filtered by the same rule the commands themselves apply,
-	// so a datastore never advertises something that would exit as not a command
-	implemented := []internal.PluginCommand{}
-	for _, pluginCommand := range pluginCommands(context.Background(), c.Meta, c.CommandFunc) {
-		// invoke is how a datastore's own commands are reached, not a command a
-		// datastore has: the commands themselves are listed below
-		if pluginCommand.Name() == "invoke" {
-			continue
-		}
-
-		if service.Implements(datastore, pluginCommand.Name()) {
-			implemented = append(implemented, pluginCommand)
-		}
-	}
-
-	// a datastore's own commands are its commands, so they are listed beside
-	// the rest rather than hidden behind the verb that dispatches them
-	implemented = append(implemented, internal.CustomCommands(datastore)...)
-
-	input := internal.PluginHelpInput{
-		Commands: implemented,
-		Data:     data,
-	}
+	input := datastoreHelpInput(c.Meta, c.CommandFunc, datastore)
+	data := input.Data
 
 	argv := arguments["help-arguments"].ListValue()
 	requested := ""
@@ -171,17 +142,50 @@ func (c *TriggerHelpCommand) Run(args []string) int {
 	prefix := data.CommandPrefix
 	switch requested {
 	case prefix, prefix + ":help", prefix + ":default":
-		return c.printPluginHelp(logger, input, subcommand)
+		return printPluginHelp(logger, input, subcommand)
 	case "help":
 		return c.printCommandList(logger, input)
 	}
 
-	return notImplementedExit()
+	return NotImplementedExit()
+}
+
+// datastoreHelpInput is what the help for one datastore is rendered from: the
+// commands it implements, its own among them, and its template data
+func datastoreHelpInput(meta command.Meta, commandFunc command.CommandFunc, datastore *service.Datastore) internal.PluginHelpInput {
+	data := internal.NewDocumentationData(internal.DocumentationDataInput{
+		Datastore: datastore,
+		PluginDir: hostenv.PluginCheckout(),
+	})
+
+	// the listing is filtered by the same rule the commands themselves apply,
+	// so a datastore never advertises something that would exit as not a command
+	implemented := []internal.PluginCommand{}
+	for _, pluginCommand := range pluginCommands(context.Background(), meta, commandFunc) {
+		// invoke is how a datastore's own commands are reached, not a command a
+		// datastore has: the commands themselves are listed below
+		if pluginCommand.Name() == "invoke" {
+			continue
+		}
+
+		if service.Implements(datastore, pluginCommand.Name()) {
+			implemented = append(implemented, pluginCommand)
+		}
+	}
+
+	// a datastore's own commands are its commands, so they are listed beside
+	// the rest rather than hidden behind the verb that dispatches them
+	implemented = append(implemented, internal.CustomCommands(datastore)...)
+
+	return internal.PluginHelpInput{
+		Commands: implemented,
+		Data:     data,
+	}
 }
 
 // printPluginHelp prints the help the user asked for by name, which is either
 // the plugin as a whole or one of its commands
-func (c *TriggerHelpCommand) printPluginHelp(logger internal.Ui, input internal.PluginHelpInput, subcommand string) int {
+func printPluginHelp(logger internal.Ui, input internal.PluginHelpInput, subcommand string) int {
 	if subcommand == "" || subcommand == "--all" {
 		overview, err := internal.PluginHelpOverview(input)
 		if err != nil {
@@ -196,7 +200,7 @@ func (c *TriggerHelpCommand) printPluginHelp(logger internal.Ui, input internal.
 	pluginCommand, ok := findPluginCommand(input.Commands, subcommand)
 	if !ok {
 		logger.Error(internal.ErrorInput{
-			Error: fmt.Errorf("%s:%s is not a %s command", input.Data.CommandPrefix, subcommand, input.Data.CommandPrefix),
+			Error: fmt.Errorf("%s is not a %s command", input.Data.Command(subcommand), input.Data.CommandPrefix),
 		})
 		return 1
 	}
@@ -249,9 +253,9 @@ func askedForJSON(args []string) bool {
 	return false
 }
 
-// notImplementedExit is the exit code that tells dokku to keep looking for a
+// NotImplementedExit is the exit code that tells dokku to keep looking for a
 // plugin that implements the command the user asked for
-func notImplementedExit() int {
+func NotImplementedExit() int {
 	if code, err := strconv.Atoi(os.Getenv("DOKKU_NOT_IMPLEMENTED_EXIT")); err == nil {
 		return code
 	}

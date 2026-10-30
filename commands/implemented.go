@@ -18,7 +18,7 @@ func requireImplemented(datastore *service.Datastore, subcommand string) (int, b
 		return 0, false
 	}
 
-	return notImplementedExit(), true
+	return NotImplementedExit(), true
 }
 
 // refuseAllDatabases reports the exit code an export or import asked for every

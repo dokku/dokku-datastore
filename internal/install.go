@@ -124,6 +124,23 @@ func Install(ctx context.Context, input InstallInput) error {
 		hostenv.S3BackupImage,
 		hostenv.WaitImage,
 	}
+
+	// a plugin serving every datastore is installed with dokku itself, and
+	// pulling the images of every datastore nobody has made a service of yet
+	// would fetch gigabytes on every dokku install and upgrade. Every command
+	// that needs an image fetches it when it gets there, so those wait until
+	// the datastore is used
+	if hostenv.CommandNamespace() != "" {
+		services, err := ListServices(ctx, ListServicesInput{Datastore: input.Datastore})
+		if err != nil {
+			return err
+		}
+
+		if len(services) == 0 {
+			images = nil
+		}
+	}
+
 	for _, reference := range images {
 		// no service name, because an install happens before any service does.
 		// It is also the one caller that carries on past a disabled pull: a host
@@ -242,7 +259,7 @@ func migrateLegacyCronFile(input InstallInput, serviceName string) (bool, error)
 
 	if err := schedule.Validate(); err != nil {
 		input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Removing the scheduled backup for %s, which cron could not run: %s", serviceName, err)})
-		input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Schedule it again with: dokku %s:backup-schedule %s <schedule> <bucket-name>", commandPrefix, serviceName)})
+		input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Schedule it again with: %s", hostenv.DokkuCommand(commandPrefix, "backup-schedule", serviceName, "<schedule>", "<bucket-name>"))})
 	} else {
 		if err := writeBackupSchedule(input.Datastore, serviceName, schedule); err != nil {
 			return false, err
@@ -373,7 +390,7 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 	}
 
 	if crontabChanged {
-		return regenerateCrontab(ctx)
+		return RegenerateCrontab(ctx)
 	}
 
 	return nil

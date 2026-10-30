@@ -123,6 +123,70 @@ func TestPluginCheckoutIsEmptyWithoutBoth(t *testing.T) {
 	}
 }
 
+// setNamespace sets a command namespace for the length of a test
+func setNamespace(t *testing.T, namespace string) {
+	t.Helper()
+	previous := CommandNamespace()
+	SetCommandNamespace(namespace)
+	t.Cleanup(func() {
+		SetCommandNamespace(previous)
+	})
+}
+
+// The plugin serving every datastore ships no definitions, so a prefix it
+// inherited from a per-datastore plugin's environment must not send it looking
+// in that plugin's checkout
+func TestPluginCheckoutIsEmptyUnderANamespace(t *testing.T) {
+	t.Setenv("PLUGIN_BASE_PATH", "/var/lib/dokku/plugins/enabled")
+	t.Setenv("PLUGIN_COMMAND_PREFIX", "redis")
+	setNamespace(t, "datastore")
+
+	if actual := PluginCheckout(); actual != "" {
+		t.Errorf("expected nowhere to look under a namespace, got %q", actual)
+	}
+}
+
+func TestPluginEnabledPath(t *testing.T) {
+	t.Setenv("DOKKU_LIB_ROOT", "/var/lib/dokku")
+
+	t.Setenv("PLUGIN_ENABLED_PATH", "/opt/enabled")
+	t.Setenv("PLUGIN_PATH", "/opt/plugins")
+	if actual := PluginEnabledPath(); actual != "/opt/enabled" {
+		t.Errorf("expected the exported enabled path, got %q", actual)
+	}
+
+	t.Setenv("PLUGIN_ENABLED_PATH", "")
+	if actual := PluginEnabledPath(); actual != "/opt/plugins/enabled" {
+		t.Errorf("expected the enabled path below PLUGIN_PATH, got %q", actual)
+	}
+
+	t.Setenv("PLUGIN_PATH", "")
+	if actual := PluginEnabledPath(); actual != "/var/lib/dokku/plugins/enabled" {
+		t.Errorf("expected the enabled path below the lib root, got %q", actual)
+	}
+}
+
+// A hint names a command that exists whichever way the datastore is installed
+func TestDokkuCommand(t *testing.T) {
+	if actual := DokkuCommand("postgres", "backup", "lollipop", "bucket"); actual != "dokku postgres:backup lollipop bucket" {
+		t.Errorf("expected the per-datastore form, got %q", actual)
+	}
+
+	if actual := Invocation("postgres", "create"); actual != "postgres:create" {
+		t.Errorf("expected the per-datastore invocation, got %q", actual)
+	}
+
+	setNamespace(t, "datastore")
+
+	if actual := DokkuCommand("postgres", "backup", "lollipop", "bucket"); actual != "dokku datastore:backup postgres lollipop bucket" {
+		t.Errorf("expected the namespaced form, got %q", actual)
+	}
+
+	if actual := Invocation("postgres", "create"); actual != "datastore:create postgres" {
+		t.Errorf("expected the namespaced invocation, got %q", actual)
+	}
+}
+
 // dokku's home is read with a default, because a host without dokku sets
 // nothing and the binary still has to answer there
 func TestRoot(t *testing.T) {

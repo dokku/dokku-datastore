@@ -3,9 +3,13 @@ package internal
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 )
 
@@ -349,4 +353,43 @@ func CronEntriesForTrigger(ctx context.Context, input CronEntriesInput) ([]CronT
 	}
 
 	return tasks, warnings, nil
+}
+
+// commandPrefixPattern is the line a per-datastore plugin's config file names
+// the datastore it serves with
+var commandPrefixPattern = regexp.MustCompile(`(?m)^export PLUGIN_COMMAND_PREFIX="([^"]+)"$`)
+
+// OwnedTypes are the datastore types an enabled per-datastore plugin serves,
+// which a plugin serving every datastore leaves to that plugin.
+//
+// A type is owned by a plugin named after it, which is how every one of them is
+// installed by default, or by any plugin whose config file says it serves it,
+// which is what one installed under another name looks like.
+func OwnedTypes() map[string]bool {
+	owned := map[string]bool{}
+	enabled := hostenv.PluginEnabledPath()
+
+	for _, name := range service.Types() {
+		if _, err := os.Stat(filepath.Join(enabled, name)); err == nil {
+			owned[name] = true
+		}
+	}
+
+	entries, err := os.ReadDir(enabled)
+	if err != nil {
+		return owned
+	}
+
+	for _, entry := range entries {
+		contents, err := os.ReadFile(filepath.Join(enabled, entry.Name(), "config"))
+		if err != nil {
+			continue
+		}
+
+		for _, match := range commandPrefixPattern.FindAllStringSubmatch(string(contents), -1) {
+			owned[match[1]] = true
+		}
+	}
+
+	return owned
 }

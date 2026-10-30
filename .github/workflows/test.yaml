@@ -106,3 +106,28 @@ jobs:
         env:
           BATS_LIB_PATH: ${{ steps.setup-bats.outputs.lib-path }}
           DEFINITION: ${{ matrix.definition }}
+
+  sdk:
+    name: sdk
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: "go.mod"
+      - run: go build -o dokku-datastore .
+      - id: setup-bats
+        uses: bats-core/bats-action@77d6fb60505b4d0d1d73e48bd035b55074bbfb43  # 4.0.0
+        with:
+          bats-version: "1.14.0"
+          assert-version: "2.2.4"
+          detik-install: false
+          file-install: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      # one datastore through a plugin serving every datastore, built on the
+      # sdk package the way dokku ships it. What it checks is the dispatch and
+      # the hand over from a per-datastore plugin, which no one datastore changes
+      - run: bats --print-output-on-failure tests/sdk.bats
+        env:
+          BATS_LIB_PATH: ${{ steps.setup-bats.outputs.lib-path }}
+          DEFINITION: redis

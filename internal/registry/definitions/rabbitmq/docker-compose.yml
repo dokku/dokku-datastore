@@ -206,9 +206,9 @@ x-dokku:
       documentation: |
         print the certificate the {{.Title}} service encrypts connections with
         > NOTE: the service must be running
-        dokku {{.CommandPrefix}}:certificate lollipop
+        dokku {{.Command "certificate"}} lollipop
         save it to verify the server from a client off the host
-        dokku {{.CommandPrefix}}:certificate lollipop > server.crt
+        dokku {{.Command "certificate"}} lollipop > server.crt
       exec: ["cat", "{{ .Target.certs }}/server.crt"]
 
   # written the way a command's documentation is: every sentence ends in a
@@ -221,21 +221,21 @@ x-dokku:
         the certificate and its key are kept in '/var/lib/dokku/services/{{.CommandPrefix}}/lollipop/certs', and are kept when the service is rebuilt or upgraded.
         to check that the client is talking to this service, save its certificate and have the client verify the server with it.
         the certificate names no host, so the client verifies it against the certificate rather than against the hostname it connects to:
-        dokku {{.CommandPrefix}}:certificate lollipop > server.crt
+        dokku {{.Command "certificate"}} lollipop > server.crt
             amqps://lollipop:PASSWORD@rabbitmq.example.com:5671/lollipop
         a service created before tls was served has its certificate made the next time its container is.
         the container is kept by a restart, so stop and start the service instead:
-        dokku {{.CommandPrefix}}:stop lollipop
-        dokku {{.CommandPrefix}}:start lollipop
+        dokku {{.Command "stop"}} lollipop
+        dokku {{.Command "start"}} lollipop
         a service exposed before then keeps the ports it was exposed on, and its tls ports are left unexposed.
         to expose them as well, unexpose the service and expose it again:
-        dokku {{.CommandPrefix}}:unexpose lollipop
-        dokku {{.CommandPrefix}}:expose lollipop
+        dokku {{.Command "unexpose"}} lollipop
+        dokku {{.Command "expose"}} lollipop
         to use a certificate of your own, write it and its key over the ones the service was created with as root, and restart the service.
         writing over the files rather than replacing them keeps the owner and mode the server needs to read its key:
             sudo sh -c 'cat server.crt > /var/lib/dokku/services/{{.CommandPrefix}}/lollipop/certs/server.crt'
             sudo sh -c 'cat server.key > /var/lib/dokku/services/{{.CommandPrefix}}/lollipop/certs/server.key'
-        dokku {{.CommandPrefix}}:restart lollipop
+        dokku {{.Command "restart"}} lollipop
         the settings that turn tls on are kept in '/var/lib/dokku/services/{{.CommandPrefix}}/lollipop/config/tls.conf', which is created once and is not rewritten.
 
   # no connect, export or import: rabbitmq holds messages rather than data to
