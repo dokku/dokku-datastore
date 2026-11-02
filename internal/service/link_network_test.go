@@ -79,7 +79,7 @@ func TestLinkNetworkCreateArgs(t *testing.T) {
 func TestEnsureLinkNetworkCreatesAndAttaches(t *testing.T) {
 	calls := linkNetworkDocker(t, "", "bridge", `{"bridge":{}}`, "")
 
-	err := EnsureLinkNetwork(t.Context(), EnsureLinkNetworkInput{
+	created, err := EnsureLinkNetwork(t.Context(), EnsureLinkNetworkInput{
 		AppName:     "my-app",
 		ContainerID: "abc123",
 		Datastore:   redisDatastore(t),
@@ -87,6 +87,9 @@ func TestEnsureLinkNetworkCreatesAndAttaches(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %s", err)
+	}
+	if !created {
+		t.Error("expected the network to be reported as made")
 	}
 
 	expected := []string{
@@ -105,7 +108,7 @@ func TestEnsureLinkNetworkCreatesAndAttaches(t *testing.T) {
 func TestEnsureLinkNetworkIsSafeToRepeat(t *testing.T) {
 	calls := linkNetworkDocker(t, "0123abcd", "bridge", `{"bridge":{},"dokku.redis.lollipop.my-app":{}}`, "")
 
-	err := EnsureLinkNetwork(t.Context(), EnsureLinkNetworkInput{
+	created, err := EnsureLinkNetwork(t.Context(), EnsureLinkNetworkInput{
 		AppName:     "my-app",
 		ContainerID: "abc123",
 		Datastore:   redisDatastore(t),
@@ -113,6 +116,9 @@ func TestEnsureLinkNetworkIsSafeToRepeat(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %s", err)
+	}
+	if created {
+		t.Error("expected a network that was already there not to be reported as made")
 	}
 
 	for _, call := range linkNetworkCalls(t, calls) {
@@ -185,5 +191,145 @@ func TestRemoveLinkNetworkThatIsGone(t *testing.T) {
 
 	if actual := linkNetworkCalls(t, calls); len(actual) != 1 {
 		t.Errorf("expected only the lookup, got %q", actual)
+	}
+}
+
+// poolDocker stands in for a docker that has run out of address pools, or that
+// fails a network create for another reason when exhausted is false. liveRestore
+// is what docker info reports, and a daemon that cannot be asked when empty.
+func poolDocker(t *testing.T, exhausted bool, liveRestore string) string {
+	t.Helper()
+
+	createError := "Error response from daemon: no space left on device"
+	if exhausted {
+		createError = "Error response from daemon: all predefined address pools have been fully subnetted"
+	}
+
+	info := `echo "Cannot connect to the Docker daemon" >&2; exit 1`
+	if liveRestore != "" {
+		info = "echo " + liveRestore
+	}
+
+	root := t.TempDir()
+	calls := filepath.Join(root, "calls")
+	script := `#!/usr/bin/env bash
+echo "$*" >>"` + calls + `"
+case "$1 $2" in
+  "network create") echo '` + createError + `' >&2; exit 1 ;;
+  "info --format") ` + info + ` ;;
+esac
+`
+	docker := filepath.Join(root, "docker")
+	if err := os.WriteFile(docker, []byte(script), 0755); err != nil {
+		t.Fatalf("unable to write the fake docker: %s", err)
+	}
+
+	t.Setenv("DOCKER_BIN", docker)
+	return calls
+}
+
+// A host out of address pools is told what to change and how to apply it,
+// rather than handed docker's error, and the network a link already had is
+// said to have gone missing rather than to be new
+func TestEnsureLinkNetworkExplainsExhaustedAddressPools(t *testing.T) {
+	tests := []struct {
+		name        string
+		recreate    bool
+		liveRestore string
+		expected    []string
+		unexpected  []string
+	}{
+		{
+			name:        "a new network with live restore off",
+			liveRestore: "false",
+			expected: []string{
+				"Unable to create network dokku.redis.lollipop.my-app for the link to app my-app: docker has no address pool left to create it from",
+				`"default-address-pools": [{"base": "172.16.0.0/12", "size": 24}]`,
+				"/etc/docker/daemon.json",
+				"sudo systemctl restart docker (a reload does not apply it)",
+				`Set "live-restore": true and run sudo systemctl reload docker first`,
+				LinkNetworksReadme,
+			},
+		},
+		{
+			name:        "a recreated network with live restore on",
+			recreate:    true,
+			liveRestore: "true",
+			expected: []string{
+				"Unable to recreate network dokku.redis.lollipop.my-app for the link to app my-app, which was removed since the app was linked: docker has no address pool left to create it from",
+				"sudo systemctl restart docker",
+			},
+			unexpected: []string{"live-restore"},
+		},
+		{
+			name:     "a daemon that cannot say whether live restore is on",
+			expected: []string{`Set "live-restore": true`},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			poolDocker(t, true, test.liveRestore)
+
+			created, err := EnsureLinkNetwork(t.Context(), EnsureLinkNetworkInput{
+				AppName:     "my-app",
+				Datastore:   redisDatastore(t),
+				Recreate:    test.recreate,
+				ServiceName: "lollipop",
+			})
+			if !errors.Is(err, ErrAddressPoolsExhausted) {
+				t.Fatalf("expected the address pools to be reported as exhausted, got %v", err)
+			}
+			if created {
+				t.Error("expected a network that could not be made not to be reported as made")
+			}
+
+			for _, expected := range test.expected {
+				if !strings.Contains(err.Error(), expected) {
+					t.Errorf("expected %q in:\n%s", expected, err)
+				}
+			}
+
+			for _, unexpected := range test.unexpected {
+				if strings.Contains(err.Error(), unexpected) {
+					t.Errorf("expected no %q in:\n%s", unexpected, err)
+				}
+			}
+		})
+	}
+}
+
+// Any other failure to make the network keeps docker's own error, said the
+// same way whether the network is new or made again
+func TestEnsureLinkNetworkReportsOtherFailures(t *testing.T) {
+	for _, test := range []struct {
+		recreate bool
+		prefix   string
+	}{
+		{false, "Unable to create network dokku.redis.lollipop.my-app for the link to app my-app: "},
+		{true, "Unable to recreate network dokku.redis.lollipop.my-app for the link to app my-app, which was removed since the app was linked: "},
+	} {
+		calls := poolDocker(t, false, "")
+
+		_, err := EnsureLinkNetwork(t.Context(), EnsureLinkNetworkInput{
+			AppName:     "my-app",
+			Datastore:   redisDatastore(t),
+			Recreate:    test.recreate,
+			ServiceName: "lollipop",
+		})
+		if err == nil || errors.Is(err, ErrAddressPoolsExhausted) {
+			t.Fatalf("expected a plain failure, got %v", err)
+		}
+		if !strings.HasPrefix(err.Error(), test.prefix) || !strings.Contains(err.Error(), "no space left on device") {
+			t.Errorf("expected %q followed by docker's error, got %q", test.prefix, err)
+		}
+
+		// docker is only asked about live restore for the advice that goes
+		// with exhausted pools
+		for _, call := range linkNetworkCalls(t, calls) {
+			if strings.HasPrefix(call, "info") {
+				t.Errorf("expected docker info not to be asked, got %q", call)
+			}
+		}
 	}
 }

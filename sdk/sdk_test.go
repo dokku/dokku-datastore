@@ -240,7 +240,7 @@ func TestPluginCommandsCoverEveryDocumentedSubcommand(t *testing.T) {
 		"backup-unschedule", "backup-unset-encryption", "backup-unset-public-key-encryption",
 		"clone", "connect", "create", "create-database", "create-user", "destroy", "destroy-database",
 		"destroy-user", "enter", "exists", "export", "expose",
-		"import", "info", "label", "link", "linked", "links", "list", "logs", "mount", "pause", "promote",
+		"import", "info", "label", "link", "link-migrate", "linked", "links", "list", "logs", "mount", "pause", "promote",
 		"reset", "restart", "set", "set-user-password", "start", "stop", "unexpose", "unlabel", "unlink", "unmount", "upgrade",
 	} {
 		if !names[name] {

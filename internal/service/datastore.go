@@ -403,12 +403,18 @@ func (s *Datastore) CreateServiceContainer(ctx context.Context, input CreateServ
 
 	// a new container is on none of the networks its links run over, so every
 	// app linked to the service would lose it. A network that went missing is
-	// made again here too.
+	// made again here too. An app still on the container link an earlier
+	// version gave it has no network to join.
 	for _, appName := range LinkedApps(ctx, LinkedAppsInput{Datastore: input.Datastore, ServiceName: input.ServiceName}) {
-		if err := EnsureLinkNetwork(ctx, EnsureLinkNetworkInput{
+		if HasLegacyLink(input.Datastore, input.ServiceName, appName) {
+			continue
+		}
+
+		if _, err := EnsureLinkNetwork(ctx, EnsureLinkNetworkInput{
 			AppName:     appName,
 			ContainerID: containerID,
 			Datastore:   input.Datastore,
+			Recreate:    true,
 			ServiceName: input.ServiceName,
 		}); err != nil {
 			return err

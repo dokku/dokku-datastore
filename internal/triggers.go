@@ -49,13 +49,18 @@ func CopyAppLinks(ctx context.Context, input TriggerInput, oldAppName string, ne
 		}
 
 		// the new app's containers join the network for its own link when
-		// they are made, so it has to be there for them
-		if err := service.EnsureLinkNetwork(ctx, service.EnsureLinkNetworkInput{
-			AppName:     newAppName,
-			Datastore:   input.Datastore,
-			ServiceName: serviceName,
-		}); err != nil {
-			return err
+		// they are made, so it has to be there for them. dokku copies the
+		// docker options along with the app, so one still on the container
+		// link an earlier version gave it keeps that, and has no network to
+		// join until it is moved with link-migrate.
+		if !service.HasLegacyLink(input.Datastore, serviceName, oldAppName) {
+			if _, err := service.EnsureLinkNetwork(ctx, service.EnsureLinkNetworkInput{
+				AppName:     newAppName,
+				Datastore:   input.Datastore,
+				ServiceName: serviceName,
+			}); err != nil {
+				return err
+			}
 		}
 
 		// dokku copies the config along with the app, so the new app holds the
@@ -119,6 +124,10 @@ func RemoveAppLinks(ctx context.Context, input TriggerInput, appName string) err
 // containers it builds, deploys and runs an app in, which are the phases a
 // container link used to cover. A container made for anything else is left
 // alone.
+//
+// A link still on the container link an earlier version gave the app is left
+// to that link, which docker gives the container from the app's docker
+// options, and is warned about, since docker 30.0 removes links.
 func ConnectContainerToLinks(ctx context.Context, input TriggerInput, containerType string, containerID string, appName string) error {
 	if containerType != "app" || containerID == "" || appName == "" {
 		return nil
@@ -133,10 +142,16 @@ func ConnectContainerToLinks(ctx context.Context, input TriggerInput, containerT
 	}
 
 	for _, serviceName := range services {
+		if service.HasLegacyLink(input.Datastore, serviceName, appName) {
+			warnLegacyLink(input, serviceName, appName)
+			continue
+		}
+
 		// a network removed by hand is made again, so a deploy repairs it
-		if err := service.EnsureLinkNetwork(ctx, service.EnsureLinkNetworkInput{
+		if _, err := service.EnsureLinkNetwork(ctx, service.EnsureLinkNetworkInput{
 			AppName:     appName,
 			Datastore:   input.Datastore,
+			Recreate:    true,
 			ServiceName: serviceName,
 		}); err != nil {
 			return err
@@ -150,12 +165,44 @@ func ConnectContainerToLinks(ctx context.Context, input TriggerInput, containerT
 	return nil
 }
 
+// warnLegacyLink says an app reaches a service through the container link an
+// earlier version gave it, and how to move it onto a network
+func warnLegacyLink(input TriggerInput, serviceName string, appName string) {
+	commandPrefix := input.Datastore.Properties().CommandPrefix
+	input.Logger.Warn(WarnInput{
+		Warning: fmt.Sprintf("App %s reaches %s service %s over a deprecated docker link, which Docker 30.0 removes", appName, commandPrefix, serviceName),
+	})
+	input.Logger.Warn(WarnInput{
+		Warning: fmt.Sprintf("Move it onto a network with: %s", hostenv.DokkuCommand(commandPrefix, "link-migrate", serviceName, appName)),
+	})
+}
+
+// ensureLinkNetwork makes the network of an app's link to a service again when
+// it went missing since the app was linked, so a deploy fails before it builds
+// anything rather than once its first container is made. A link still on the
+// container link an earlier version gave the app has no network to make.
+func ensureLinkNetwork(ctx context.Context, s *service.Datastore, serviceName string, appName string) error {
+	if service.HasLegacyLink(s, serviceName, appName) {
+		return nil
+	}
+
+	_, err := service.EnsureLinkNetwork(ctx, service.EnsureLinkNetworkInput{
+		AppName:     appName,
+		Datastore:   s,
+		Recreate:    true,
+		ServiceName: serviceName,
+	})
+	return err
+}
+
 // StartLinkedServices starts every service an app is linked to that is not
-// already running, so the app does not come up without its datastores.
+// already running, so the app does not come up without its datastores, and
+// makes again any network one of its links runs over that went missing.
 //
 // It runs before an app starts, builds or releases, and the first service that
-// cannot be started stops there: the app would otherwise fail later on a
-// service that is not there, saying nothing about why.
+// cannot be started or reached stops there: the app would otherwise fail later
+// on a service that is not there, saying nothing about why, and a network that
+// cannot be made would otherwise fail the deploy only once the build was done.
 func StartLinkedServices(ctx context.Context, input TriggerInput, appName string) error {
 	// a trigger that names no app has no services to answer for
 	if appName == "" {
@@ -172,6 +219,10 @@ func StartLinkedServices(ctx context.Context, input TriggerInput, appName string
 
 	for _, serviceName := range services {
 		if err := startService(ctx, input, serviceName, appName); err != nil {
+			return err
+		}
+
+		if err := ensureLinkNetwork(ctx, input.Datastore, serviceName, appName); err != nil {
 			return err
 		}
 	}
@@ -197,6 +248,15 @@ func StartAllLinkedServices(ctx context.Context, input TriggerInput) error {
 	for _, serviceName := range services {
 		if err := startService(ctx, input, serviceName, ""); err != nil {
 			input.Logger.Warn(WarnInput{Warning: err.Error()})
+			continue
+		}
+
+		// a network that cannot be made is warned about for the same reason,
+		// and the app's own pre-start stops it
+		for _, appName := range service.LiveLinkedApps(ctx, linkedAppsInput(input.Datastore, serviceName)) {
+			if err := ensureLinkNetwork(ctx, input.Datastore, serviceName, appName); err != nil {
+				input.Logger.Warn(WarnInput{Warning: err.Error()})
+			}
 		}
 	}
 

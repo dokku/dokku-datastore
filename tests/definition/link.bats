@@ -31,6 +31,9 @@ teardown() {
   # behind
   "$BIN" unlink "$PLUGIN" "$SERVICE" "$APP" --no-restart >/dev/null 2>/dev/null || true
   "$BIN" unlink "$PLUGIN" "$SERVICE" "$OTHER_APP" --no-restart >/dev/null 2>/dev/null || true
+
+  # a docker link seeded for one test would make every later one a legacy link
+  rm -rf "$DOKKU_LIB_ROOT/config/docker-options"
 }
 
 teardown_file() {
@@ -81,6 +84,53 @@ container_networks() {
 # whether a container reaches the service by the host its url names
 reaches_service() {
   docker container run --rm --network "container:$1" "$WAIT_IMAGE" -c "$(service_host):$(service_wait_port)" -t 15
+}
+
+# the docker link an earlier version linked an app to the service with
+legacy_link_option() {
+  echo "--link $(service_container):$(service_host)"
+}
+
+# where dokku 0.38 and later keeps an app's docker options for a phase
+docker_options_file() {
+  echo "$DOKKU_LIB_ROOT/config/docker-options/${2:-$APP}/_default_.$1"
+}
+
+# gives an app the docker link an earlier version linked it with, in every
+# phase, beside an option of its own that has to survive the link being moved
+seed_legacy_link() {
+  local app="${1:-$APP}" phase
+  mkdir -p "$DOKKU_LIB_ROOT/config/docker-options/$app"
+  for phase in build deploy run; do
+    printf '%s\n%s\n' "$(legacy_link_option)" "--restart=on-failure:10" >"$(docker_options_file "$phase" "$app")"
+  done
+}
+
+# links an app the way an earlier version did: on the links file and the
+# config, with the docker link and no network
+link_the_old_way() {
+  local app="${1:-$APP}"
+  run "$BIN" link "$PLUGIN" "$SERVICE" "$app" --no-restart
+  assert_success
+  remove_link_network "$app"
+  seed_legacy_link "$app"
+}
+
+# removes the network of a link behind the plugin's back, as an operator or a
+# docker network prune would
+remove_link_network() {
+  docker network disconnect --force "$(link_network "${1:-$APP}")" "$(service_container)" >/dev/null 2>/dev/null || true
+  docker network rm "$(link_network "${1:-$APP}")" >/dev/null
+}
+
+# install is a root step, as dokku runs it. The environment is kept, so it works
+# on this run's data root
+install_plugin() {
+  if [[ "$EUID" -eq 0 ]]; then
+    "$BIN" trigger-install "$PLUGIN"
+  else
+    sudo -n -E "$BIN" trigger-install "$PLUGIN"
+  fi
 }
 
 @test "($DEFINITION) unlink of an app that was never linked fails and changes nothing" {
@@ -335,11 +385,12 @@ reaches_service() {
   run reaches_service ci-link-app-web
   assert_success
 
-  # no container link is given, and one an earlier version gave is removed
-  run grep -F "docker-options:add $APP" "$FAKE_CONFIG_ROOT/docker-options.log"
+  # no container link is given, and dokku is not asked to change the docker
+  # options of an app that never had one
+  run grep -F "docker-options:" "$FAKE_CONFIG_ROOT/docker-options.log"
   assert_failure
-  run grep -F -- "docker-options:remove $APP build,deploy,run --link $(service_container):$(service_host)" "$FAKE_CONFIG_ROOT/docker-options.log"
-  assert_success
+  run grep -rF -- "--link" "$DOKKU_LIB_ROOT/config/docker-options/$APP"
+  assert_failure
 
   # unlinking takes the service away straight away, even with no restart
   run "$BIN" unlink "$PLUGIN" "$SERVICE" "$APP" --no-restart
@@ -431,6 +482,107 @@ reaches_service() {
 
   run "$BIN" unlink "$PLUGIN" "$SERVICE" "$APP" --no-restart
   assert_success
+}
+
+@test "($DEFINITION) an app on a docker link keeps it through a deploy" {
+  echo '{}' >"$FAKE_CONFIG_ROOT/$APP.json"
+  link_the_old_way
+
+  # the pre-* triggers make no network for it
+  run "$BIN" trigger-pre-build "$PLUGIN" herokuish "$APP" "$BATS_TEST_TMPDIR"
+  assert_success
+  run docker network inspect "$(link_network)"
+  assert_failure
+
+  # a container made for it is left to the docker link, and warned about
+  docker container create --name ci-link-app-run --label "com.dokku.app-name=$APP" busybox:1.37.0-uclibc sleep 300 >/dev/null
+  run "$BIN" trigger-post-container-create "$PLUGIN" app "$(docker container inspect --format '{{ .Id }}' ci-link-app-run)" "$APP" deploy web
+  assert_success
+  assert_output --partial "App $APP reaches $PLUGIN service $SERVICE over a deprecated docker link, which Docker 30.0 removes"
+  assert_output --partial "link-migrate $SERVICE $APP"
+
+  run docker network inspect "$(link_network)"
+  assert_failure
+  run container_networks ci-link-app-run
+  refute_line "$(link_network)"
+
+  # the docker link is still there for the container to be made with
+  run grep -F -- "$(legacy_link_option)" "$(docker_options_file deploy)"
+  assert_success
+}
+
+@test "($DEFINITION) updating the plugin names the apps on a docker link and moves none" {
+  if [[ "$EUID" -ne 0 ]] && ! sudo -n true 2>/dev/null; then
+    skip "install needs root"
+  fi
+
+  echo '{}' >"$FAKE_CONFIG_ROOT/$APP.json"
+  link_the_old_way
+
+  run install_plugin
+  assert_success
+  assert_output --partial "Service $SERVICE is linked to app $APP over a deprecated docker link, which Docker 30.0 removes"
+  assert_output --partial "link-migrate $SERVICE"
+
+  run docker network inspect "$(link_network)"
+  assert_failure
+  run grep -F -- "$(legacy_link_option)" "$(docker_options_file deploy)"
+  assert_success
+}
+
+@test "($DEFINITION) link-migrate moves a docker link onto a network" {
+  echo '{}' >"$FAKE_CONFIG_ROOT/$APP.json"
+  link_the_old_way
+  start_app_container ci-link-app-web "$APP"
+
+  run "$BIN" link-migrate "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_output --partial "Moving app $APP onto the network of its link to $PLUGIN service $SERVICE"
+  assert_output --partial "Removing the deprecated docker link from app $APP"
+
+  # the running container joined without a restart, and reaches the service
+  run container_networks ci-link-app-web
+  assert_success
+  assert_line "$(link_network)"
+  run reaches_service ci-link-app-web
+  assert_success
+
+  # the docker link is gone, the app's other options are not, and the config is
+  # left alone
+  run grep -F -- "--link" "$(docker_options_file deploy)"
+  assert_failure
+  run grep -F -- "--restart=on-failure:10" "$(docker_options_file deploy)"
+  assert_success
+  run jq -r --arg key "$ALIAS" '.[$key] // empty' "$FAKE_CONFIG_ROOT/$APP.json"
+  assert_success
+  refute_output ""
+
+  # moving it again only puts it back on its network
+  run "$BIN" link-migrate "$PLUGIN" "$SERVICE" "$APP"
+  assert_success
+  assert_output --partial "App $APP already uses a network link to $PLUGIN service $SERVICE"
+
+  # an app the service is not linked to is refused
+  run "$BIN" link-migrate "$PLUGIN" "$SERVICE" "$UNLINKED_APP"
+  assert_failure
+  assert_output --partial "Not linked to app $UNLINKED_APP"
+}
+
+@test "($DEFINITION) a link network that went missing is made again before a build" {
+  echo '{}' >"$FAKE_CONFIG_ROOT/$APP.json"
+  run "$BIN" link "$PLUGIN" "$SERVICE" "$APP" --no-restart
+  assert_success
+
+  remove_link_network
+  run docker network inspect "$(link_network)"
+  assert_failure
+
+  run "$BIN" trigger-pre-build "$PLUGIN" herokuish "$APP" "$BATS_TEST_TMPDIR"
+  assert_success
+
+  run docker container inspect --format "{{ json (index .NetworkSettings.Networks \"$(link_network)\").Aliases }}" "$(service_container)"
+  assert_success
+  assert_output --partial "\"$(service_host)\""
 }
 
 @test "($DEFINITION) unlink and destroy agree once the app's url is repointed" {

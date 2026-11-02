@@ -81,6 +81,9 @@ func Commands(ctx context.Context, meta command.Meta) map[string]cli.CommandFact
 		"link": func() (cli.Command, error) {
 			return &commands.LinkCommand{Meta: meta}, nil
 		},
+		"link-migrate": func() (cli.Command, error) {
+			return &commands.LinkMigrateCommand{Meta: meta}, nil
+		},
 		"linked": func() (cli.Command, error) {
 			return &commands.LinkedCommand{Meta: meta}, nil
 		},

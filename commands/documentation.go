@@ -784,10 +784,10 @@ if you want your container to be reachable from outside, you should
 use the 'expose' subcommand. earlier versions of the plugin linked an app with
 a docker link, which docker has deprecated, and which set DOKKU_{{.PluginVariable}}_LOLLIPOP_PORT
 style variables on the app's containers. docker 29 no longer sets them, so an app
-reading them should read {{.DefaultAlias}}_URL instead. updating the plugin moves
-every linked app onto the network for its link, and the docker link is gone from
-each app's containers once they are restarted.
-> NOTE: every link uses a docker network of its own. docker's default address pools hold about 31 networks, so a server with many links may need a larger default-address-pools setting in /etc/docker/daemon.json.
+reading them should read {{.DefaultAlias}}_URL instead. an app linked that way
+keeps its docker link, and updating the plugin warns about it, until it is moved
+onto a network with {{.Command "link-migrate"}}.
+> NOTE: every link uses a docker network of its own. docker's default address pools hold about 31 networks, so a server with many links may need a larger default-address-pools setting in /etc/docker/daemon.json, which only applies once docker is restarted. A link that cannot get a network fails and says what to change, and nothing is set on the app.
 
 another service can be linked to your app:
 dokku {{.Command "link"}} other_service playground
@@ -875,6 +875,40 @@ to be unlinked and linked again to move it to another database or user.
 
 // Group is the readme usage section the command is documented under
 func (c *LinkCommand) Group() string {
+	return definition.GroupBasicUsage
+}
+
+// Description returns the one line description of the command, in the idiom of the
+// plugin rather than of the binary
+func (c *LinkMigrateCommand) Description() string {
+	return `move apps linked to the {{.Title}} service off the deprecated docker link and onto a network`
+}
+
+// Usage returns the argument sketch rendered after the command name
+func (c *LinkMigrateCommand) Usage() string {
+	return `<service> [<app>]`
+}
+
+// Documentation returns the long form documentation for the command
+func (c *LinkMigrateCommand) Documentation() string {
+	return `earlier versions of the plugin, and the bash plugins before them, linked an app
+with a docker link, which docker 30.0 removes. such a link keeps working until it
+is moved, and updating the plugin and deploying the app warn about it. move every
+app linked to the lollipop {{.CommandPrefix}} service onto the network of its link
+dokku {{.Command "link-migrate"}} lollipop
+move only the 'playground' app
+dokku {{.Command "link-migrate"}} lollipop playground
+the network is made and the app's running containers join it before the docker
+link is removed, so nothing is restarted, and the app's config is not changed,
+since the service answers to the same host on the network. an app that cannot be
+moved keeps its docker link, the error says why, and the other apps are still
+moved. an app that was already moved is put back on its network, which repairs a
+network that went missing.
+> NOTE: every link uses a docker network of its own. a host that runs out of docker's address pools is told the default-address-pools setting to add to /etc/docker/daemon.json. it only applies once docker is restarted, as a reload does not apply it, and then the command can be run again.`
+}
+
+// Group is the readme usage section the command is documented under
+func (c *LinkMigrateCommand) Group() string {
 	return definition.GroupBasicUsage
 }
 

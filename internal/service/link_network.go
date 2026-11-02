@@ -35,6 +35,84 @@ const (
 // network, which cannot be attached to any other network
 var ErrHostNetworkContainer = errors.New("container uses the host network")
 
+// ErrAddressPoolsExhausted is returned when docker has no address pool left to
+// give a link network a subnet from. Every link has a network of its own, and
+// docker's default pools only hold about 31, so a host with many links runs
+// out of them.
+var ErrAddressPoolsExhausted = errors.New("docker has no address pool left to create it from")
+
+// addressPoolsExhaustedMessage is what docker answers a network create with
+// once every subnet of its address pools is in use
+const addressPoolsExhaustedMessage = "all predefined address pools have been fully subnetted"
+
+// LinkNetworksReadme is the readme section that explains link networks and how
+// to give docker more address pools for them
+const LinkNetworksReadme = "https://github.com/dokku/dokku-datastore#link-networks"
+
+// addressPoolsError explains how to give docker more address pools. Changing
+// default-address-pools needs docker restarted, since a reload does not apply
+// it. The restart stops every container unless live-restore is on, which a
+// reload does apply, so that is suggested first when it is off.
+type addressPoolsError struct {
+	// network is the network that could not be made
+	network string
+
+	// appName is the app the network is for
+	appName string
+
+	// recreated is whether the network had been made before and went missing
+	recreated bool
+
+	// liveRestore is whether docker keeps containers running across a restart
+	liveRestore bool
+}
+
+func (e *addressPoolsError) Error() string {
+	lines := []string{
+		fmt.Sprintf("%s: %s", networkFailurePrefix(e.recreated, e.network, e.appName), ErrAddressPoolsExhausted),
+		"Give docker smaller pools by adding this to /etc/docker/daemon.json:",
+		`  "default-address-pools": [{"base": "172.16.0.0/12", "size": 24}]`,
+		"then restart docker with: sudo systemctl restart docker (a reload does not apply it)",
+	}
+
+	if !e.liveRestore {
+		lines = append(lines, `Set "live-restore": true and run sudo systemctl reload docker first to keep containers running across the restart`)
+	}
+
+	lines = append(lines, "See "+LinkNetworksReadme)
+	return strings.Join(lines, "\n")
+}
+
+func (e *addressPoolsError) Unwrap() error {
+	return ErrAddressPoolsExhausted
+}
+
+// networkFailurePrefix starts the message for a network that could not be made.
+// One that has to be recreated was made when the app was linked, so it is said
+// to have gone missing rather than to be new.
+func networkFailurePrefix(recreated bool, network string, appName string) string {
+	if recreated {
+		return fmt.Sprintf("Unable to recreate network %s for the link to app %s, which was removed since the app was linked", network, appName)
+	}
+
+	return fmt.Sprintf("Unable to create network %s for the link to app %s", network, appName)
+}
+
+// liveRestoreEnabled reports whether docker keeps containers running across a
+// restart of the daemon. A daemon that cannot be asked is taken not to, as the
+// advice that follows from it is only advice.
+func liveRestoreEnabled(ctx context.Context) bool {
+	result, err := execx.Run(ctx, common.ExecCommandInput{
+		Command: common.DockerBin(),
+		Args:    []string{"info", "--format", "{{ .LiveRestoreEnabled }}"},
+	})
+	if err != nil {
+		return false
+	}
+
+	return strings.TrimSpace(result.StdoutContents()) == "true"
+}
+
 // LinkNetworkName returns the network a link between a service and an app runs
 // over. An app name cannot hold a dot, so no two links share one.
 //
@@ -153,6 +231,10 @@ type EnsureLinkNetworkInput struct {
 	// Datastore is the datastore the service belongs to
 	Datastore *Datastore
 
+	// Recreate is whether the network was made when the app was linked, so one
+	// that is missing was removed since, which is what a failure says
+	Recreate bool
+
 	// ServiceName is the service the link is for
 	ServiceName string
 }
@@ -160,23 +242,37 @@ type EnsureLinkNetworkInput struct {
 // EnsureLinkNetwork creates the network a link runs over when it is missing,
 // and attaches the service container to it under the name the service url
 // points at. A service with no container yet is attached once one is made.
-// It is safe to repeat.
-func EnsureLinkNetwork(ctx context.Context, input EnsureLinkNetworkInput) error {
+// It is safe to repeat, and reports whether it made the network, so a caller
+// undoing a failed link only removes a network it made.
+func EnsureLinkNetwork(ctx context.Context, input EnsureLinkNetworkInput) (bool, error) {
 	network := LinkNetworkName(input.Datastore, input.ServiceName, input.AppName)
 	exists, err := linkNetworkExists(ctx, network)
 	if err != nil {
-		return err
+		return false, err
 	}
 
+	created := false
 	if !exists {
-		if _, err := execx.Run(ctx, common.ExecCommandInput{
+		result, err := execx.Run(ctx, common.ExecCommandInput{
 			Command: common.DockerBin(),
 			Args:    LinkNetworkCreateArgs(input.Datastore, input.ServiceName, input.AppName),
-		}); err != nil {
+		})
+		if err != nil {
 			// running out of address pools is the one failure a host with many
-			// links is likely to see, and nothing in docker's error says why
-			return fmt.Errorf("unable to create network %s for the link to app %s, a host with many links may need a larger docker default-address-pools setting: %w", network, input.AppName, err)
+			// links is likely to see, and nothing in docker's error says what
+			// to do about it
+			if strings.Contains(result.StderrContents(), addressPoolsExhaustedMessage) {
+				return false, &addressPoolsError{
+					network:     network,
+					appName:     input.AppName,
+					recreated:   input.Recreate,
+					liveRestore: liveRestoreEnabled(ctx),
+				}
+			}
+
+			return false, fmt.Errorf("%s: %w", networkFailurePrefix(input.Recreate, network, input.AppName), err)
 		}
+		created = true
 	}
 
 	containerID := input.ContainerID
@@ -188,10 +284,10 @@ func EnsureLinkNetwork(ctx context.Context, input EnsureLinkNetworkInput) error 
 	}
 
 	if containerID == "" {
-		return nil
+		return created, nil
 	}
 
-	return connectToNetwork(ctx, network, containerID, DNSHostname(input.Datastore, input.ServiceName))
+	return created, connectToNetwork(ctx, network, containerID, DNSHostname(input.Datastore, input.ServiceName))
 }
 
 // AppContainerIDs returns the running containers of an app, whatever phase
