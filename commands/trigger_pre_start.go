@@ -28,7 +28,7 @@ func (c *TriggerPreStartCommand) Name() string {
 
 // Synopsis returns the synopsis of the command
 func (c *TriggerPreStartCommand) Synopsis() string {
-	return "Starts the services an app is linked to before it starts"
+	return "Starts the services and link networks an app needs before it starts"
 }
 
 // Help returns the help text for the command

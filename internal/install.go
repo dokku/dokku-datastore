@@ -386,7 +386,7 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 			return err
 		}
 
-		migrateLegacyLinks(ctx, input, serviceName)
+		warnLegacyLinks(ctx, input, serviceName)
 	}
 
 	if crontabChanged {
@@ -396,14 +396,16 @@ func migrateServices(ctx context.Context, input InstallInput) error {
 	return nil
 }
 
-// migrateLegacyLinks moves the apps linked to a service off the container link
-// earlier versions gave them and onto the network each link now runs over. The
-// running containers join the network straight away, so nothing has to be
-// restarted, and drop the container link the next time they are.
+// warnLegacyLinks names the apps linked to a service that still reach it
+// through the container link earlier versions gave them, and how to move them.
 //
-// A link that cannot be moved is only warned about: the plugin still has to
-// install, and the app keeps its container link until the move is retried.
-func migrateLegacyLinks(ctx context.Context, input InstallInput, serviceName string) {
+// They are not moved here. Moving one makes a docker network for it, a host
+// with many links can run out of the address pools those are made from, and
+// an install that half-moved them left apps that no longer deployed. A legacy
+// link keeps working until docker removes links, so moving it is left to
+// link-migrate, where a failure can be put right and retried.
+func warnLegacyLinks(ctx context.Context, input InstallInput, serviceName string) {
+	legacy := []string{}
 	for _, appName := range service.LinkedApps(ctx, linkedAppsInput(input.Datastore, serviceName)) {
 		// an app deleted outside dokku has nothing to move, and is dropped
 		// from the links file when the service is next unlinked from it
@@ -411,12 +413,33 @@ func migrateLegacyLinks(ctx context.Context, input InstallInput, serviceName str
 			continue
 		}
 
-		if err := connectLink(ctx, input.Logger, input.Datastore, serviceName, appName); err != nil {
-			input.Logger.Warn(WarnInput{
-				Warning: fmt.Sprintf("Unable to move app %s onto the network of its link to service %s, run dokku plugin:install again to retry: %s", appName, serviceName, err),
-			})
+		if service.HasLegacyLink(input.Datastore, serviceName, appName) {
+			legacy = append(legacy, appName)
 		}
 	}
+
+	if len(legacy) == 0 {
+		return
+	}
+
+	command := hostenv.DokkuCommand(input.Datastore.Properties().CommandPrefix, "link-migrate", serviceName)
+	if len(legacy) == 1 {
+		input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Service %s is linked to app %s over a deprecated docker link, which Docker 30.0 removes", serviceName, legacy[0])})
+		input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Move it onto a network with: %s", command)})
+		return
+	}
+
+	input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Service %s is linked to apps %s over deprecated docker links, which Docker 30.0 removes", serviceName, joinNames(legacy))})
+	input.Logger.Warn(WarnInput{Warning: fmt.Sprintf("Move them onto networks with: %s", command)})
+}
+
+// joinNames lists names the way a sentence does: a, b and c
+func joinNames(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // restrictServiceSecrets takes away access by other users to every file of a

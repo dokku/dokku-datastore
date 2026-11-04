@@ -28,7 +28,7 @@ func (c *TriggerPreReleaseBuilderCommand) Name() string {
 
 // Synopsis returns the synopsis of the command
 func (c *TriggerPreReleaseBuilderCommand) Synopsis() string {
-	return "Starts the services an app is linked to before it is released"
+	return "Starts the services and link networks an app needs before it is released"
 }
 
 // Help returns the help text for the command

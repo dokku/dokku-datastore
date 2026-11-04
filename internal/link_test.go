@@ -255,7 +255,6 @@ func TestUnlinkService(t *testing.T) {
 			},
 			expectedCalls: func(option string) []string {
 				return []string{
-					"docker-options:remove my-app build,deploy,run " + option,
 					"config:unset --no-restart my-app REDIS_URL",
 				}
 			},
@@ -267,7 +266,7 @@ func TestUnlinkService(t *testing.T) {
 				return map[string]string{"REDIS_URL": "redis://:other@elsewhere:6379"}
 			},
 			expectedCalls: func(option string) []string {
-				return []string{"docker-options:remove my-app build,deploy,run " + option}
+				return []string{}
 			},
 			expectedWarn: true,
 		},
@@ -279,7 +278,6 @@ func TestUnlinkService(t *testing.T) {
 			},
 			expectedCalls: func(option string) []string {
 				return []string{
-					"docker-options:remove my-app build,deploy,run " + option,
 					"config:unset --no-restart my-app REDIS_URL",
 				}
 			},
@@ -304,7 +302,6 @@ func TestUnlinkService(t *testing.T) {
 			},
 			expectedCalls: func(option string) []string {
 				return []string{
-					"docker-options:remove my-app build,deploy,run " + option,
 					"config:unset --no-restart my-app MB_DB_CONNECTION_URI",
 				}
 			},
@@ -318,7 +315,6 @@ func TestUnlinkService(t *testing.T) {
 			},
 			expectedCalls: func(option string) []string {
 				return []string{
-					"docker-options:remove my-app build,deploy,run " + option,
 					"config:unset --no-restart my-app MB_DB_CONNECTION_URI",
 				}
 			},
@@ -331,7 +327,7 @@ func TestUnlinkService(t *testing.T) {
 				return map[string]string{"REDIS_URL": "redis://:other@elsewhere:6379"}
 			},
 			expectedCalls: func(option string) []string {
-				return []string{"docker-options:remove my-app build,deploy,run " + option}
+				return []string{}
 			},
 			expectedWarn: true,
 		},
@@ -428,7 +424,6 @@ func TestLinkService(t *testing.T) {
 			},
 			expectedCalls: func(serviceURL string, option string) []string {
 				return []string{
-					"docker-options:remove my-app build,deploy,run " + option,
 					"config:set --no-restart my-app REDIS_URL=" + serviceURL,
 				}
 			},
@@ -444,7 +439,6 @@ func TestLinkService(t *testing.T) {
 			},
 			expectedCalls: func(serviceURL string, option string) []string {
 				return []string{
-					"docker-options:remove my-app build,deploy,run " + option,
 					"config:set --no-restart my-app REDIS_URL=" + serviceURL,
 				}
 			},
@@ -460,7 +454,6 @@ func TestLinkService(t *testing.T) {
 			},
 			expectedCalls: func(serviceURL string, option string) []string {
 				return []string{
-					"docker-options:remove my-app build,deploy,run " + option,
 					"config:set --no-restart my-app BLUE_REDIS_URL=" + serviceURL,
 				}
 			},
@@ -476,7 +469,6 @@ func TestLinkService(t *testing.T) {
 			},
 			expectedCalls: func(serviceURL string, option string) []string {
 				return []string{
-					"docker-options:remove my-app build,deploy,run " + option,
 					"config:set --no-restart my-app REDIS_URL=" + serviceURL + "?foo=bar&baz=qux",
 				}
 			},
@@ -491,7 +483,6 @@ func TestLinkService(t *testing.T) {
 			},
 			expectedCalls: func(serviceURL string, option string) []string {
 				return []string{
-					"docker-options:remove my-app build,deploy,run " + option,
 					"config:set --no-restart my-app DOKKU_REDIS_AQUA_URL=" + serviceURL,
 				}
 			},
@@ -505,7 +496,7 @@ func TestLinkService(t *testing.T) {
 				return map[string]string{"REDIS_URL": serviceURL}
 			},
 			expectedCalls: func(serviceURL string, option string) []string {
-				return []string{"docker-options:remove my-app build,deploy,run " + option}
+				return []string{}
 			},
 			expectedLinks:    []string{"my-app"},
 			expectedRecorded: []string{"REDIS_URL"},
@@ -519,7 +510,7 @@ func TestLinkService(t *testing.T) {
 				return map[string]string{"FOO_URL": serviceURL}
 			},
 			expectedCalls: func(serviceURL string, option string) []string {
-				return []string{"docker-options:remove my-app build,deploy,run " + option}
+				return []string{}
 			},
 			expectedLinks:    []string{"my-app"},
 			expectedRecorded: []string{"FOO_URL"},
@@ -572,7 +563,6 @@ func TestLinkService(t *testing.T) {
 			},
 			expectedCalls: func(serviceURL string, option string) []string {
 				return []string{
-					"docker-options:remove my-app build,deploy,run " + option,
 					"config:set --no-restart my-app MB_DB_CONNECTION_URI=" + serviceURL,
 				}
 			},
@@ -589,7 +579,6 @@ func TestLinkService(t *testing.T) {
 			},
 			expectedCalls: func(serviceURL string, option string) []string {
 				return []string{
-					"docker-options:remove my-app build,deploy,run " + option,
 					"config:set --no-restart my-app MB_DB_CONNECTION_URI=" + serviceURL + "?foo=bar",
 				}
 			},
@@ -605,7 +594,6 @@ func TestLinkService(t *testing.T) {
 			},
 			expectedCalls: func(serviceURL string, option string) []string {
 				return []string{
-					"docker-options:remove my-app build,deploy,run " + option,
 					"config:set --no-restart my-app MB_DB_CONNECTION_URI=" + serviceURL,
 				}
 			},
@@ -687,7 +675,7 @@ func TestLinkService(t *testing.T) {
 				return map[string]string{"MB_DB_CONNECTION_URI": serviceURL}
 			},
 			expectedCalls: func(serviceURL string, option string) []string {
-				return []string{"docker-options:remove my-app build,deploy,run " + option}
+				return []string{}
 			},
 			expectedLinks:    []string{"my-app"},
 			expectedRecorded: []string{"MB_DB_CONNECTION_URI"},
@@ -904,9 +892,7 @@ func TestLinkServiceReplacesACorruptRecord(t *testing.T) {
 		t.Fatalf("expected no error, got %s", err)
 	}
 
-	option := fmt.Sprintf("--link %s:%s", service.ContainerName(datastore, "lollipop"), service.DNSHostname(datastore, "lollipop"))
 	expectedCalls := []string{
-		"docker-options:remove my-app build,deploy,run " + option,
 		"config:set --no-restart my-app MB_DB_CONNECTION_URI=" + serviceURL,
 	}
 	if actual := recordedCalls(t, calls); !slices.Equal(actual, expectedCalls) {
@@ -1152,9 +1138,7 @@ func TestLinkServiceWithJDBC(t *testing.T) {
 				t.Fatalf("expected no error, got %s", err)
 			}
 
-			option := fmt.Sprintf("--link %s:%s", service.ContainerName(datastore, "lollipop"), service.DNSHostname(datastore, "lollipop"))
 			expectedCalls := []string{
-				"docker-options:remove my-app build,deploy,run " + option,
 				test.expectedSet(serviceURL, jdbc),
 			}
 			if actual := recordedCalls(t, calls); !slices.Equal(actual, expectedCalls) {
@@ -1211,8 +1195,7 @@ func TestLinkServiceWithJDBCAndTheURLAlreadySet(t *testing.T) {
 		t.Fatalf("expected no error, got %s", err)
 	}
 
-	option := fmt.Sprintf("--link %s:%s", service.ContainerName(datastore, "lollipop"), service.DNSHostname(datastore, "lollipop"))
-	expectedCalls := []string{"docker-options:remove my-app build,deploy,run " + option}
+	expectedCalls := []string{}
 	if actual := recordedCalls(t, calls); !slices.Equal(actual, expectedCalls) {
 		t.Errorf("expected the calls %q, got %q", expectedCalls, actual)
 	}
@@ -1307,8 +1290,7 @@ func TestUnlinkServiceWithJDBC(t *testing.T) {
 				t.Fatalf("expected no error, got %s", err)
 			}
 
-			option := fmt.Sprintf("--link %s:%s", service.ContainerName(datastore, "lollipop"), service.DNSHostname(datastore, "lollipop"))
-			expectedCalls := []string{"docker-options:remove my-app build,deploy,run " + option}
+			expectedCalls := []string{}
 			if test.expectedUnset != "" {
 				expectedCalls = append(expectedCalls, test.expectedUnset)
 			}

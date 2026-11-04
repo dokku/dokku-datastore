@@ -28,7 +28,7 @@ func (c *TriggerPreBuildCommand) Name() string {
 
 // Synopsis returns the synopsis of the command
 func (c *TriggerPreBuildCommand) Synopsis() string {
-	return "Starts the services an app is linked to before it is built"
+	return "Starts the services and link networks an app needs before it is built"
 }
 
 // Help returns the help text for the command

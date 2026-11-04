@@ -28,7 +28,7 @@ func (c *TriggerPreRestoreCommand) Name() string {
 
 // Synopsis returns the synopsis of the command
 func (c *TriggerPreRestoreCommand) Synopsis() string {
-	return "Starts every service linked to an app before apps are restored"
+	return "Starts every linked service and its link networks before apps are restored"
 }
 
 // Help returns the help text for the command

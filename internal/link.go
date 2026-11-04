@@ -592,7 +592,7 @@ func UnlinkService(ctx context.Context, input UnlinkServiceInput) error {
 		return err
 	}
 
-	if err := removeLegacyLinkOption(ctx, input.Datastore, input.ServiceName, input.AppName); err != nil {
+	if err := service.RemoveLegacyLinkOption(ctx, input.Datastore, input.ServiceName, input.AppName); err != nil {
 		return err
 	}
 
@@ -687,10 +687,19 @@ func warnOnCorruptLinkConfigKeys(logger Ui, serviceName string, property string,
 	return nil
 }
 
-// addLink records an app as linked to a service and puts the app on the network
-// the link runs over, firing the triggers around both
+// addLink puts an app on the network a link to a service runs over and records
+// it as linked, firing the triggers around both.
+//
+// The network comes first: an app recorded as linked has every container dokku
+// makes for it put on the network, so one recorded without it would fail every
+// deploy after a link that could not be made. A network that cannot be made
+// leaves the app unlinked, with nothing recorded and no config set.
 func addLink(ctx context.Context, logger Ui, s *service.Datastore, serviceName string, appName string) error {
 	if err := callServiceAction(ctx, s, "pre-link", serviceName, appName); err != nil {
+		return err
+	}
+
+	if err := connectLink(ctx, logger, s, serviceName, appName); err != nil {
 		return err
 	}
 
@@ -698,10 +707,6 @@ func addLink(ctx context.Context, logger Ui, s *service.Datastore, serviceName s
 		Datastore:   s,
 		ServiceName: serviceName,
 	}, appName); err != nil {
-		return err
-	}
-
-	if err := connectLink(ctx, logger, s, serviceName, appName); err != nil {
 		return err
 	}
 

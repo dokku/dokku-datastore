@@ -1,12 +1,13 @@
 module github.com/dokku/dokku-datastore
 
-go 1.26.2
+go 1.27.3
 
 require (
 	github.com/creack/pty v1.1.24
 	github.com/docker/go-units v0.5.0
 	github.com/dokku/docker-port-forward v0.0.0-20260927082313-8cbfc680c944
-	github.com/dokku/dokku/plugins/common v0.0.0-20260914154134-61ff696e0012
+	github.com/dokku/dokku/plugins/common v0.0.0-20261102053158-1910c3fb682a
+	github.com/dokku/dokku/plugins/docker-options v0.0.0-20261102053158-1910c3fb682a
 	github.com/josegonzalez/cli-skeleton v0.25.0
 	github.com/mitchellh/cli v1.1.5
 	github.com/posener/complete v1.2.3
@@ -44,7 +45,7 @@ require (
 	github.com/huandu/xstrings v1.5.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-shellwords v1.0.12 // indirect
 	github.com/melbahja/goph v1.5.2 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
@@ -72,7 +73,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.4 // indirect
-	golang.org/x/crypto v0.56.0 // indirect
-	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 )

@@ -70,6 +70,7 @@ Available commands are:
     invoke                                Invokes a datastore's own command against a service
     label                                 Adds docker labels to a service
     link                                  Links a service to an app
+    link-migrate                          Moves linked apps off the deprecated docker link and onto a network
     linked                                Checks if a service is linked to an app
     links                                 Lists all apps that are linked to a given service
     list                                  Lists all services of a given datastore type
@@ -93,11 +94,11 @@ Available commands are:
     trigger-post-app-clone-setup          Copies an app's service links onto its clone
     trigger-post-app-rename-setup         Carries an app's service links across a rename
     trigger-post-container-create         Attaches a new app container to the networks of its links
-    trigger-pre-build                     Starts the services an app is linked to before it is built
+    trigger-pre-build                     Starts the services and link networks an app needs before it is built
     trigger-pre-delete                    Unlinks an app from every service before it is deleted
-    trigger-pre-release-builder           Starts the services an app is linked to before it is released
-    trigger-pre-restore                   Starts every service linked to an app before apps are restored
-    trigger-pre-start                     Starts the services an app is linked to before it starts
+    trigger-pre-release-builder           Starts the services and link networks an app needs before it is released
+    trigger-pre-restore                   Starts every linked service and its link networks before apps are restored
+    trigger-pre-start                     Starts the services and link networks an app needs before it starts
     trigger-service-list                  Lists the services other dokku plugins can see
     unexpose                              Unexposes a service
     unlabel                               Removes one or all labels from a service
@@ -1204,9 +1205,17 @@ Dokku has no trigger before it runs the containers of an image it has already bu
 
 `link` used to give the app a docker link to the service, added to the app's `build`, `deploy` and `run` docker options as `--link dokku.postgres.lollipop:dokku-postgres-lollipop`. Docker 29.6 warns that links on the default bridge network are deprecated, and Docker 30.0 removes them. Docker 29.0 had already stopped setting the `DOKKU_POSTGRES_LOLLIPOP_PORT`-style variables a link handed the app's containers, unless the daemon is run with `DOCKER_KEEP_DEPRECATED_LEGACY_LINKS_ENV_VARS=1`.
 
-Each link now has a docker network of its own, named for the service and the app, such as `dokku.postgres.lollipop.playground`. The service joins it as `dokku-postgres-lollipop`, the host its url already names, so the url does not change. The app's running containers join it when the app is linked, and every container dokku makes for the app from then on joins it through the `post-container-create` trigger, which dokku fires for the containers an app is built, deployed and run in. Two apps linked to the same service are on different networks, so neither can resolve or reach the other through it. The network is internal, so joining it changes neither container's route to anything else. A container on the host network, which could not be given a docker link either, is warned about and left as it is.
+Each link made now has a docker network of its own, named for the service and the app, such as `dokku.postgres.lollipop.playground`. The service joins it as `dokku-postgres-lollipop`, the host its url already names, so the url does not change. The app's running containers join it when the app is linked, and every container dokku makes for the app from then on joins it through the `post-container-create` trigger, which dokku fires for the containers an app is built, deployed and run in. Each container that joins says so in the deploy output, since nothing in the app's docker options shows the link:
 
-`unlink` removes the network, which takes the service away from the app's running containers straight away, even with `--no-restart`. Deleting the app removes it too, and `destroy` removes any a service still has. A service container that is made again, by a `start` with no container left, an `upgrade` or a `reset`, rejoins the network of every app it is linked to, and a network that went missing is made again then, and whenever a container of the app is made.
+```text
+       Attaching container 0123abcd4567 to network dokku.postgres.lollipop.playground for the link to postgres service lollipop
+```
+
+Two apps linked to the same service are on different networks, so neither can resolve or reach the other through it. The network is internal, so joining it changes neither container's route to anything else. A container on the host network, which could not be given a docker link either, is warned about and left as it is.
+
+The network is made before anything is recorded: a `link` that cannot get one fails, and the app is neither recorded as linked nor given any config.
+
+`unlink` removes the network, which takes the service away from the app's running containers straight away, even with `--no-restart`. Deleting the app removes it too, and `destroy` removes any a service still has. A network that went missing is made again before the app is built, released or started, through the `pre-build`, `pre-release-builder` and `pre-start` triggers, so a deploy that cannot make it fails before the build rather than after. It is also made again whenever a container of the app is made, which covers `ps:restart`, `ps:scale` and the restart after `config:set`, as dokku fires none of those triggers for them. A service container that is made again, by a `start` with no container left, an `upgrade` or a `reset`, rejoins the network of every app it is linked to.
 
 The readiness check a service is waited on with used a docker link as well. It now runs in the service container's network namespace, as the sidecar commands do.
 
@@ -1220,17 +1229,74 @@ docker network inspect dokku.postgres.lollipop.playground
 dokku postgres:unlink lollipop playground --no-restart
 ```
 
-Updating the plugin moves every linked app onto the network for its link and removes the `--link` docker option, without restarting anything. The app's containers keep the docker link they were started with until they are next restarted. An app that reads the `DOKKU_POSTGRES_LOLLIPOP_*` variables should read `DATABASE_URL` instead.
+### Moving a docker link onto a network
 
-Every link uses a network, and Docker's default address pools hold about 31, so a host with many links may need a larger `default-address-pools` setting in `/etc/docker/daemon.json`. It applies to networks made once docker is restarted:
+An app linked by an earlier version, or by the bash plugins, keeps its `--link` docker option and keeps working as it did. Updating the plugin does not move it, and changes nothing about it. A link is taken to be a docker link for as long as the app's docker options hold the `--link` option for the service, and to run over a network otherwise. The docker options are read from wherever the installed dokku keeps them.
+
+Updating the plugin names the apps still on a docker link, and the command that moves them:
+
+```text
+ !     Service lollipop is linked to apps playground and metabase over deprecated docker links, which Docker 30.0 removes
+ !     Move them onto networks with: dokku postgres:link-migrate lollipop
+```
+
+Each container dokku makes for such an app gets the docker link from the app's docker options, joins no network, and is warned about:
+
+```text
+ !     App playground reaches postgres service lollipop over a deprecated docker link, which Docker 30.0 removes
+ !     Move it onto a network with: dokku postgres:link-migrate lollipop playground
+```
+
+`link-migrate` moves every app linked to a service, or the one named. The network is made, the service and the app's running containers join it, and only then is the `--link` docker option removed, so nothing is restarted and an app that cannot be moved keeps its docker link. The app's config is not changed, since the service answers to the same host on the network. The app's containers keep the docker link they were started with until they are next restarted. An app that cannot be moved is reported along with why, any network made for it is removed again, and the other apps are still moved. An app that was already moved is put back on its network, which repairs one that went missing.
+
+```shell
+# every app linked to the service
+dokku postgres:link-migrate lollipop
+
+# only playground
+dokku postgres:link-migrate lollipop playground
+```
+
+An app that reads the `DOKKU_POSTGRES_LOLLIPOP_*` variables should read `DATABASE_URL` instead.
+
+### Running out of address pools
+
+Every link uses a network, and docker's default address pools hold about 31, so a host with many links runs out of them. A network that cannot be made then fails with what to change:
+
+```text
+ !     Unable to create network dokku.postgres.lollipop.playground for the link to app playground: docker has no address pool left to create it from
+ !     Give docker smaller pools by adding this to /etc/docker/daemon.json:
+ !       "default-address-pools": [{"base": "172.16.0.0/12", "size": 24}]
+ !     then restart docker with: sudo systemctl restart docker (a reload does not apply it)
+ !     Set "live-restore": true and run sudo systemctl reload docker first to keep containers running across the restart
+ !     See https://github.com/dokku/dokku-datastore#link-networks
+```
+
+A network that was made when the app was linked and has since gone missing is said to be recreated instead: `Unable to recreate network ... for the link to app playground, which was removed since the app was linked`. The live-restore line is left out when docker already has it on.
+
+`default-address-pools` is not one of the settings docker applies on a reload, so docker has to be restarted, which stops every container unless live-restore is on. `live-restore` is applied on a reload, so turning it on first keeps the containers running across the restart:
+
+```shell
+# 1. add "live-restore": true to /etc/docker/daemon.json, then
+sudo systemctl reload docker
+
+# 2. add the address pools to /etc/docker/daemon.json, then
+sudo systemctl restart docker
+
+# 3. move the links that could not be moved
+dokku postgres:link-migrate lollipop
+```
 
 ```json
 {
+  "live-restore": true,
   "default-address-pools": [
     {"base": "172.16.0.0/12", "size": 24}
   ]
 }
 ```
+
+The new pools only apply to networks made after the restart. Networks that already exist keep their subnets.
 
 ## Linked apps
 
