@@ -62,7 +62,7 @@ jobs:
           go-version-file: "go.mod"
       - run: go build -o dokku-datastore .
       - id: setup-bats
-        uses: bats-core/bats-action@77d6fb60505b4d0d1d73e48bd035b55074bbfb43  # 4.0.0
+        uses: bats-core/bats-action@3566550e0f594451ac0f58fcbfdeca93aa29a45e  # 4.1.0
         with:
           bats-version: "1.14.0"
           assert-version: "2.2.4"
@@ -92,7 +92,7 @@ jobs:
           go-version-file: "go.mod"
       - run: go build -o dokku-datastore .
       - id: setup-bats
-        uses: bats-core/bats-action@77d6fb60505b4d0d1d73e48bd035b55074bbfb43  # 4.0.0
+        uses: bats-core/bats-action@3566550e0f594451ac0f58fcbfdeca93aa29a45e  # 4.1.0
         with:
           bats-version: "1.14.0"
           assert-version: "2.2.4"
@@ -117,7 +117,7 @@ jobs:
           go-version-file: "go.mod"
       - run: go build -o dokku-datastore .
       - id: setup-bats
-        uses: bats-core/bats-action@77d6fb60505b4d0d1d73e48bd035b55074bbfb43  # 4.0.0
+        uses: bats-core/bats-action@3566550e0f594451ac0f58fcbfdeca93aa29a45e  # 4.1.0
         with:
           bats-version: "1.14.0"
           assert-version: "2.2.4"
