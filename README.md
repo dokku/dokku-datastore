@@ -689,15 +689,32 @@ What the dump holds is up to each datastore:
 - couchdb dumps every database whose name does not start with `_`, keyed by name.
 - clickhouse backs up every database but the ones it keeps for itself, under the names they have, leaving out `default` when it holds no tables. Every database is restored beside the live one before any is swapped in, so an archive that fails to restore leaves them all as they were.
 
-`backup` now always dumps every database wherever the datastore can, so a backup of one of these datastores is restored with `import --all-databases`. A backup made before this change holds only the service's own database, and is still restored without it.
+`backup` holds the same dump `export` makes of the service's own database unless it is asked for every database, so a restore built on that dump keeps working, such as a postgres backup loaded with `pg_restore`. A release of this plugin backed up every database by default, which changed the format of every backup under the restores that read it, and a postgres backup became plain sql `pg_restore` refused. A backup holds every database when it is given `--all-databases`, or when the service's `backup-all-databases` property is `true`, which scheduled backups read when they run. `--all-databases=false` backs up only the service's own database on a service set to back up every one. A schedule can set `backup-all-databases` for itself with `set --id`. A datastore that cannot export every database refuses both, and `info --backup-all-databases` reports whether the service's backups hold every database. `clone` copies the property.
 
 ```shell
+# every database in this backup
+dokku postgres:backup lollipop my-s3-bucket --all-databases
+
+# every database in every backup, scheduled ones included
+dokku postgres:set lollipop backup-all-databases true
+
+# and back to the service's own database
+dokku postgres:set lollipop backup-all-databases
+```
+
+A backup is restored the way it was made. A backup of the service's own database is restored with `import`, and a backup of every database, including one made by the release that backed up every database by default, is restored with `import --all-databases`. `import` does not tell the two apart on its own.
+
+```shell
+# a backup of the service's own database
+dokku postgres:import lollipop < backup-folder/export
+
+# a backup of every database
 dokku postgres:import lollipop --all-databases < backup-folder/export
 ```
 
 `clone` still copies only the service's own database. A dump of every database loads each one under the name it was exported from, so the source's database would land beside the clone's own rather than in it.
 
-Arguments after `--`, and the `export-args` and `import-args` properties, are passed on by these dumps as well, a backup's included. They reach the same tools as before, with one exception: postgres loads every database with `psql` rather than `pg_restore`, so its `import-args` are handed to `psql`. postgres passes `export-args` to `pg_dump` once for each database, so a format such as `-Fc` there would leave a backup that cannot be loaded.
+Arguments after `--`, and the `export-args` and `import-args` properties, are passed on by these dumps as well, a backup of every database included. They reach the same tools as before, with one exception: postgres loads every database with `psql` rather than `pg_restore`, so its `import-args` are handed to `psql`. postgres passes `export-args` to `pg_dump` once for each database, so a format such as `-Fc` there would leave a backup of every database that cannot be loaded.
 
 ## Resetting a service's data
 
@@ -895,7 +912,7 @@ default|0 3 * * *|my-bucket|false;frequent|*/15 * * * *|bucket-a|false;monthly|@
 
 The other backup keys `info` reports stay the service's values. A passphrase that exists only on a schedule does not make `--backup-encrypted` true.
 
-A schedule can set its own storage class, object name, timestamp, mailto, keyserver, export arguments, passphrase, public key, region, signature version and endpoint. `set <key> <value> --id <id>` records it, and an empty value clears that schedule's own value so it inherits the service's again. The schedule has to exist already. `set backup-bucket` and `set backup-use-iam` still change the default schedule, and only when it is the only one; otherwise they are refused, and the schedule is changed with `backup-schedule --id`. The encryption commands, `backup-auth` and `backup-deauth` take the same `--id`.
+A schedule can set its own storage class, object name, timestamp, mailto, keyserver, export arguments, whether it backs up every database, passphrase, public key, region, signature version and endpoint. `set <key> <value> --id <id>` records it, and an empty value clears that schedule's own value so it inherits the service's again. The schedule has to exist already. `set backup-bucket` and `set backup-use-iam` still change the default schedule, and only when it is the only one; otherwise they are refused, and the schedule is changed with `backup-schedule --id`. The encryption commands, `backup-auth` and `backup-deauth` take the same `--id`.
 
 ```shell
 # credentials every schedule uses, unless it has its own or authenticates with an instance role
@@ -1394,7 +1411,7 @@ Redis always holds sixteen databases, so there are none to make, and an app is l
 
 `link` records the database and user an app was linked on in the service's `link-database` and `link-user` properties, so `unlink`, `promote`, a password change and renaming or cloning an app find the url it was given. A link on the service's own database and user records nothing, which is what every link made before looks like. An app that is already linked has to be unlinked and linked again to be moved to another database or user.
 
-`connect` takes `--database` and `--user`, and `export`, `import` and `reset` take `--database`, each addressing that database or user in place of the service's own. A command that acts on the whole service refuses them rather than ignoring them, as redis's `export`, which dumps every database at once, does with `--database`. `export --database` cannot be combined with `--all-databases`. A `reset` of the service's own database on couchdb, rabbitmq and rethinkdb, which empties every database an app could have written to, leaves the ones made with `create-database` alone, and a `reset` of one of those empties it alone. A backup is unchanged, and holds the databases made in a service only where it holds every database.
+`connect` takes `--database` and `--user`, and `export`, `import` and `reset` take `--database`, each addressing that database or user in place of the service's own. A command that acts on the whole service refuses them rather than ignoring them, as redis's `export`, which dumps every database at once, does with `--database`. `export --database` cannot be combined with `--all-databases`. A `reset` of the service's own database on couchdb, rabbitmq and rethinkdb, which empties every database an app could have written to, leaves the ones made with `create-database` alone, and a `reset` of one of those empties it alone. A backup is unchanged, and holds the databases made in a service only when it is asked for every database with `--all-databases` or `backup-all-databases`.
 
 ```shell
 dokku postgres:connect lollipop --database paintshop --user painter

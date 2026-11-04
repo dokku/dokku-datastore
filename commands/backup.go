@@ -28,6 +28,10 @@ type BackupCommand struct {
 
 	// scheduleID is the schedule whose settings this backup runs with
 	scheduleID string
+
+	// allDatabases backs up every database in the service rather than only
+	// the one named for it, when the flag is given
+	allDatabases bool
 }
 
 // Name returns the name of the command
@@ -49,7 +53,8 @@ func (c *BackupCommand) Help() string {
 func (c *BackupCommand) Examples() map[string]string {
 	appName := os.Getenv("CLI_APP_NAME")
 	return map[string]string{
-		"Backs a redis service named test up to a bucket": fmt.Sprintf("%s %s redis test my-bucket", appName, c.Name()),
+		"Backs a redis service named test up to a bucket":                      fmt.Sprintf("%s %s redis test my-bucket", appName, c.Name()),
+		"Backs every database in a postgres service named test up to a bucket": fmt.Sprintf("%s %s postgres test my-bucket --all-databases", appName, c.Name()),
 	}
 }
 
@@ -93,6 +98,7 @@ func (c *BackupCommand) FlagSet() *flag.FlagSet {
 	c.GlobalFlags(f)
 	f.BoolVarP(&c.useIAM, "use-iam", "u", false, "use the IAM profile associated with the current server")
 	f.StringVar(&c.scheduleID, "id", "", "run with the settings of this schedule")
+	f.BoolVar(&c.allDatabases, "all-databases", false, "back up every database in the service rather than only the one named for it, in place of the backup-all-databases property")
 	return f
 }
 
@@ -102,7 +108,8 @@ func (c *BackupCommand) AutocompleteFlags() complete.Flags {
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
 		complete.Flags{
-			"--id": complete.PredictNothing,
+			"--id":            complete.PredictNothing,
+			"--all-databases": complete.PredictNothing,
 		},
 	)
 }
@@ -193,6 +200,17 @@ func (c *BackupCommand) Run(args []string) int {
 		return 1
 	}
 
+	if code, refused := refuseAllDatabases(logger, datastore, c.allDatabases); refused {
+		return c.finish(ctx, &logger, datastore, serviceName, arguments["bucket-name"].StringValue(), code)
+	}
+
+	// only a flag that was given decides, so that --all-databases=false backs
+	// up the service's own database on a service set to back up every one
+	var allDatabases *bool
+	if flags.Changed("all-databases") {
+		allDatabases = &c.allDatabases
+	}
+
 	bucketName := arguments["bucket-name"].StringValue()
 	if bucketName == "" {
 		logger.Error(internal.ErrorInput{
@@ -216,11 +234,12 @@ func (c *BackupCommand) Run(args []string) int {
 	logger.Header2(message) //nolint:errcheck
 
 	if err := internal.Backup(ctx, internal.BackupInput{
-		BucketName:  bucketName,
-		Datastore:   datastore,
-		ServiceName: serviceName,
-		UseIAM:      c.useIAM,
-		ScheduleID:  c.scheduleID,
+		BucketName:   bucketName,
+		Datastore:    datastore,
+		ServiceName:  serviceName,
+		UseIAM:       c.useIAM,
+		ScheduleID:   c.scheduleID,
+		AllDatabases: allDatabases,
 	}); err != nil {
 		logger.Info(fmt.Sprintf("Backup of %s failed at %s", serviceName, internal.BackupTimestamp(time.Now())))
 		logger.Error(internal.ErrorInput{Error: err})
@@ -251,4 +270,9 @@ func (c *BackupCommand) finish(ctx context.Context, logger *internal.Ui, datasto
 	}
 
 	return code
+}
+
+// DocumentsFlag reports whether a flag is described for a datastore
+func (c *BackupCommand) DocumentsFlag(name string, data internal.DocumentationData) bool {
+	return documentsAllDatabases(name, data)
 }

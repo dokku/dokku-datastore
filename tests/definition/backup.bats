@@ -625,6 +625,22 @@ teardown_file() {
   run "$BIN" import "$PLUGIN" "$SERVICE" --all-databases </dev/null
   assert_failure
   assert_output --partial "--all-databases is not supported"
+
+  # a backup is refused before it needs a bucket or credentials, and the
+  # property scheduled backups read is refused before it is written
+  run "$BIN" backup "$PLUGIN" "$SERVICE" my-bucket --all-databases
+  if [[ "$status" -ne "$NOT_IMPLEMENTED_EXIT" ]]; then
+    assert_failure
+    assert_output --partial "--all-databases is not supported"
+  fi
+
+  run "$BIN" set "$PLUGIN" "$SERVICE" backup-all-databases true
+  assert_failure
+  assert_output --partial "backup-all-databases cannot be true"
+
+  run --separate-stderr "$BIN" info "$PLUGIN" "$SERVICE" --backup-all-databases
+  assert_success
+  assert_output "false"
 }
 
 @test "($DEFINITION) import of a missing file leaves the data alone" {

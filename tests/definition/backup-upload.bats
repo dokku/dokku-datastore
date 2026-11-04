@@ -100,6 +100,10 @@ setup() {
   aws_cli s3 rm --recursive "s3://$S3_BUCKET/" >/dev/null
 }
 
+# issue 412: a backup had become a dump of every database, in a format the
+# restores built on the service's own dump could not read, such as plain sql
+# where pg_restore expects its custom format. Without being asked for every
+# database, a backup is the dump export makes, restored without --all-databases
 @test "($DEFINITION) backup ships the dump and it restores" {
   local probe
   probe="$(probe_path)"
@@ -107,12 +111,7 @@ setup() {
     run "$probe" write "$SERVICE"
     assert_success
   fi
-
-  # a backup holds every database wherever the datastore can export them, so
-  # one an app made beside the service's own comes back with it
-  local restore_flags=()
   if exports_all_databases; then
-    restore_flags=(--all-databases)
     run "$probe" write-extra "$SERVICE"
     assert_success
   fi
@@ -131,6 +130,13 @@ setup() {
 
   download_backup
 
+  # the archive pg_restore reads starts with its own magic, which plain sql
+  # does not
+  if [[ "$PLUGIN" == "postgres" ]]; then
+    [[ "$(head -c 5 "$BATS_TEST_TMPDIR/extracted/backup/export")" == "PGDMP" ]] ||
+      fail "expected the backup to hold a pg_dump custom format archive"
+  fi
+
   # overwritten first, so that finding the record afterwards means the backup
   # put it back rather than that it was never gone
   if [[ -x "$probe" ]]; then
@@ -142,7 +148,7 @@ setup() {
     assert_success
   fi
 
-  run "$BIN" import "$PLUGIN" "$SERVICE" "${restore_flags[@]}" --file "$BATS_TEST_TMPDIR/extracted/backup/export" </dev/null
+  run "$BIN" import "$PLUGIN" "$SERVICE" --file "$BATS_TEST_TMPDIR/extracted/backup/export" </dev/null
   assert_success
 
   if [[ -x "$probe" ]]; then
@@ -150,11 +156,69 @@ setup() {
     assert_success
     assert_output "known"
   fi
+
+  # the database an app made beside the service's own is not in the backup,
+  # so it is left as it was
   if exports_all_databases; then
     run --separate-stderr "$probe" read-extra "$SERVICE"
     assert_success
-    assert_output "known"
+    assert_output "clobbered"
   fi
+}
+
+# a backup of every database, asked for with the flag or with the property a
+# scheduled backup reads, holds the database an app made beside the service's
+# own, and restores it with import --all-databases
+@test "($DEFINITION) backup of every database ships the dump and it restores" {
+  if ! exports_all_databases; then
+    skip "$DEFINITION does not export every database"
+  fi
+
+  local probe
+  probe="$(probe_path)"
+
+  local mode backup_status backup_output
+  for mode in flag property; do
+    run "$probe" write "$SERVICE"
+    assert_success
+    run "$probe" write-extra "$SERVICE"
+    assert_success
+
+    aws_cli s3 rm --recursive "s3://$S3_BUCKET/" >/dev/null
+    if [[ "$mode" == "flag" ]]; then
+      run "$BIN" backup "$PLUGIN" "$SERVICE" "$S3_BUCKET" --all-databases
+      backup_status="$status" backup_output="$output"
+    else
+      run "$BIN" set "$PLUGIN" "$SERVICE" backup-all-databases true
+      assert_success
+      run "$BIN" backup "$PLUGIN" "$SERVICE" "$S3_BUCKET"
+      backup_status="$status" backup_output="$output"
+
+      # cleared before anything is asserted, so the other tests back up only
+      # the service's own database
+      run "$BIN" set "$PLUGIN" "$SERVICE" backup-all-databases
+      assert_success
+    fi
+    [[ "$backup_status" -eq 0 ]] || fail "the backup of every database by $mode failed: $backup_output"
+
+    rm -rf "$BATS_TEST_TMPDIR/extracted"
+    download_backup
+
+    run "$probe" clobber "$SERVICE"
+    assert_success
+    run "$probe" clobber-extra "$SERVICE"
+    assert_success
+
+    run "$BIN" import "$PLUGIN" "$SERVICE" --all-databases --file "$BATS_TEST_TMPDIR/extracted/backup/export" </dev/null
+    assert_success
+
+    run --separate-stderr "$probe" read "$SERVICE"
+    assert_success
+    assert_output "known"
+    run --separate-stderr "$probe" read-extra "$SERVICE"
+    assert_success
+    assert_output "known"
+  done
 }
 
 # issue 313: nothing outside dokku could be told whether a backup worked, short

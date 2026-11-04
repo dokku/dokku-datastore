@@ -57,3 +57,25 @@ func TestValidateBackupTimestamp(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateBackupAllDatabases(t *testing.T) {
+	for _, value := range []string{"", "true", "false", " true "} {
+		if err := ValidateBackupAllDatabases(value); err != nil {
+			t.Errorf("expected %q to be accepted, got %q", value, err)
+		}
+	}
+
+	// read as exactly true, so a value that looks like it turns the setting on
+	// is refused rather than quietly backing up only the service's database
+	for _, value := range []string{"yes", "1", "TRUE", "True", "on"} {
+		err := ValidateBackupAllDatabases(value)
+		if err == nil {
+			t.Errorf("expected %q to be refused, got no error", value)
+			continue
+		}
+
+		if !strings.Contains(err.Error(), BackupAllDatabasesProperty) {
+			t.Errorf("expected the error to name %s, got %q", BackupAllDatabasesProperty, err)
+		}
+	}
+}

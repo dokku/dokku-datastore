@@ -91,7 +91,7 @@ func (c *ImportCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
 	f.StringVarP(&c.file, "file", "f", "", "a file on the dokku host to import instead of reading stdin")
-	f.BoolVar(&c.allDatabases, "all-databases", false, "load a dump of every database in the service, as written by export --all-databases or a backup")
+	f.BoolVar(&c.allDatabases, "all-databases", false, "load a dump of every database in the service, as written by export --all-databases or backup --all-databases")
 	f.StringVar(&c.database, "database", "", "the database in the service to import into, in place of the one named for the service")
 	return f
 }

@@ -42,6 +42,7 @@ var InfoKeys = []InfoKey{
 	{Name: "backup-endpoint-url", Description: "show the s3-compatible endpoint backups are shipped to"},
 	{Name: "backup-keyserver", Description: "show the keyserver backup public keys are fetched from"},
 	{Name: "backup-mailto", Description: "show who cron mails the output of scheduled backups to in place of the global MAILTO"},
+	{Name: "backup-all-databases", Description: "show whether backups hold every database in the service rather than only the one named for it"},
 	{Name: "backup-object-name", Description: "show the name backups are uploaded under in place of the default"},
 	{Name: "backup-public-key-id", Description: "show the gpg public key id backups are encrypted with"},
 	{Name: "backup-schedule", Description: "show the cron schedule backups run on"},
@@ -143,6 +144,7 @@ func Info(ctx context.Context, input InfoInput) map[string]string {
 	info[service.BackupStorageClassProperty] = service.BackupStorageClass(input.Datastore, input.ServiceName)
 	info[service.BackupObjectNameProperty] = service.BackupObjectName(input.Datastore, input.ServiceName)
 	info[service.BackupTimestampProperty] = strconv.FormatBool(service.BackupTimestamp(input.Datastore, input.ServiceName))
+	info[service.BackupAllDatabasesProperty] = strconv.FormatBool(service.BackupAllDatabases(input.Datastore, input.ServiceName))
 	info["custom-env"] = customEnv(serviceFiles.Env)
 	info["database-name"] = service.DatabaseName(input.Datastore, input.ServiceName)
 	// the names alone: a user's password reaches an app through its url, and

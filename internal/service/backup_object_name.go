@@ -23,6 +23,12 @@ const BackupObjectNameProperty = "backup-object-name"
 // rotate them. Empty keeps the timestamp.
 const BackupTimestampProperty = "backup-timestamp"
 
+// BackupAllDatabasesProperty says whether a service's backups hold every
+// database in it rather than only the one named for it. Empty or false keeps
+// the dump export makes, which is what a backup always held before there was
+// anything to say here, and what a restore pipeline built on that dump reads.
+const BackupAllDatabasesProperty = "backup-all-databases"
+
 // backupObjectNamePattern is what an object name may be made of: the same
 // characters a bucket name may hold, which s3 and every s3 compatible service
 // take in a key without escaping
@@ -81,4 +87,21 @@ func ValidateBackupTimestamp(value string) error {
 // ending in the time they started, which they are unless it was set to false
 func BackupTimestamp(s *Datastore, serviceName string) bool {
 	return strings.TrimSpace(common.PropertyGet(s.Properties().CommandPrefix, serviceName, BackupTimestampProperty)) != "false"
+}
+
+// ValidateBackupAllDatabases reports whether a value says whether backups hold
+// every database. An empty value is valid and backs up only the service's own.
+func ValidateBackupAllDatabases(value string) error {
+	switch strings.TrimSpace(value) {
+	case "", "true", "false":
+		return nil
+	}
+
+	return fmt.Errorf("invalid %s value %q, must be one of [true, false]", BackupAllDatabasesProperty, value)
+}
+
+// BackupAllDatabases reports whether a service's backups hold every database
+// in it, which they do only once it was set to true
+func BackupAllDatabases(s *Datastore, serviceName string) bool {
+	return strings.TrimSpace(common.PropertyGet(s.Properties().CommandPrefix, serviceName, BackupAllDatabasesProperty)) == "true"
 }

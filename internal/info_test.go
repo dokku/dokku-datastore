@@ -283,6 +283,27 @@ func TestInfoReportsTheBackupObjectKey(t *testing.T) {
 	}
 }
 
+// issue 412: backups hold only the service's own database unless told
+// otherwise, and info reports which a backup of the service will hold
+func TestInfoReportsWhetherBackupsHoldEveryDatabase(t *testing.T) {
+	datastore := service.Datastores["postgres"]
+	withInfoService(t, datastore, "lollipop")
+
+	info := Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if info[service.BackupAllDatabasesProperty] != "false" {
+		t.Errorf("expected backups to hold only the service's database by default, got %q", info[service.BackupAllDatabasesProperty])
+	}
+
+	if err := SetProperty(datastore, "lollipop", service.BackupAllDatabasesProperty, "true"); err != nil {
+		t.Fatalf("failed to set the %s property: %s", service.BackupAllDatabasesProperty, err)
+	}
+
+	info = Info(context.Background(), InfoInput{Datastore: datastore, ServiceName: "lollipop"})
+	if info[service.BackupAllDatabasesProperty] != "true" {
+		t.Errorf("expected backups to be reported as holding every database, got %q", info[service.BackupAllDatabasesProperty])
+	}
+}
+
 // The backup mailto is a property of the service, so it is reported whether or
 // not a backup is scheduled
 func TestInfoReportsTheBackupMailto(t *testing.T) {

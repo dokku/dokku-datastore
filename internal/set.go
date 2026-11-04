@@ -175,6 +175,13 @@ var SettableProperties = []SettableProperty{
 		validate:    service.ValidateBackupTimestamp,
 	},
 	{
+		Name:            service.BackupAllDatabasesProperty,
+		Description:     "`true` to back up every database in the service rather than only the one named for it",
+		Backup:          true,
+		validate:        service.ValidateBackupAllDatabases,
+		validateService: allDatabasesAccepted,
+	},
+	{
 		Name:        service.BackupMailtoProperty,
 		Description: "who cron mails the output of scheduled backups to",
 		Backup:      true,
@@ -887,7 +894,7 @@ func regenerateCrontabIfScheduled(ctx context.Context, s *service.Datastore, ser
 // The cron expression, bucket and instance role are changed with backup-schedule.
 func scheduleOverrideProperty(key string) bool {
 	switch key {
-	case service.BackupStorageClassProperty, service.BackupObjectNameProperty, service.BackupTimestampProperty, service.BackupMailtoProperty, service.KeyserverProperty, service.ExportArgsProperty, backupEncryptionPassphraseProperty, "backup-public-key-id", backupAccessKeyIDProperty, backupSecretAccessKeyProperty, "backup-default-region", "backup-signature-version", "backup-endpoint-url":
+	case service.BackupStorageClassProperty, service.BackupObjectNameProperty, service.BackupTimestampProperty, service.BackupMailtoProperty, service.KeyserverProperty, service.ExportArgsProperty, service.BackupAllDatabasesProperty, backupEncryptionPassphraseProperty, "backup-public-key-id", backupAccessKeyIDProperty, backupSecretAccessKeyProperty, "backup-default-region", "backup-signature-version", "backup-endpoint-url":
 		return true
 	default:
 		return false
@@ -1014,6 +1021,8 @@ func (b *BackupSchedule) setOverride(key string, value string) error {
 		b.Keyserver = value
 	case service.ExportArgsProperty:
 		b.ExportArgs = value
+	case service.BackupAllDatabasesProperty:
+		b.AllDatabases = strings.TrimSpace(value)
 	case backupEncryptionPassphraseProperty:
 		b.EncryptionPassphrase = value
 	case "backup-public-key-id":
@@ -1054,6 +1063,17 @@ func extraArgsAccepted(key string) func(s *service.Datastore, serviceName string
 
 		return nil
 	}
+}
+
+// allDatabasesAccepted refuses to have backups hold every database for a
+// datastore that only exports the one named for the service, so that a backup
+// is not the first thing to find out the setting can never be used
+func allDatabasesAccepted(s *service.Datastore, serviceName string, value string) error {
+	if strings.TrimSpace(value) == "true" && !s.ExportsAllDatabases() {
+		return fmt.Errorf("the %s datastore only exports the database named for the service, so %s cannot be true", s.Definition.Dokku.Plugin, service.BackupAllDatabasesProperty)
+	}
+
+	return nil
 }
 
 // validateVolumeTargets refuses to move a volume the definition the service
