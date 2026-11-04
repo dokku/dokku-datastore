@@ -53,9 +53,13 @@ setup() {
 
   run wait_for_grafana
   assert_success
+  # the image's tag is not the version of the grafana it ships, so that is
+  # read from the image itself
+  local grafana_version
+  grafana_version="$(docker container run --rm --entrypoint grafana "$IMAGE:$IMAGE_VERSION" --version | awk '{ print $NF }')"
   run grafana http://127.0.0.1:80/api/health
   assert_success
-  assert_output --partial "\"version\": \"$IMAGE_VERSION\""
+  assert_output --partial "\"version\": \"$grafana_version\""
 }
 
 @test "($DEFINITION) the upgraded service keeps its metrics" {
