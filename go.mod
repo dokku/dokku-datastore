@@ -6,7 +6,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/distribution/reference v0.6.0
 	github.com/docker/go-units v0.5.0
-	github.com/dokku/docker-port-forward v0.0.0-20261105045244-b1a47e72446e
+	github.com/dokku/docker-port-forward v0.0.0-20261105051345-e35b7af5a11c
 	github.com/dokku/dokku/plugins/common v0.0.0-20261102053158-1910c3fb682a
 	github.com/dokku/dokku/plugins/docker-options v0.0.0-20261102053158-1910c3fb682a
 	github.com/josegonzalez/cli-skeleton v0.25.0
