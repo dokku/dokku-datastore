@@ -48,17 +48,13 @@ jobs:
       - name: Build binaries
         run: |
           mkdir -p dist
-          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64; do
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
             goos="${target%/*}"
             goarch="${target#*/}"
-            extension=""
-            if [[ "$goos" == "windows" ]]; then
-              extension=".exe"
-            fi
 
             CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -v -trimpath \
               -ldflags "-s -w -X main.Version=${{ github.ref_name }}" \
-              -o "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-${goos}-${goarch}${extension}"
+              -o "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-${goos}-${goarch}"
           done
 
       - name: Attest Build Provenance - darwin-amd64
@@ -69,7 +65,6 @@ jobs:
             dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-darwin-arm64
             dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-amd64
             dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-arm64
-            dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-windows-amd64.exe
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
