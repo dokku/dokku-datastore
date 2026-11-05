@@ -998,8 +998,14 @@ const AmbassadorSourceRangeLabel = "dokku.ambassador.source-range"
 // published carries, so one of those fronting a udp port is replaced.
 const AmbassadorUDPPortsLabel = "dokku.ambassador.udp-ports"
 
+// AmbassadorNetworkLabel is the label an ambassador carries naming the network
+// it joined to reach the service. Unset when it was made before the label
+// existed, which is when it may have joined an internal link network, from
+// which docker publishes nothing, so one of those is replaced.
+const AmbassadorNetworkLabel = "dokku.ambassador.network"
+
 // ambassadorSettings are the service properties an ambassador is made from
-// that a running one cannot take on: a change to either only reaches the
+// that a running one cannot take on: a change to any of them only reaches the
 // service through a new ambassador.
 type ambassadorSettings struct {
 	// Address is the port-bind-address, empty for every interface
@@ -1011,16 +1017,43 @@ type ambassadorSettings struct {
 	// UDPPorts are the container ports forwarded over udp, comma separated,
 	// empty when there are none
 	UDPPorts string
+
+	// Network is the network the ambassador joins to reach the service, empty
+	// when the service container is on none it can join
+	Network string
+
+	// Image is the image the ambassador is made from
+	Image string
 }
 
 // serviceAmbassadorSettings are the settings a service's ambassador should be
-// made with.
-func serviceAmbassadorSettings(s *Datastore, serviceName string) ambassadorSettings {
+// made with, but for the network, which is the service container's rather
+// than the service's.
+func serviceAmbassadorSettings(s *Datastore, serviceName string, image string) ambassadorSettings {
 	return ambassadorSettings{
 		Address:     ServicePortBindAddress(s, serviceName),
 		SourceRange: ServicePortSourceRange(s, serviceName),
 		UDPPorts:    udpPorts(s.Properties()),
+		Image:       image,
 	}
+}
+
+// ambassadorNetwork is the network a service container's ambassador joins: the
+// one the container was made on, which is the default bridge or its
+// initial-network. Every other network it is on was attached after it was
+// made, and one of those may be an internal link network, from which docker
+// publishes no ports. Taken from the container rather than the property, so
+// an initial-network changed since the container was made is not a network it
+// is on. Empty for a container that shares another's network, or none.
+func ambassadorNetwork(mode string) string {
+	switch {
+	case mode == "default":
+		return "bridge"
+	case mode == "", mode == "host", mode == "none", strings.HasPrefix(mode, "container:"):
+		return ""
+	}
+
+	return mode
 }
 
 // udpPorts are a datastore's container ports that speak udp, comma separated
@@ -1039,6 +1072,20 @@ func udpPorts(properties ServiceStruct) string {
 // by that name.
 func ambassadorLabel(ambassadorName string, label string) string {
 	value, _ := common.DockerInspect(ambassadorName, fmt.Sprintf("{{ index .Config.Labels %q }}", label))
+	return value
+}
+
+// ambassadorImageName is the image an ambassador was made from, as it was
+// named when it was made, rather than the image id that name pointed at.
+func ambassadorImageName(ambassadorName string) string {
+	value, _ := common.DockerInspect(ambassadorName, "{{ .Config.Image }}")
+	return value
+}
+
+// containerNetworkMode is the network mode a container was made with, empty
+// when it cannot be inspected.
+func containerNetworkMode(containerID string) string {
+	value, _ := common.DockerInspect(containerID, "{{ .HostConfig.NetworkMode }}")
 	return value
 }
 
@@ -1192,9 +1239,6 @@ type ambassadorForwardOptionsInput struct {
 	// address alone
 	HostPorts []string
 
-	// Image is the ambassador image
-	Image string
-
 	// LogConfig is the logging the service container was given
 	LogConfig LogConfig
 
@@ -1205,7 +1249,8 @@ type ambassadorForwardOptionsInput struct {
 	// docker-port-forward reads an empty policy as unless-stopped
 	RestartPolicy string
 
-	// Settings are the service's port-bind-address and port-source-range
+	// Settings are the service's port-bind-address, port-source-range, the
+	// network the ambassador joins and the image it is made from
 	Settings ambassadorSettings
 }
 
@@ -1250,6 +1295,9 @@ func ambassadorForwardOptions(input ambassadorForwardOptionsInput) portforward.O
 	if input.Settings.UDPPorts != "" {
 		labels[AmbassadorUDPPortsLabel] = input.Settings.UDPPorts
 	}
+	if input.Settings.Network != "" {
+		labels[AmbassadorNetworkLabel] = input.Settings.Network
+	}
 
 	return portforward.Options{
 		Target:              "container/" + input.ContainerID,
@@ -1259,7 +1307,8 @@ func ambassadorForwardOptions(input ambassadorForwardOptionsInput) portforward.O
 		Detach:              true,
 		RestartPolicy:       render.RestartPolicy(input.RestartPolicy),
 		Name:                input.AmbassadorName,
-		HelperImage:         input.Image,
+		Network:             input.Settings.Network,
+		HelperImage:         input.Settings.Image,
 		Pull:                portforward.PullNever,
 		TCPHalfCloseTimeout: AmbassadorHalfCloseTimeout,
 
@@ -1303,6 +1352,11 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 	portFile := Files(input.Datastore, input.ServiceName).Port
 	ambassadorName := AmbassadorContainerName(input.Datastore, input.ServiceName)
 
+	ambassadorImage, err := AmbassadorImage(input.Datastore)
+	if err != nil {
+		return err
+	}
+
 	state := ambassadorState{
 		Exposed: common.FileExists(portFile) && common.ReadFirstLine(portFile) != "",
 		Status:  backend.Status(ctx, ambassadorName),
@@ -1310,19 +1364,23 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 			Datastore:   input.Datastore,
 			ServiceName: input.ServiceName,
 		}),
-		Settings: serviceAmbassadorSettings(input.Datastore, input.ServiceName),
+		Settings: serviceAmbassadorSettings(input.Datastore, input.ServiceName, ambassadorImage),
 		Direct:   ServiceExposeMode(input.Datastore, input.ServiceName) == ExposeModeDirect,
 	}
 	state.PublishesDirectly = len(ContainerPublishedPorts(state.ServiceID)) > 0
+	if state.ServiceID != "" {
+		state.Settings.Network = ambassadorNetwork(containerNetworkMode(state.ServiceID))
+	}
 	if state.Exposed && state.Status != "missing" {
 		state.FrontedID = ambassadorLabel(ambassadorName, AmbassadorContainerIDLabel)
 		state.FrontedSettings = ambassadorSettings{
 			Address:     ambassadorLabel(ambassadorName, AmbassadorAddressLabel),
 			SourceRange: ambassadorLabel(ambassadorName, AmbassadorSourceRangeLabel),
 			UDPPorts:    ambassadorLabel(ambassadorName, AmbassadorUDPPortsLabel),
+			Network:     ambassadorLabel(ambassadorName, AmbassadorNetworkLabel),
+			Image:       ambassadorImageName(ambassadorName),
 		}
 
-		var err error
 		state.Managed, state.Stale, err = inspectAmbassador(ctx, ambassadorName)
 		if err != nil {
 			return err
@@ -1360,7 +1418,7 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		Action:      "port publishing",
 		Datastore:   input.Datastore,
 		ServiceName: input.ServiceName,
-		TaggedImage: hostenv.AmbassadorImage,
+		TaggedImage: ambassadorImage,
 	}); err != nil {
 		return err
 	}
@@ -1383,7 +1441,6 @@ func ServicePortReconcileStatus(ctx context.Context, input ServicePortReconcileS
 		ContainerPorts:     serviceProperties.Ports,
 		ContainerProtocols: serviceProperties.Protocols,
 		HostPorts:          hostPorts,
-		Image:              hostenv.AmbassadorImage,
 		LogConfig:          logConfig,
 		RestartPolicy:      ServiceRestartPolicy(input.Datastore, input.ServiceName),
 		Settings:           state.Settings,

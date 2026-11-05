@@ -24,6 +24,31 @@ setup() {
   # the ports the first expose landed on, kept for the tests that need ports
   # known to be free
   EXPOSED_PORTS_FILE="$BATS_FILE_TMPDIR/exposed-ports"
+
+  # an internal network the service is put on the way a link puts it on one
+  INTERNAL_NETWORK="$(service_container).ci-expose-app"
+
+  # the image the ambassador is made from when nothing says otherwise, read from
+  # the source rather than repeated here so a bump cannot leave this behind
+  DEFAULT_AMBASSADOR_IMAGE="$(awk -F'"' '/DefaultAmbassadorImage = / { print $2; exit }' "$REPO_ROOT/internal/hostenv/hostenv.go")"
+}
+
+teardown() {
+  # a failed test can leave the service on the internal network, or the plugin
+  # told to make its ambassador from another image, which every later test
+  # would find
+  if docker network inspect "$INTERNAL_NETWORK" >/dev/null 2>/dev/null; then
+    docker network disconnect --force "$INTERNAL_NETWORK" "$(service_container)" >/dev/null 2>/dev/null || true
+    docker network rm "$INTERNAL_NETWORK" >/dev/null 2>/dev/null || true
+  fi
+  "$BIN" set --global "$PLUGIN" ambassador-image >/dev/null 2>/dev/null || true
+}
+
+# puts the service container on an internal network, the way linking it to an
+# app does
+join_internal_network() {
+  docker network create --internal "$INTERNAL_NETWORK" >/dev/null
+  docker network connect "$INTERNAL_NETWORK" "$(service_container)"
 }
 
 # the ambassador is up, was made by docker-port-forward rather than with a
@@ -56,7 +81,22 @@ assert_ambassador() {
   host_port="${host_port##*:}"
   [[ "$published" == *":$host_port"* ]] || fail "$step: expected port $host_port to be published, got '$published'"
 
+  assert_ambassador_network "$step"
   assert_protocols "$step"
+}
+
+# the ambassador is on the network the service container was made on, which is
+# the default bridge here, and on nothing else. Docker publishes no ports from a
+# container whose only network is internal, so one on a link network reports
+# its ports as published while nothing listens on them
+assert_ambassador_network() {
+  local step="$1" label networks
+  label="$(container_inspect "$AMBASSADOR" '{{ index .Config.Labels "dokku.ambassador.network" }}')"
+  [[ "$label" == "bridge" ]] || fail "$step: expected the ambassador to record the bridge network, got '$label'"
+
+  # shellcheck disable=SC2016
+  networks="$(container_inspect "$AMBASSADOR" '{{ range $name, $_ := .NetworkSettings.Networks }}{{ $name }} {{ end }}')"
+  [[ "$networks" == "bridge " ]] || fail "$step: expected the ambassador on the bridge network alone, got '$networks'"
 }
 
 # every port is published and forwarded over the protocol its definition
@@ -256,8 +296,7 @@ expected_exposed_dsn() {
 
   # the ambassador image, read from the source rather than repeated here so a bump
   # cannot leave this making an ambassador out of an image nothing runs
-  local ambassador_image service_id mapping mappings
-  ambassador_image="$(awk -F'"' '/AmbassadorImage = / { print $2; exit }' "$REPO_ROOT/internal/hostenv/hostenv.go")"
+  local service_id mapping mappings
   service_id="$(container_inspect "$(service_container)" '{{ .Id }}')"
 
   local legacy_publish=()
@@ -269,11 +308,119 @@ expected_exposed_dsn() {
   docker container rm --force "$AMBASSADOR" >/dev/null
   docker container run -d --link "$(service_container):$PLUGIN" --name "$AMBASSADOR" --restart=always \
     --label dokku=ambassador --label "dokku.ambassador=$PLUGIN" --label "dokku.ambassador.container-id=$service_id" \
-    "${legacy_publish[@]}" "$ambassador_image" >/dev/null
+    "${legacy_publish[@]}" "$DEFAULT_AMBASSADOR_IMAGE" >/dev/null
 
   run "$BIN" start "$PLUGIN" "$SERVICE"
   assert_success
   assert_ambassador "start over a legacy ambassador"
+}
+
+@test "($DEFINITION) an exposed service on an internal network publishes its ports" {
+  # a link puts the service on an internal network, and the ambassador used to
+  # join it rather than the bridge, since it was the first network the service
+  # was on that was not the bridge
+  join_internal_network
+  docker container rm --force "$AMBASSADOR" >/dev/null
+
+  run "$BIN" start "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_ambassador "start of a service on an internal network"
+}
+
+@test "($DEFINITION) start replaces an ambassador stuck on an internal network" {
+  # made the way the plugin made it before it named the network the ambassador
+  # joins: on the internal network alone, so it publishes nothing, and with no
+  # label saying which network it is on
+  local service_id mapping mappings
+  join_internal_network
+  service_id="$(container_inspect "$(service_container)" '{{ .Id }}')"
+
+  local stuck_publish=()
+  read -r -a mappings <"$EXPOSED_PORTS_FILE"
+  for mapping in "${mappings[@]}"; do
+    stuck_publish+=("--publish=${mapping#*->}:${mapping%%->*}")
+  done
+
+  docker container rm --force "$AMBASSADOR" >/dev/null
+  docker container run -d --network "$INTERNAL_NETWORK" --name "$AMBASSADOR" --restart=always \
+    --label dokku=ambassador --label "dokku.ambassador=$PLUGIN" --label "dokku.ambassador.container-id=$service_id" \
+    --label com.dokku.port-forward=true --label "com.dokku.port-forward.target=$service_id" \
+    --label "com.dokku.port-forward.target-network=$INTERNAL_NETWORK" --label "com.dokku.port-forward.target-address=$(service_container)" \
+    "${stuck_publish[@]}" "$DEFAULT_AMBASSADOR_IMAGE" >/dev/null
+
+  run "$BIN" start "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_ambassador "start over an ambassador stuck on an internal network"
+}
+
+@test "($DEFINITION) reexpose makes the ambassador from the ambassador-image global property" {
+  local image="${DEFAULT_AMBASSADOR_IMAGE%:*}:ci-global"
+  docker image tag "$DEFAULT_AMBASSADOR_IMAGE" "$image"
+
+  run "$BIN" set --global "$PLUGIN" ambassador-image "$image"
+  assert_success
+  run "$BIN" reexpose "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_ambassador "reexpose with an ambassador-image global property"
+  run container_inspect "$AMBASSADOR" '{{ .Config.Image }}'
+  assert_output "$image"
+
+  # and back to the image the plugin pins once it is cleared
+  run "$BIN" set --global "$PLUGIN" ambassador-image
+  assert_success
+  run "$BIN" reexpose "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_ambassador "reexpose with the ambassador-image global property cleared"
+  run container_inspect "$AMBASSADOR" '{{ .Config.Image }}'
+  assert_output "$DEFAULT_AMBASSADOR_IMAGE"
+
+  docker image rm "$image" >/dev/null
+}
+
+@test "($DEFINITION) PLUGIN_AMBASSADOR_IMAGE wins over the ambassador-image global property" {
+  local global="${DEFAULT_AMBASSADOR_IMAGE%:*}:ci-global" variable="${DEFAULT_AMBASSADOR_IMAGE%:*}:ci-variable"
+  docker image tag "$DEFAULT_AMBASSADOR_IMAGE" "$global"
+  docker image tag "$DEFAULT_AMBASSADOR_IMAGE" "$variable"
+
+  run "$BIN" set --global "$PLUGIN" ambassador-image "$global"
+  assert_success
+  PLUGIN_AMBASSADOR_IMAGE="$variable" run "$BIN" reexpose "$PLUGIN" "$SERVICE"
+  assert_success
+  assert_ambassador "reexpose with PLUGIN_AMBASSADOR_IMAGE"
+  run container_inspect "$AMBASSADOR" '{{ .Config.Image }}'
+  assert_output "$variable"
+
+  run "$BIN" set --global "$PLUGIN" ambassador-image
+  assert_success
+  run "$BIN" reexpose "$PLUGIN" "$SERVICE"
+  assert_success
+  docker image rm "$global" "$variable" >/dev/null
+}
+
+@test "($DEFINITION) --ambassador-image wins over PLUGIN_AMBASSADOR_IMAGE" {
+  local variable="${DEFAULT_AMBASSADOR_IMAGE%:*}:ci-variable" flag="${DEFAULT_AMBASSADOR_IMAGE%:*}:ci-flag"
+  docker image tag "$DEFAULT_AMBASSADOR_IMAGE" "$variable"
+  docker image tag "$DEFAULT_AMBASSADOR_IMAGE" "$flag"
+
+  PLUGIN_AMBASSADOR_IMAGE="$variable" run "$BIN" reexpose "$PLUGIN" "$SERVICE" --ambassador-image "$flag"
+  assert_success
+  assert_ambassador "reexpose with --ambassador-image"
+  run container_inspect "$AMBASSADOR" '{{ .Config.Image }}'
+  assert_output "$flag"
+
+  run "$BIN" reexpose "$PLUGIN" "$SERVICE"
+  assert_success
+  docker image rm "$variable" "$flag" >/dev/null
+}
+
+@test "($DEFINITION) --ambassador-image without a tag is refused" {
+  local ambassador_before
+  ambassador_before="$(ambassador_id)"
+
+  run --separate-stderr "$BIN" reexpose "$PLUGIN" "$SERVICE" --ambassador-image "${DEFAULT_AMBASSADOR_IMAGE%:*}"
+  assert_failure
+  assert_stderr --partial "invalid --ambassador-image flag"
+  [[ "$(ambassador_id)" == "$ambassador_before" ]] || fail "expected a refused image to leave the ambassador alone"
 }
 
 @test "($DEFINITION) the ambassador restarts the way its service does" {

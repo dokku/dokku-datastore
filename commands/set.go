@@ -23,6 +23,8 @@ type SetCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+	// AmbassadorImageFlagCommand is the ambassador image flag command
+	AmbassadorImageFlagCommand
 
 	// allowRestart is whether a property that only takes effect once the
 	// service is restarted or reexposed has that done for it, when its value
@@ -136,6 +138,7 @@ func (c *SetCommand) ParsedArguments(args []string) (map[string]command.Argument
 func (c *SetCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	c.AmbassadorImageFlags(f)
 	f.BoolVar(&c.global, "global", false, "set the property for every service of the datastore, taking <datastore-type> <key> [<value>] with no service name")
 	f.BoolVar(&c.allowRestart, "allow-restart", false, "restart or reexpose the service when the property only takes effect that way and its value changed")
 	f.BoolVar(&c.noRestart, "no-restart", false, "do not restart the linked apps when a password change updates the url they hold")
@@ -148,6 +151,7 @@ func (c *SetCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
+		c.AutocompleteAmbassadorImageFlags(),
 		complete.Flags{
 			"--allow-restart": complete.PredictNothing,
 			"--global":        complete.PredictNothing,
@@ -184,6 +188,10 @@ func (c *SetCommand) Run(args []string) int {
 	}
 
 	logger = c.Logger(c.Ui)
+	if err := c.ApplyAmbassadorImage(); err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
+	}
 
 	if c.global {
 		return c.runGlobal(logger, flags.Args())

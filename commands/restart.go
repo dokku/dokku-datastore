@@ -21,6 +21,8 @@ type RestartCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+	// AmbassadorImageFlagCommand is the ambassador image flag command
+	AmbassadorImageFlagCommand
 }
 
 // Name returns the name of the command
@@ -78,6 +80,7 @@ func (c *RestartCommand) ParsedArguments(args []string) (map[string]command.Argu
 func (c *RestartCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	c.AmbassadorImageFlags(f)
 	return f
 }
 
@@ -86,6 +89,7 @@ func (c *RestartCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
+		c.AutocompleteAmbassadorImageFlags(),
 		complete.Flags{},
 	)
 }
@@ -117,6 +121,10 @@ func (c *RestartCommand) Run(args []string) int {
 	}
 
 	logger = c.Logger(c.Ui)
+	if err := c.ApplyAmbassadorImage(); err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
+	}
 
 	arguments, err := c.ParsedArguments(flags.Args())
 	if err != nil {
