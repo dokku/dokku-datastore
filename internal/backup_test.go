@@ -376,14 +376,15 @@ func TestScheduleBackupRoundTrip(t *testing.T) {
 		t.Fatalf("failed to report the schedule: %s", err)
 	}
 	expectedReport := BackupScheduleReport{
-		ID:          BackupScheduleIDDefault,
-		Schedule:    "0 3 * * *",
-		BucketName:  "my-bucket",
-		UseIAM:      true,
-		Timestamp:   "true",
-		Mailto:      "ops@example.com",
-		Overrides:   []string{},
-		CrontabLine: strings.TrimSuffix(contents, "\n"),
+		ID:           BackupScheduleIDDefault,
+		Schedule:     "0 3 * * *",
+		BucketName:   "my-bucket",
+		UseIAM:       true,
+		Timestamp:    "true",
+		AllDatabases: "false",
+		Mailto:       "ops@example.com",
+		Overrides:    []string{},
+		CrontabLine:  strings.TrimSuffix(contents, "\n"),
 	}
 	if !reflect.DeepEqual(report, expectedReport) {
 		t.Errorf("expected %+v, got %+v", expectedReport, report)
@@ -1220,40 +1221,105 @@ func TestSetBackupEncryptionKeepsThePassphrasePrivate(t *testing.T) {
 	}
 }
 
-// A backup holds every database wherever the datastore can export them, and the
-// single dump it always made wherever it cannot.
-func TestBackupExportCoversEveryDatabase(t *testing.T) {
-	tests := map[string]bool{
-		"clickhouse": true,
-		"couchdb":    true,
-		"mariadb":    true,
-		"mongo":      true,
-		"mysql":      true,
-		"postgres":   true,
-		"redis":      false,
+// A backup is the dump export makes of the service's own database unless it
+// is asked for every database, so that a restore built on that dump keeps
+// reading it. Issue 412: a postgres backup had become plain sql pg_restore
+// refused.
+func TestBackupExportIsTheServicesOwnDatabaseByDefault(t *testing.T) {
+	for _, allDatabases := range []bool{false, true} {
+		datastore := service.Datastores["postgres"]
+
+		var dump bytes.Buffer
+		input := backupExport(datastore, "lollipop", &dump, allDatabases)
+		if input.AllDatabases != allDatabases {
+			t.Errorf("expected a backup of every database=%t, got %t", allDatabases, input.AllDatabases)
+		}
+
+		if input.ServiceName != "lollipop" || input.Writer != &dump || input.Datastore != datastore {
+			t.Errorf("expected the export of lollipop into the backup's file, got %+v", input)
+		}
+
+		if len(input.ExtraArgs) != 0 {
+			t.Errorf("expected the backup to leave the arguments to the export-args property, got %q", input.ExtraArgs)
+		}
+	}
+}
+
+// Whether a backup holds every database is the backup command's flag when it
+// was given, then the schedule's own setting, then the service's, and only
+// the service's own database when nothing says otherwise.
+func TestBackupAllDatabasesResolution(t *testing.T) {
+	yes, no := true, false
+	tests := []struct {
+		name     string
+		service  string
+		schedule string
+		flag     *bool
+		expected bool
+	}{
+		{name: "nothing set", expected: false},
+		{name: "service on", service: "true", expected: true},
+		{name: "service off", service: "false", expected: false},
+		{name: "schedule on over the service", service: "false", schedule: "true", expected: true},
+		{name: "schedule off over the service", service: "true", schedule: "false", expected: false},
+		{name: "flag on over both", service: "false", schedule: "false", flag: &yes, expected: true},
+		{name: "flag off over both", service: "true", schedule: "true", flag: &no, expected: false},
 	}
 
-	for name, expected := range tests {
-		t.Run(name, func(t *testing.T) {
-			datastore, ok := service.Datastores[name]
-			if !ok {
-				t.Fatalf("expected %s to be registered", name)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			withScheduleService(t)
+			datastore := service.Datastores["postgres"]
+			if test.service != "" {
+				if err := common.PropertyWrite(datastore.Properties().CommandPrefix, "lollipop", service.BackupAllDatabasesProperty, test.service); err != nil {
+					t.Fatalf("failed to write the property: %s", err)
+				}
 			}
 
-			var dump bytes.Buffer
-			input := backupExport(datastore, "lollipop", &dump)
-			if input.AllDatabases != expected {
-				t.Errorf("expected a backup of every database=%t, got %t", expected, input.AllDatabases)
+			allDatabases, err := backupAllDatabases(datastore, "lollipop", BackupSchedule{AllDatabases: test.schedule}, test.flag)
+			if err != nil {
+				t.Fatalf("expected no error, got %s", err)
 			}
 
-			if input.ServiceName != "lollipop" || input.Writer != &dump || input.Datastore != datastore {
-				t.Errorf("expected the export of lollipop into the backup's file, got %+v", input)
-			}
-
-			if len(input.ExtraArgs) != 0 {
-				t.Errorf("expected the backup to leave the arguments to the export-args property, got %q", input.ExtraArgs)
+			if allDatabases != test.expected {
+				t.Errorf("expected a backup of every database=%t, got %t", test.expected, allDatabases)
 			}
 		})
+	}
+}
+
+// A datastore that only exports the database named for the service refuses
+// a backup of every database rather than shipping the single dump, which an
+// import with --all-databases could not load, whichever setting asked for it.
+func TestBackupAllDatabasesRefusedWhereEveryDatabaseCannotBeExported(t *testing.T) {
+	yes, no := true, false
+	withScheduleService(t, "lollipop")
+	datastore := service.Datastores["redis"]
+
+	allDatabases, err := backupAllDatabases(datastore, "lollipop", BackupSchedule{}, nil)
+	if err != nil || allDatabases {
+		t.Fatalf("expected the service's own dump without an error, got %t and %v", allDatabases, err)
+	}
+
+	if _, err := backupAllDatabases(datastore, "lollipop", BackupSchedule{}, &no); err != nil {
+		t.Errorf("expected --all-databases=false to be accepted, got %s", err)
+	}
+
+	for name, schedule := range map[string]BackupSchedule{"flag": {}, "schedule": {AllDatabases: "true"}} {
+		flag := &yes
+		if name == "schedule" {
+			flag = nil
+		}
+
+		_, err := backupAllDatabases(datastore, "lollipop", schedule, flag)
+		if err == nil {
+			t.Errorf("expected the %s asking for every database to be refused", name)
+			continue
+		}
+
+		if !strings.Contains(err.Error(), service.BackupAllDatabasesProperty) {
+			t.Errorf("expected the error to name %s, got %q", service.BackupAllDatabasesProperty, err)
+		}
 	}
 }
 
@@ -1515,6 +1581,90 @@ func TestMultipleBackupSchedules(t *testing.T) {
 	}
 	if schedule, ok := ReadBackupSchedule(datastore, "lollipop"); !ok || schedule.ID != BackupScheduleIDDefault || schedule.BucketName != "my-bucket" {
 		t.Errorf("expected the default schedule to remain, got %+v", schedule)
+	}
+}
+
+// A schedule can decide for itself whether its backups hold every database,
+// and one that does not inherits the service's backup-all-databases. The
+// default schedule keeps its setting through the three properties it is
+// recorded in, and a datastore that only exports the service's own database
+// refuses the setting on a schedule as it does on the service.
+func TestBackupScheduleAllDatabases(t *testing.T) {
+	withScheduleService(t, "lollipop")
+	ctx := t.Context()
+	datastore := service.Datastores["postgres"]
+
+	for _, input := range []ScheduleBackupInput{
+		{Schedule: "0 3 * * *", BucketName: "my-bucket"},
+		{ID: "monthly", Schedule: "@monthly", BucketName: "bucket-c"},
+	} {
+		input.Datastore = datastore
+		input.ServiceName = "lollipop"
+		if err := ScheduleBackup(ctx, input); err != nil {
+			t.Fatalf("failed to schedule %q: %s", input.ID, err)
+		}
+	}
+
+	reportOf := func(id string) BackupScheduleReport {
+		t.Helper()
+		value, _, err := BackupScheduleCatOutput(datastore, "lollipop", id)
+		if err != nil {
+			t.Fatalf("failed to cat the %s schedule: %s", id, err)
+		}
+		return value.(BackupScheduleReport)
+	}
+
+	if report := reportOf("monthly"); report.AllDatabases != "false" || len(report.Overrides) != 0 {
+		t.Errorf("expected a schedule to back up only the service's database by default, got %+v", report)
+	}
+
+	err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "monthly", service.BackupAllDatabasesProperty, "yes")
+	if err == nil || !strings.Contains(err.Error(), service.BackupAllDatabasesProperty) {
+		t.Errorf("expected a value other than true or false to be refused, got %v", err)
+	}
+
+	if err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "monthly", service.BackupAllDatabasesProperty, "true"); err != nil {
+		t.Fatalf("failed to set the schedule's backup-all-databases: %s", err)
+	}
+	if report := reportOf("monthly"); report.AllDatabases != "true" || !slices.Equal(report.Overrides, []string{service.BackupAllDatabasesProperty}) {
+		t.Errorf("expected the monthly schedule to back up every database, got %+v", report)
+	}
+	if report := reportOf(BackupScheduleIDDefault); report.AllDatabases != "false" {
+		t.Errorf("expected the default schedule to inherit the service's setting, got %+v", report)
+	}
+
+	// the service's setting reaches every schedule that did not set its own,
+	// and a schedule that turned it off keeps it off
+	if err := SetProperty(datastore, "lollipop", service.BackupAllDatabasesProperty, "true"); err != nil {
+		t.Fatalf("failed to set the service's backup-all-databases: %s", err)
+	}
+	if err := SetBackupScheduleOverride(ctx, datastore, "lollipop", BackupScheduleIDDefault, service.BackupAllDatabasesProperty, "false"); err != nil {
+		t.Fatalf("failed to set the default schedule's backup-all-databases: %s", err)
+	}
+	if schedule, ok := ReadBackupSchedule(datastore, "lollipop"); !ok || schedule.AllDatabases != "false" {
+		t.Errorf("expected the default schedule to keep its own setting, got %+v", schedule)
+	}
+	if report := reportOf(BackupScheduleIDDefault); report.AllDatabases != "false" {
+		t.Errorf("expected the default schedule to back up only the service's database, got %+v", report)
+	}
+
+	if err := SetBackupScheduleOverride(ctx, datastore, "lollipop", "monthly", service.BackupAllDatabasesProperty, ""); err != nil {
+		t.Fatalf("failed to clear the schedule's backup-all-databases: %s", err)
+	}
+	if report := reportOf("monthly"); report.AllDatabases != "true" || len(report.Overrides) != 0 {
+		t.Errorf("expected the cleared schedule to inherit the service's setting, got %+v", report)
+	}
+
+	redis := service.Datastores["redis"]
+	if err := ScheduleBackup(ctx, ScheduleBackupInput{Datastore: redis, ServiceName: "lollipop", ID: "monthly", Schedule: "@monthly", BucketName: "bucket-c"}); err != nil {
+		t.Fatalf("failed to schedule the redis backup: %s", err)
+	}
+	err = SetBackupScheduleOverride(ctx, redis, "lollipop", "monthly", service.BackupAllDatabasesProperty, "true")
+	if err == nil || !strings.Contains(err.Error(), service.BackupAllDatabasesProperty) {
+		t.Errorf("expected redis to refuse a schedule backing up every database, got %v", err)
+	}
+	if err := SetBackupScheduleOverride(ctx, redis, "lollipop", "monthly", service.BackupAllDatabasesProperty, "false"); err != nil {
+		t.Errorf("expected redis to accept a schedule backing up only the service's database, got %s", err)
 	}
 }
 

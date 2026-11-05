@@ -38,7 +38,7 @@ func (c *BackupCommand) Description() string {
 
 // Usage returns the argument sketch rendered after the command name
 func (c *BackupCommand) Usage() string {
-	return `<service> <bucket-name> [--id <id>] [-u|--use-iam]`
+	return `<service> <bucket-name> [--id <id>] [-u|--use-iam]{{if .AllDatabases}} [--all-databases]{{end}}`
 }
 
 // Documentation returns the long form documentation for the command
@@ -51,10 +51,12 @@ dokku {{.Command "backup"}} lollipop my-s3-bucket --id monthly
 backup the 'lollipop' service under a path in the bucket
 dokku {{.Command "backup"}} lollipop my-s3-bucket/{{.CommandPrefix}}-backups
 {{- if .AllDatabases}}
-a backup holds every database in the service, so it is restored with --all-databases (assuming it was extracted via 'tar -xf backup.tgz')
-dokku {{.Command "import"}} lollipop --all-databases < backup-folder/export
-a backup made by an older version of the plugin holds only the database named for the service, and is restored without it
+a backup holds the database named for the service, in the format export writes, and is restored without --all-databases (assuming it was extracted via 'tar -xf backup.tgz')
 dokku {{.Command "import"}} lollipop < backup-folder/export
+backup every database in the service rather than only the one named for it. the backup-all-databases property does the same for every backup, scheduled ones included, and --all-databases=false overrides it
+dokku {{.Command "backup"}} lollipop my-s3-bucket --all-databases
+a backup of every database, including one made by a version of the plugin that always backed up every database, is restored with --all-databases
+dokku {{.Command "import"}} lollipop --all-databases < backup-folder/export
 {{- else}}
 restore a backup file (assuming it was extracted via 'tar -xf backup.tgz')
 dokku {{.Command "import"}} lollipop < backup-folder/export
@@ -641,7 +643,7 @@ a dump that is already on the dokku host can be imported with --file.
 the path is on the dokku host, not on the machine running ssh.
 dokku {{.Command "import"}} lollipop --file /var/lib/dokku/data/storage/data.dump
 {{- if .AllDatabases}}
-a dump of every database, as written by export --all-databases or a backup, is imported with --all-databases.
+a dump of every database, as written by export --all-databases or backup --all-databases, is imported with --all-databases.
 each database in the dump is replaced under the name it was exported from, and any other database is left alone.
 dokku {{.Command "import"}} lollipop --all-databases < all.dump
 {{- end}}

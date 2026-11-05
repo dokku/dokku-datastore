@@ -11,8 +11,8 @@ import (
 )
 
 // --all-databases is documented, in the usage, the prose and the flag list, only
-// for a datastore that can export and import every database, and a backup says
-// how to restore what it holds.
+// for a datastore that can export and import every database, backup included,
+// whose backups hold only the service's own database unless it is given.
 func TestAllDatabasesIsDocumentedWhereItIsTaken(t *testing.T) {
 	commands := []internal.PluginCommand{&ExportCommand{}, &ImportCommand{}, &BackupCommand{}}
 
@@ -49,11 +49,6 @@ func TestAllDatabasesIsDocumentedWhereItIsTaken(t *testing.T) {
 
 				if strings.Contains(documentation, "\n\n") {
 					t.Errorf("expected the %s documentation to have no blank lines left by the conditionals", c.Name())
-				}
-
-				// backup takes no such flag: it always holds every database it can
-				if c.Name() == "backup" {
-					continue
 				}
 
 				if actual := strings.Contains(usage, "[--all-databases]"); actual != expected {

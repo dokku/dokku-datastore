@@ -88,17 +88,39 @@ const (
 	backupArchiveExport = "backup/export"
 )
 
-// backupExport is the export a backup is made from. It holds every database
-// rather than the one named for the service, wherever the datastore can export
-// them: an app free to make databases of its own on the server would otherwise
-// be backed up without them, with nothing to say so.
-func backupExport(s *service.Datastore, serviceName string, w io.Writer) service.ExportServiceInput {
+// backupExport is the export a backup is made from. Unless it was asked for
+// every database, it is the dump export makes of the database named for the
+// service, in the format that export writes: a backup that quietly became a
+// dump of every database changed format under every restore built on it, such
+// as a postgres backup pg_restore could no longer read.
+func backupExport(s *service.Datastore, serviceName string, w io.Writer, allDatabases bool) service.ExportServiceInput {
 	return service.ExportServiceInput{
 		Datastore:    s,
 		ServiceName:  serviceName,
 		Writer:       w,
-		AllDatabases: s.ExportsAllDatabases(),
+		AllDatabases: allDatabases,
 	}
+}
+
+// backupAllDatabases decides whether a backup holds every database. The
+// backup command's flag wins when it was given, then the schedule's own
+// setting, then the service's. A backup that would hold every database of a
+// datastore that cannot export them is refused rather than shipped as the
+// single dump, which a restore with import --all-databases could not load.
+func backupAllDatabases(s *service.Datastore, serviceName string, schedule BackupSchedule, flag *bool) (bool, error) {
+	allDatabases := service.BackupAllDatabases(s, serviceName)
+	if schedule.AllDatabases != "" {
+		allDatabases = schedule.AllDatabases == "true"
+	}
+	if flag != nil {
+		allDatabases = *flag
+	}
+
+	if err := allDatabasesAccepted(s, serviceName, strconv.FormatBool(allDatabases)); err != nil {
+		return false, err
+	}
+
+	return allDatabases, nil
 }
 
 // backupArchive writes the tar stream the backup image reads from stdin: the
@@ -576,6 +598,11 @@ type BackupSchedule struct {
 	// empty when it inherits the service's export-args.
 	ExportArgs string `json:"export-args,omitempty"`
 
+	// AllDatabases is "true" or "false" when this schedule decides for itself
+	// whether its backups hold every database, and empty when it inherits the
+	// service's backup-all-databases.
+	AllDatabases string `json:"all-databases,omitempty"`
+
 	// EncryptionPassphrase is the passphrase this schedule encrypts with. Set
 	// together with PublicKeyID it replaces the service's encryption, and the
 	// public key still takes precedence. Empty alongside PublicKeyID means the
@@ -611,7 +638,7 @@ func ValidateBackupScheduleID(id string) error {
 
 // hasOverrides reports whether the schedule set any setting for itself.
 func (b BackupSchedule) hasOverrides() bool {
-	return b.StorageClass != "" || b.ObjectName != "" || b.Timestamp != "" || b.Mailto != "" || b.Keyserver != "" || b.ExportArgs != "" || b.hasOwnEncryption() || b.hasScheduleAuth()
+	return b.StorageClass != "" || b.ObjectName != "" || b.Timestamp != "" || b.Mailto != "" || b.Keyserver != "" || b.ExportArgs != "" || b.AllDatabases != "" || b.hasOwnEncryption() || b.hasScheduleAuth()
 }
 
 // hasScheduleAuth reports whether the schedule set any of the five backup-auth
@@ -662,6 +689,9 @@ func (b BackupSchedule) overrideNames() []string {
 	}
 	if b.ExportArgs != "" {
 		names = append(names, service.ExportArgsProperty)
+	}
+	if b.AllDatabases != "" {
+		names = append(names, service.BackupAllDatabasesProperty)
 	}
 	if b.AccessKeyID != "" {
 		names = append(names, backupAccessKeyIDProperty)
@@ -760,6 +790,7 @@ func ReadBackupSchedule(s *service.Datastore, serviceName string) (BackupSchedul
 		schedule.Mailto = item.Mailto
 		schedule.Keyserver = item.Keyserver
 		schedule.ExportArgs = item.ExportArgs
+		schedule.AllDatabases = item.AllDatabases
 		schedule.EncryptionPassphrase = item.EncryptionPassphrase
 		schedule.PublicKeyID = item.PublicKeyID
 		schedule.AccessKeyID = item.AccessKeyID
@@ -1109,6 +1140,7 @@ type BackupScheduleReport struct {
 	SignatureVersion                string   `json:"signature-version"`
 	EndpointURL                     string   `json:"endpoint-url"`
 	ExportArgs                      string   `json:"export-args"`
+	AllDatabases                    string   `json:"all-databases"`
 	Overrides                       []string `json:"overrides"`
 	CrontabLine                     string   `json:"crontab-line"`
 }
@@ -1144,6 +1176,10 @@ func reportBackupSchedule(s *service.Datastore, serviceName string, schedule Bac
 	if exportArgs == "" {
 		exportArgs = service.ServiceExtraArgs(s, serviceName, service.ExportArgsProperty)
 	}
+	allDatabases := schedule.AllDatabases
+	if allDatabases == "" {
+		allDatabases = strconv.FormatBool(service.BackupAllDatabases(s, serviceName))
+	}
 
 	publicKeyID, passphraseFingerprint := resolvedScheduleEncryption(s, serviceName, schedule)
 	accessKeyFingerprint, secretFingerprint, authFingerprint, region, signatureVersion, endpointURL := resolvedScheduleAuth(s, serviceName, schedule)
@@ -1167,6 +1203,7 @@ func reportBackupSchedule(s *service.Datastore, serviceName string, schedule Bac
 		SignatureVersion:                signatureVersion,
 		EndpointURL:                     endpointURL,
 		ExportArgs:                      exportArgs,
+		AllDatabases:                    allDatabases,
 		Overrides:                       schedule.overrideNames(),
 		CrontabLine:                     CrontabLine(s.Properties().CommandPrefix, serviceName, resolved),
 	}
@@ -1719,6 +1756,11 @@ type BackupInput struct {
 	// uses the service's settings, and the bucket and instance role still come
 	// from this input, which is what the crontab line passes.
 	ScheduleID string
+
+	// AllDatabases is whether the backup command was told to hold every
+	// database or only the service's own, nil when it was told neither and the
+	// schedule's or the service's backup-all-databases decides.
+	AllDatabases *bool
 }
 
 // the status a backup ended with, as the post-backup trigger is handed it
@@ -1855,6 +1897,11 @@ func Backup(ctx context.Context, input BackupInput) error {
 		storageClass = service.BackupStorageClass(input.Datastore, input.ServiceName)
 	}
 
+	allDatabases, err := backupAllDatabases(input.Datastore, input.ServiceName, schedule, input.AllDatabases)
+	if err != nil {
+		return err
+	}
+
 	arguments := BackupArgsInput{
 		BucketName:    input.BucketName,
 		BackupName:    backupName,
@@ -1905,7 +1952,7 @@ func Backup(ctx context.Context, input BackupInput) error {
 	exportFile := handle.Name()
 	defer os.Remove(exportFile)
 
-	export := backupExport(input.Datastore, input.ServiceName, handle)
+	export := backupExport(input.Datastore, input.ServiceName, handle, allDatabases)
 	if schedule.ExportArgs != "" {
 		extraArgs, err := service.SplitExtraArgs(schedule.ExportArgs)
 		if err != nil {
