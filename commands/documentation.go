@@ -1385,7 +1385,7 @@ dokku {{.Command "reexpose"}} lollipop
 move an exposed service between being published through an ambassador and directly, stopping and starting it without asking
 dokku {{.Command "set"}} lollipop expose-mode direct
 dokku {{.Command "reexpose"}} lollipop --force
-replace the ambassador with one made from another image. --ambassador-image wins over PLUGIN_AMBASSADOR_IMAGE, which wins over the ambassador-image global property
+replace the ambassador with one made from another image, for this command with --ambassador-image or for every service with the ambassador-image global property. the flag wins over the global property
 dokku {{.Command "reexpose"}} lollipop --ambassador-image dokku/ambassador:0.8.4
 dokku {{.Command "set"}} --global ambassador-image dokku/ambassador:0.8.4
 > NOTE: a service published through an ambassador only has the ambassador replaced, so the service keeps running, though connections made through the exposed ports are dropped. An ambassador that already matches the service's settings and is publishing is left alone.

@@ -1130,11 +1130,7 @@ dokku redis:reexpose lollipop
 
 ### Choosing the ambassador image
 
-The ambassador is made from `dokku/ambassador:0.8.4` unless something names another image. The datastore plugins used to read `PLUGIN_AMBASSADOR_IMAGE` for this, and stopped when the image was pinned. It is read again, along with two ways to name an image that do not depend on the environment, which sudo on newer versions of ubuntu drops before the plugin runs. In order of precedence:
-
-- `--ambassador-image` on `expose`, `reexpose`, `start`, `restart`, `upgrade` and `set`
-- the `PLUGIN_AMBASSADOR_IMAGE` environment variable, where it reaches the plugin
-- the `ambassador-image` global property, set with `dokku redis:set --global ambassador-image <image>`
+The ambassador is made from `dokku/ambassador:0.8.4` unless another image is named. `--ambassador-image` on `expose`, `reexpose`, `start`, `restart`, `upgrade` and `set` names one for that command, and the `ambassador-image` global property, set with `dokku redis:set --global ambassador-image <image>`, names one for every service. The flag wins over the global property.
 
 The image has to name a tag or a digest, since every image the plugin runs is pinned, and an image without one is refused before anything is changed. A different image reaches an exposed service the same way a changed `port-bind-address` does: on its next `start`, `restart`, `upgrade` or `reexpose`, which replace an ambassador made from another image. Setting the global property does not reexpose every service on its own. `dokku/ambassador:0.8.4` or newer is needed for a udp port, such as graphite's statsd port.
 
