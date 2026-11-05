@@ -307,7 +307,7 @@ A reference is cut on its tag rather than on its first colon, so an image held i
 
 ## The images a plugin needs
 
-A service's own image is not the only one a datastore plugin runs. Four more are pinned by the plugin itself - an ambassador to publish a service's ports, a probe to wait until it answers, busybox to take its data back off it, and the tool that ships a dump to s3 - and a definition may name one of its own on a command, which is how couchdb dumps with a tool its image does not have.
+A service's own image is not the only one a datastore plugin runs. Four more are pinned by the plugin itself - an ambassador to publish a service's ports, a probe to wait until it answers, busybox to take its data back off it, and the tool that ships a dump to s3 - and a definition may name one of its own on a command, which is how couchdb dumps with a tool its image does not have. The ambassador's is the one an operator may swap, as [choosing the ambassador image](#choosing-the-ambassador-image) describes.
 
 Installing a plugin fetches all of them, and that is the only time they were ever fetched. Every one is now checked again at the moment it is about to be run, so a host that has been pruned since gets it back rather than a command failing on an image nothing put there.
 
@@ -1113,6 +1113,38 @@ dokku graphite:expose lollipop 8125 8126 8080 8081 2003
 
 # a service exposed before this picks it up without a restart
 dokku graphite:reexpose lollipop
+```
+
+### Exposed services linked to an app
+
+Linking an app to a service puts the service container on a network of its own with the app, and that network is internal. The ambassador joined the first network the service container was on other than the default bridge, which for a linked service was the link network. Docker publishes no ports from a container whose only network is internal, so `expose` reported the service as exposed, `docker inspect` showed the port binding, and nothing listened on the host. It also left the ambassador on a network that is meant to carry only the app's traffic.
+
+The ambassador now joins the network the service container was made on - the default bridge, or the service's `initial-network` - rather than any network it is on, and records it in a `dokku.ambassador.network` label. [docker-port-forward](https://github.com/dokku/docker-port-forward) refuses an internal network as well, and reports a helper already on one as stale.
+
+An ambassador made before the label existed carries none, so the first `start`, `restart`, `expose`, `upgrade` or `reexpose` of each exposed service replaces its ambassador once, whether or not it was on a link network. Connections made through the exposed ports are dropped when it is replaced; the service itself keeps running.
+
+```shell
+# an exposed service stuck on its link network is published again
+dokku redis:reexpose lollipop
+```
+
+### Choosing the ambassador image
+
+The ambassador is made from `dokku/ambassador:0.8.4` unless something names another image. The datastore plugins used to read `PLUGIN_AMBASSADOR_IMAGE` for this, and stopped when the image was pinned. It is read again, along with two ways to name an image that do not depend on the environment, which sudo on newer versions of ubuntu drops before the plugin runs. In order of precedence:
+
+- `--ambassador-image` on `expose`, `reexpose`, `start`, `restart`, `upgrade` and `set`
+- the `PLUGIN_AMBASSADOR_IMAGE` environment variable, where it reaches the plugin
+- the `ambassador-image` global property, set with `dokku redis:set --global ambassador-image <image>`
+
+The image has to name a tag or a digest, since every image the plugin runs is pinned, and an image without one is refused before anything is changed. A different image reaches an exposed service the same way a changed `port-bind-address` does: on its next `start`, `restart`, `upgrade` or `reexpose`, which replace an ambassador made from another image. Setting the global property does not reexpose every service on its own. `dokku/ambassador:0.8.4` or newer is needed for a udp port, such as graphite's statsd port.
+
+```shell
+# every ambassador from now on
+dokku redis:set --global ambassador-image dokku/ambassador:0.8.4
+dokku redis:reexpose lollipop
+
+# one service, this once
+dokku redis:reexpose lollipop --ambassador-image dokku/ambassador:0.8.4
 ```
 
 ### A definition that gains a port

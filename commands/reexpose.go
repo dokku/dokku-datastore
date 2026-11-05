@@ -21,6 +21,8 @@ type ReexposeCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+	// AmbassadorImageFlagCommand is the ambassador image flag command
+	AmbassadorImageFlagCommand
 
 	// force is whether a running service exposed directly is stopped and
 	// started without asking, when its container has to publish other ports
@@ -82,6 +84,7 @@ func (c *ReexposeCommand) ParsedArguments(args []string) (map[string]command.Arg
 func (c *ReexposeCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	c.AmbassadorImageFlags(f)
 	f.BoolVarP(&c.force, "force", "f", false, "stop and start a running service without asking when its container has to publish other ports")
 	return f
 }
@@ -91,6 +94,7 @@ func (c *ReexposeCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
+		c.AutocompleteAmbassadorImageFlags(),
 		complete.Flags{
 			"--force": complete.PredictNothing,
 		},
@@ -124,6 +128,10 @@ func (c *ReexposeCommand) Run(args []string) int {
 	}
 
 	logger = c.Logger(c.Ui)
+	if err := c.ApplyAmbassadorImage(); err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
+	}
 
 	arguments, err := c.ParsedArguments(flags.Args())
 	if err != nil {

@@ -117,10 +117,15 @@ func Install(ctx context.Context, input InstallInput) error {
 		return fmt.Errorf("unable to set up plugin properties: %w", err)
 	}
 
+	ambassadorImage, err := service.AmbassadorImage(input.Datastore)
+	if err != nil {
+		return err
+	}
+
 	images := []string{
 		fmt.Sprintf("%s:%s", properties.DefaultImage, properties.DefaultImageVersion),
 		hostenv.BusyboxImage,
-		hostenv.AmbassadorImage,
+		ambassadorImage,
 		hostenv.S3BackupImage,
 		hostenv.WaitImage,
 	}

@@ -506,7 +506,7 @@ skip_unless_log_is_capped() {
 @test "($DEFINITION) a global property set does not take is refused first" {
   run --separate-stderr "$BIN" set --global "$PLUGIN" memory 512
   assert_failure
-  assert_stderr --partial "Invalid global key specified, valid keys include: disable-pull, wait-timeout"
+  assert_stderr --partial "Invalid global key specified, valid keys include: disable-pull, wait-timeout, ambassador-image"
 
   local value
   for value in abc 0; do
@@ -518,6 +518,11 @@ skip_unless_log_is_capped() {
   run --separate-stderr "$BIN" set --global "$PLUGIN" disable-pull yes
   assert_failure
   assert_stderr --partial "must be true or false"
+
+  # an ambassador image that floats, which the images the plugin runs never do
+  run --separate-stderr "$BIN" set --global "$PLUGIN" ambassador-image dokku/ambassador
+  assert_failure
+  assert_stderr --partial "must name a tag or a digest"
 
   # each of these applies to one service, and --global names none
   local flag

@@ -39,6 +39,11 @@ var GlobalProperties = []GlobalProperty{
 		Description: "how long, in seconds, every service of the datastore is waited on, unless it sets its own",
 		validate:    service.ValidateWaitTimeout,
 	},
+	{
+		Name:        service.AmbassadorImageProperty,
+		Description: "the image the ambassador an exposed service runs is made from, with a tag or digest. `dokku/ambassador:0.8.4` or newer is needed for udp ports",
+		validate:    service.ValidateAmbassadorImage,
+	},
 }
 
 // GlobalPropertyNames are the keys the set command takes with --global, in the

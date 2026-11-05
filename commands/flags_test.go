@@ -3,8 +3,10 @@ package commands
 import (
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/mitchellh/cli"
 	flag "github.com/spf13/pflag"
 )
@@ -114,6 +116,50 @@ func TestLoggerAppliesTheGlobalFlags(t *testing.T) {
 			}
 			if actual := os.Getenv("DOKKU_TRACE"); actual != test.trace {
 				t.Errorf("expected DOKKU_TRACE %q, got %q", test.trace, actual)
+			}
+		})
+	}
+}
+
+// The flag is handed on as PLUGIN_AMBASSADOR_IMAGE, which is read before the
+// global property, so a flag wins over both. Without it the variable is left as
+// the host set it.
+func TestApplyAmbassadorImage(t *testing.T) {
+	tests := []struct {
+		name     string
+		env      string
+		args     []string
+		expected string
+		err      string
+	}{
+		{name: "nothing", expected: ""},
+		{name: "the variable alone", env: "example/ambassador:1.0", expected: "example/ambassador:1.0"},
+		{name: "the flag", args: []string{"--ambassador-image", "dokku/ambassador:0.8.2"}, expected: "dokku/ambassador:0.8.2"},
+		{name: "the flag over the variable", env: "example/ambassador:1.0", args: []string{"--ambassador-image", "dokku/ambassador:0.8.2"}, expected: "dokku/ambassador:0.8.2"},
+		{name: "an image with no tag", env: "example/ambassador:1.0", args: []string{"--ambassador-image", "dokku/ambassador"}, expected: "example/ambassador:1.0", err: "invalid --ambassador-image flag"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(hostenv.AmbassadorImageVariable, test.env)
+
+			c := &AmbassadorImageFlagCommand{}
+			f := flag.NewFlagSet("test", flag.ContinueOnError)
+			c.AmbassadorImageFlags(f)
+			if err := f.Parse(test.args); err != nil {
+				t.Fatalf("failed to parse flags: %v", err)
+			}
+
+			err := c.ApplyAmbassadorImage()
+			if test.err == "" && err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+			if test.err != "" && (err == nil || !strings.Contains(err.Error(), test.err)) {
+				t.Fatalf("expected an error containing %q, got %v", test.err, err)
+			}
+
+			if actual := os.Getenv(hostenv.AmbassadorImageVariable); actual != test.expected {
+				t.Errorf("expected %s %q, got %q", hostenv.AmbassadorImageVariable, test.expected, actual)
 			}
 		})
 	}

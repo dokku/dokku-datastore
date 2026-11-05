@@ -9,7 +9,7 @@ import (
 )
 
 func TestGlobalPropertyNames(t *testing.T) {
-	expected := []string{"disable-pull", "wait-timeout"}
+	expected := []string{"disable-pull", "wait-timeout", "ambassador-image"}
 	if actual := GlobalPropertyNames(); !slices.Equal(actual, expected) {
 		t.Errorf("expected %v, got %v", expected, actual)
 	}
@@ -24,7 +24,7 @@ func TestValidateGlobalPropertyRejectsUnknownKeys(t *testing.T) {
 			t.Fatalf("expected %s to be refused, got no error", key)
 		}
 
-		expected := "Invalid global key specified, valid keys include: disable-pull, wait-timeout"
+		expected := "Invalid global key specified, valid keys include: disable-pull, wait-timeout, ambassador-image"
 		if err.Error() != expected {
 			t.Errorf("expected %q, got %q", expected, err)
 		}
@@ -46,6 +46,9 @@ func TestValidateGlobalPropertyValues(t *testing.T) {
 		{key: "wait-timeout", value: "120", valid: true},
 		{key: "wait-timeout", value: "0", valid: false},
 		{key: "wait-timeout", value: "forever", valid: false},
+		{key: "ambassador-image", value: "", valid: true},
+		{key: "ambassador-image", value: "dokku/ambassador:0.8.2", valid: true},
+		{key: "ambassador-image", value: "dokku/ambassador", valid: false},
 	}
 
 	for _, test := range tests {

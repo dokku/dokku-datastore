@@ -7,6 +7,7 @@ import (
 
 	"github.com/dokku/dokku-datastore/internal"
 	"github.com/dokku/dokku-datastore/internal/execx"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/mitchellh/cli"
 	"github.com/posener/complete"
@@ -68,6 +69,45 @@ func setEnvFlag(name string, enabled bool) {
 	}
 
 	os.Unsetenv(name) //nolint:errcheck
+}
+
+// AmbassadorImageFlagCommand is the flag a command that may make a service's
+// ambassador takes to name the image it is made from
+type AmbassadorImageFlagCommand struct {
+	// ambassadorImage is the image the ambassador is made from, empty to leave
+	// it to the variable, the global property and then the pinned default
+	ambassadorImage string
+}
+
+// AmbassadorImageFlags adds the ambassador image flag to the flag set
+func (c *AmbassadorImageFlagCommand) AmbassadorImageFlags(f *flag.FlagSet) {
+	f.StringVar(&c.ambassadorImage, "ambassador-image", "", fmt.Sprintf("the image to make the ambassador from, with a tag or digest, overriding %s and the %s global property", hostenv.AmbassadorImageVariable, service.AmbassadorImageProperty))
+}
+
+// AutocompleteAmbassadorImageFlags returns the autocomplete ambassador image
+// flags
+func (c *AmbassadorImageFlagCommand) AutocompleteAmbassadorImageFlags() complete.Flags {
+	return complete.Flags{
+		"--ambassador-image": complete.PredictAnything,
+	}
+}
+
+// ApplyAmbassadorImage hands a given ambassador image on as
+// PLUGIN_AMBASSADOR_IMAGE, which is checked before the global property. That
+// is how the flag wins over both without being passed down to wherever an
+// ambassador is made, and how a trigger the command fires sees it too. It is
+// refused before the command changes anything when it names no tag or digest.
+func (c *AmbassadorImageFlagCommand) ApplyAmbassadorImage() error {
+	image := strings.TrimSpace(c.ambassadorImage)
+	if image == "" {
+		return nil
+	}
+
+	if err := service.ValidateAmbassadorImage(image); err != nil {
+		return fmt.Errorf("invalid --ambassador-image flag: %w", err)
+	}
+
+	return os.Setenv(hostenv.AmbassadorImageVariable, image)
 }
 
 // ReportFormat maps the format flag onto what the report helper accepts. The

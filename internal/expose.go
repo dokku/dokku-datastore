@@ -105,11 +105,16 @@ func ExposeService(ctx context.Context, input ExposeServiceInput) error {
 	// service reported as exposed that publishes nothing and that a second
 	// expose refuses to touch. A service exposed directly runs no ambassador
 	if mode != service.ExposeModeDirect {
+		ambassadorImage, err := service.AmbassadorImage(input.Datastore)
+		if err != nil {
+			return err
+		}
+
 		if err := service.EnsureTaggedImage(ctx, service.EnsureTaggedImageInput{
 			Action:      "port publishing",
 			Datastore:   input.Datastore,
 			ServiceName: input.ServiceName,
-			TaggedImage: hostenv.AmbassadorImage,
+			TaggedImage: ambassadorImage,
 		}); err != nil {
 			return err
 		}

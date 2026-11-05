@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"github.com/dokku/dokku-datastore/internal/definition"
+	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 )
 
@@ -304,6 +305,7 @@ func readmeUsage(input ReadmeInput) ([]string, error) {
 	sections = append(sections, readmeSettableProperties(input.Data)...)
 	sections = append(sections, readmeExposeLimits(input.Data)...)
 	sections = append(sections, readmeExposeMode(input.Data)...)
+	sections = append(sections, readmeAmbassadorImage(input.Data)...)
 	sections = append(sections, readmeExposedDsn(input.Data)...)
 	sections = append(sections, readmeExtraArgs(input.Data)...)
 	sections = append(sections, readmeWaitTimeout(input.Data)...)
@@ -536,6 +538,19 @@ func readmeExposeMode(data DocumentationData) []string {
 			"For a running service, `dokku %s`, `dokku %s` and `dokku %s` ask before stopping and starting it, and change nothing if the answer is no. Pass `--force` to stop and start it without being asked. "+
 			"A change also reaches the service the next time it is restarted, or stopped and started.", data.Command("set"), data.Command("expose"), data.Command("unexpose"), data.Command("reexpose")),
 		"A `port-source-range` cannot be enforced on a port the service container publishes itself, so it cannot be set on a service exposed directly, and a service with one cannot be exposed directly.",
+	}
+}
+
+// readmeAmbassadorImage explains how to make the ambassador from another image
+func readmeAmbassadorImage(data DocumentationData) []string {
+	return []string{
+		"### Choosing the ambassador image",
+		fmt.Sprintf("The ambassador is made from `%s` unless another image is named. Pass `--ambassador-image` to `expose`, `reexpose`, `start`, `restart`, `upgrade` or `set` to name one for that command, "+
+			"set the `%s` environment variable, or set the `%s` global property with `dokku %s --global %s %s`. "+
+			"The flag is used first, then the environment variable, then the global property. The environment variable only reaches the plugin where sudo keeps the caller's environment, which it does not on newer versions of ubuntu.",
+			hostenv.DefaultAmbassadorImage, hostenv.AmbassadorImageVariable, service.AmbassadorImageProperty, data.Command("set"), service.AmbassadorImageProperty, hostenv.DefaultAmbassadorImage),
+		fmt.Sprintf("The image has to name a tag or a digest. A different image reaches an exposed service on its next start, restart, upgrade or `dokku %s`, which replace an ambassador made from another image. "+
+			"`%s` or newer is needed for a udp port.", data.Command("reexpose"), hostenv.DefaultAmbassadorImage),
 	}
 }
 

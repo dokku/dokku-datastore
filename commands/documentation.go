@@ -615,6 +615,8 @@ dokku {{.Command "expose"}} lollipop
 expose the service by publishing its ports on the service container itself rather than through an ambassador container. a running service is stopped and started to publish them, after asking, or without asking when --force is given
 dokku {{.Command "set"}} lollipop expose-mode direct
 dokku {{.Command "expose"}} lollipop --force
+expose the service through an ambassador made from another image
+dokku {{.Command "expose"}} lollipop --ambassador-image dokku/ambassador:0.8.4
 print the dsn a client off the host connects with, which names the expose-host or the first global domain
 dokku {{.Command "info"}} lollipop --exposed-dsn`
 }
@@ -1383,6 +1385,9 @@ dokku {{.Command "reexpose"}} lollipop
 move an exposed service between being published through an ambassador and directly, stopping and starting it without asking
 dokku {{.Command "set"}} lollipop expose-mode direct
 dokku {{.Command "reexpose"}} lollipop --force
+replace the ambassador with one made from another image. --ambassador-image wins over PLUGIN_AMBASSADOR_IMAGE, which wins over the ambassador-image global property
+dokku {{.Command "reexpose"}} lollipop --ambassador-image dokku/ambassador:0.8.4
+dokku {{.Command "set"}} --global ambassador-image dokku/ambassador:0.8.4
 > NOTE: a service published through an ambassador only has the ambassador replaced, so the service keeps running, though connections made through the exposed ports are dropped. An ambassador that already matches the service's settings and is publishing is left alone.
 > NOTE: a service whose container has to publish other ports, because it is exposed directly or is being moved between expose modes, is stopped and started. A running service is asked about first, and nothing is changed if the answer is no.
 > NOTE: A service that is not exposed is refused, as is one published through an ambassador that is not running.`

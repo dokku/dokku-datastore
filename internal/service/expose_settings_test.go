@@ -73,7 +73,7 @@ func TestServiceExposeSettings(t *testing.T) {
 		t.Errorf("expected the range to be read back, got %q", sourceRange)
 	}
 
-	if settings := serviceAmbassadorSettings(redis, "lollipop"); settings != (ambassadorSettings{Address: "10.0.0.5", SourceRange: "10.0.0.0/8"}) {
+	if settings := serviceAmbassadorSettings(redis, "lollipop", "dokku/ambassador:0.8.4"); settings != (ambassadorSettings{Address: "10.0.0.5", SourceRange: "10.0.0.0/8", Image: "dokku/ambassador:0.8.4"}) {
 		t.Errorf("expected the ambassador to be made with both, got %+v", settings)
 	}
 }

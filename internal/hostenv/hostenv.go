@@ -14,9 +14,10 @@ import (
 // than floating, because a service that silently changes its ambassador or its
 // backup tool on a docker pull is a service nobody can reason about.
 const (
-	// AmbassadorImage publishes a service's ports, so that the service container
-	// itself never has to
-	AmbassadorImage = "dokku/ambassador:0.8.4"
+	// DefaultAmbassadorImage publishes a service's ports, so that the service
+	// container itself never has to. An operator may run another one, see
+	// AmbassadorImageVariable
+	DefaultAmbassadorImage = "dokku/ambassador:0.8.4"
 
 	// S3BackupImage ships a dump to an s3 bucket
 	S3BackupImage = "dokku/s3backup:0.20.0"
@@ -27,6 +28,11 @@ const (
 	// WaitImage probes a port until a service answers on it
 	WaitImage = "dokku/wait:0.9.3"
 )
+
+// AmbassadorImageVariable names the image a service's ambassador is made from
+// in place of DefaultAmbassadorImage. The --ambassador-image flag sets it for
+// the rest of the process.
+const AmbassadorImageVariable = "PLUGIN_AMBASSADOR_IMAGE"
 
 // defaultLibRoot is where dokku keeps its data when nothing says otherwise.
 const defaultLibRoot = "/var/lib/dokku"

@@ -746,6 +746,11 @@ func TestActionForAmbassador(t *testing.T) {
 		{name: "not exposed, direct mode, ambassador left over", state: ambassadorState{Direct: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc"}, expected: ambassadorRemove},
 		{name: "exposed, forwarding the udp ports the service has", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", FrontedSettings: ambassadorSettings{UDPPorts: "8125"}, Settings: ambassadorSettings{UDPPorts: "8125"}}, expected: ambassadorKeep},
 		{name: "exposed, made before udp ports were published", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", Settings: ambassadorSettings{UDPPorts: "8125"}}, expected: ambassadorReplace},
+		{name: "exposed, on the service container's network", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", FrontedSettings: ambassadorSettings{Network: "bridge"}, Settings: ambassadorSettings{Network: "bridge"}}, expected: ambassadorKeep},
+		{name: "exposed, made before the network label existed", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", Settings: ambassadorSettings{Network: "bridge"}}, expected: ambassadorReplace},
+		{name: "exposed, on another network than the service container's", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", FrontedSettings: ambassadorSettings{Network: "dokku.postgres.lake.app"}, Settings: ambassadorSettings{Network: "bridge"}}, expected: ambassadorReplace},
+		{name: "exposed, made from the image the service is given", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", FrontedSettings: ambassadorSettings{Image: "dokku/ambassador:0.8.4"}, Settings: ambassadorSettings{Image: "dokku/ambassador:0.8.4"}}, expected: ambassadorKeep},
+		{name: "exposed, made from another image", state: ambassadorState{Exposed: true, Status: "running", Managed: true, FrontedID: "abc", ServiceID: "abc", FrontedSettings: ambassadorSettings{Image: "dokku/ambassador:0.8.4"}, Settings: ambassadorSettings{Image: "dokku/ambassador:0.8.2"}}, expected: ambassadorReplace},
 	}
 
 	for _, test := range tests {
@@ -784,7 +789,6 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "abc123",
 				ContainerPorts: []int{5432},
 				HostPorts:      []string{"5678"},
-				Image:          "dokku/ambassador:0.8.4",
 				LogConfig:      LogConfig{Options: map[string]string{"max-size": "10m"}},
 			},
 			expected: base(portforward.Options{
@@ -807,7 +811,6 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "def456",
 				ContainerPorts: []int{5672, 4369, 35197, 15672},
 				HostPorts:      []string{"1", "2", "3", "4"},
-				Image:          "dokku/ambassador:0.8.4",
 			},
 			expected: base(portforward.Options{
 				Target: "container/def456",
@@ -828,7 +831,6 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "def456",
 				ContainerPorts: []int{5672, 4369, 35197, 15672},
 				HostPorts:      []string{"127.0.0.1:1", "[::1]:2", "3", "10.0.0.2:4"},
-				Image:          "dokku/ambassador:0.8.4",
 				LogConfig:      LogConfig{Driver: "local", Options: map[string]string{"max-size": "5m", "max-file": "2"}},
 			},
 			expected: base(portforward.Options{
@@ -853,7 +855,6 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "abc123",
 				ContainerPorts: []int{5432},
 				HostPorts:      []string{"5678"},
-				Image:          "dokku/ambassador:0.8.4",
 				RestartPolicy:  "on-failure:3",
 			},
 			expected: func() portforward.Options {
@@ -881,7 +882,6 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "def456",
 				ContainerPorts: []int{5672, 4369},
 				HostPorts:      []string{"127.0.0.1:1", "2"},
-				Image:          "dokku/ambassador:0.8.4",
 				Settings:       ambassadorSettings{Address: "10.0.0.5", SourceRange: "10.0.0.0/8"},
 			},
 			expected: func() portforward.Options {
@@ -913,7 +913,6 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerPorts:     []int{8125, 8126, 80},
 				ContainerProtocols: []string{"udp", "tcp", "tcp"},
 				HostPorts:          []string{"1", "127.0.0.1:2", "3"},
-				Image:              "dokku/ambassador:0.8.4",
 				Settings:           ambassadorSettings{UDPPorts: "8125"},
 			},
 			expected: base(portforward.Options{
@@ -938,7 +937,6 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerPorts:     []int{8125},
 				ContainerProtocols: []string{"udp"},
 				HostPorts:          []string{"[::1]:1"},
-				Image:              "dokku/ambassador:0.8.4",
 				Settings:           ambassadorSettings{UDPPorts: "8125"},
 			},
 			expected: base(portforward.Options{
@@ -954,6 +952,56 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 			}),
 		},
 		{
+			// joins the network the service container was made on, rather than
+			// one docker-port-forward picks, which may be an internal link network
+			name: "the service container's network",
+			input: ambassadorForwardOptionsInput{
+				AmbassadorName: "dokku.postgres.lake.ambassador",
+				CommandPrefix:  "postgres",
+				ContainerID:    "abc123",
+				ContainerPorts: []int{5432},
+				HostPorts:      []string{"5678"},
+				Settings:       ambassadorSettings{Network: "bridge"},
+			},
+			expected: base(portforward.Options{
+				Target:  "container/abc123",
+				Ports:   []string{"5678:5432"},
+				Name:    "dokku.postgres.lake.ambassador",
+				Network: "bridge",
+				Labels: map[string]string{
+					"dokku":                         "ambassador",
+					"dokku.ambassador":              "postgres",
+					"dokku.ambassador.container-id": "abc123",
+					"dokku.ambassador.network":      "bridge",
+				},
+			}),
+		},
+		{
+			name: "an image of the operator's own",
+			input: ambassadorForwardOptionsInput{
+				AmbassadorName: "dokku.postgres.lake.ambassador",
+				CommandPrefix:  "postgres",
+				ContainerID:    "abc123",
+				ContainerPorts: []int{5432},
+				HostPorts:      []string{"5678"},
+				Settings:       ambassadorSettings{Image: "dokku/ambassador:0.8.2"},
+			},
+			expected: func() portforward.Options {
+				options := base(portforward.Options{
+					Target: "container/abc123",
+					Ports:  []string{"5678:5432"},
+					Name:   "dokku.postgres.lake.ambassador",
+					Labels: map[string]string{
+						"dokku":                         "ambassador",
+						"dokku.ambassador":              "postgres",
+						"dokku.ambassador.container-id": "abc123",
+					},
+				})
+				options.HelperImage = "dokku/ambassador:0.8.2"
+				return options
+			}(),
+		},
+		{
 			name: "a port-source-range alone",
 			input: ambassadorForwardOptionsInput{
 				AmbassadorName: "dokku.postgres.lake.ambassador",
@@ -961,7 +1009,6 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 				ContainerID:    "abc123",
 				ContainerPorts: []int{5432},
 				HostPorts:      []string{"5678"},
-				Image:          "dokku/ambassador:0.8.4",
 				Settings:       ambassadorSettings{SourceRange: "2001:db8::/32"},
 			},
 			expected: base(portforward.Options{
@@ -981,6 +1028,11 @@ func TestAmbassadorForwardOptions(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// every ambassador is made from the pinned image unless the case says
+			// otherwise
+			if test.input.Settings.Image == "" {
+				test.input.Settings.Image = "dokku/ambassador:0.8.4"
+			}
 			if actual := ambassadorForwardOptions(test.input); !reflect.DeepEqual(actual, test.expected) {
 				t.Errorf("expected:\n%+v\ngot:\n%+v", test.expected, actual)
 			}

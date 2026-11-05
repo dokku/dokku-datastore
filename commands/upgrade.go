@@ -21,6 +21,8 @@ type UpgradeCommand struct {
 	command.Meta
 	// GlobalFlagCommand is the global flag command
 	GlobalFlagCommand
+	// AmbassadorImageFlagCommand is the ambassador image flag command
+	AmbassadorImageFlagCommand
 	// definition is the definition to move the service onto
 	definition string
 	// image is the image to upgrade to
@@ -122,6 +124,7 @@ func (c *UpgradeCommand) ParsedArguments(args []string) (map[string]command.Argu
 func (c *UpgradeCommand) FlagSet() *flag.FlagSet {
 	f := c.Meta.FlagSet(c.Name(), command.FlagSetClient)
 	c.GlobalFlags(f)
+	c.AmbassadorImageFlags(f)
 	f.StringVar(&c.definition, "definition", "", "the definition to move the service onto, instead of the one its image and version resolve to")
 	f.StringVarP(&c.image, "image", "i", "", "the image to upgrade the service to")
 	f.StringVarP(&c.imageVersion, "image-version", "I", "", "the image version to upgrade the service to")
@@ -154,6 +157,7 @@ func (c *UpgradeCommand) AutocompleteFlags() complete.Flags {
 	return command.MergeAutocompleteFlags(
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
+		c.AutocompleteAmbassadorImageFlags(),
 		complete.Flags{},
 	)
 }
@@ -185,6 +189,10 @@ func (c *UpgradeCommand) Run(args []string) int {
 	}
 
 	logger = c.Logger(c.Ui)
+	if err := c.ApplyAmbassadorImage(); err != nil {
+		logger.Error(internal.ErrorInput{Error: err})
+		return 1
+	}
 
 	arguments, err := c.ParsedArguments(flags.Args())
 	if err != nil {
