@@ -81,7 +81,7 @@ type AmbassadorImageFlagCommand struct {
 
 // AmbassadorImageFlags adds the ambassador image flag to the flag set
 func (c *AmbassadorImageFlagCommand) AmbassadorImageFlags(f *flag.FlagSet) {
-	f.StringVar(&c.ambassadorImage, "ambassador-image", "", fmt.Sprintf("the image to make the ambassador from, with a tag or digest, overriding %s and the %s global property", hostenv.AmbassadorImageVariable, service.AmbassadorImageProperty))
+	f.StringVar(&c.ambassadorImage, "ambassador-image", "", fmt.Sprintf("the image to make the ambassador from, with a tag or digest, overriding the %s global property", service.AmbassadorImageProperty))
 }
 
 // AutocompleteAmbassadorImageFlags returns the autocomplete ambassador image

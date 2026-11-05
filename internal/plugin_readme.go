@@ -546,9 +546,8 @@ func readmeAmbassadorImage(data DocumentationData) []string {
 	return []string{
 		"### Choosing the ambassador image",
 		fmt.Sprintf("The ambassador is made from `%s` unless another image is named. Pass `--ambassador-image` to `expose`, `reexpose`, `start`, `restart`, `upgrade` or `set` to name one for that command, "+
-			"set the `%s` environment variable, or set the `%s` global property with `dokku %s --global %s %s`. "+
-			"The flag is used first, then the environment variable, then the global property. The environment variable only reaches the plugin where sudo keeps the caller's environment, which it does not on newer versions of ubuntu.",
-			hostenv.DefaultAmbassadorImage, hostenv.AmbassadorImageVariable, service.AmbassadorImageProperty, data.Command("set"), service.AmbassadorImageProperty, hostenv.DefaultAmbassadorImage),
+			"or set the `%s` global property with `dokku %s --global %s %s` to name one for every service. The flag wins over the global property.",
+			hostenv.DefaultAmbassadorImage, service.AmbassadorImageProperty, data.Command("set"), service.AmbassadorImageProperty, hostenv.DefaultAmbassadorImage),
 		fmt.Sprintf("The image has to name a tag or a digest. A different image reaches an exposed service on its next start, restart, upgrade or `dokku %s`, which replace an ambassador made from another image. "+
 			"`%s` or newer is needed for a udp port.", data.Command("reexpose"), hostenv.DefaultAmbassadorImage),
 	}
