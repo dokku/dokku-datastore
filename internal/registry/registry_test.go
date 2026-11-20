@@ -796,13 +796,16 @@ func TestForImagePicksTheFlavor(t *testing.T) {
 		t.Fatalf("unable to load the registry: %s", err)
 	}
 
+	newest := newestOf(t, loaded, "postgres", "")
+	newestPgvector := newestOf(t, loaded, "postgres", "pgvector")
+
 	tests := []struct {
 		image    string
 		version  string
 		expected string
 	}{
-		{image: "", version: "", expected: "postgres-19"},
-		{image: "", version: "pg17", expected: "postgres-19"},
+		{image: "", version: "", expected: newest},
+		{image: "", version: "pg17", expected: newest},
 		{image: "postgres", version: "14.24", expected: "postgres-14"},
 		{image: "postgres", version: "15.7", expected: "postgres-15"},
 		{image: "postgres", version: "16.15", expected: "postgres-16"},
@@ -811,7 +814,7 @@ func TestForImagePicksTheFlavor(t *testing.T) {
 		{image: "postgres", version: "19.0", expected: "postgres-19"},
 		{image: "ghcr.io/example/postgres", version: "17.11", expected: "postgres-17"},
 		{image: "pgvector/pgvector", version: "pg17", expected: "postgres-pgvector-pg17"},
-		{image: "pgvector/pgvector", version: "", expected: "postgres-pgvector-pg19"},
+		{image: "pgvector/pgvector", version: "", expected: newestPgvector},
 		{image: "pgvector/pgvector", version: "0.8.7-pg18", expected: "postgres-pgvector-pg18"},
 		{image: "postgis/postgis", version: "17-3.5", expected: "postgres-postgis-pg17"},
 		{image: "timescale/timescaledb", version: "2.30.1-pg17", expected: "postgres-timescaledb-pg17"},
@@ -868,6 +871,28 @@ func TestForImageMajorNeverFallsBack(t *testing.T) {
 			}
 		})
 	}
+}
+
+// newestOf is the newest definition of a plugin's own, or of one of its
+// flavors. A test that means the newest asks for it here rather than naming
+// it, so that adding a major moves the test along with it; the test below is
+// the one place the newest is spelled out.
+func newestOf(t *testing.T, loaded *Registry, plugin string, flavor string) string {
+	t.Helper()
+
+	newest := ""
+	for _, name := range loaded.NamesFor(plugin) {
+		found := parseVariant(name)
+		if found.flavor == flavor && (newest == "" || found.major > parseVariant(newest).major) {
+			newest = name
+		}
+	}
+
+	if newest == "" {
+		t.Fatalf("expected %s to have a definition of flavor %q", plugin, flavor)
+	}
+
+	return newest
 }
 
 // A service created with no image, version or definition runs the datastore's

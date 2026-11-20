@@ -19,11 +19,32 @@ func postgresDatastore(t *testing.T) *Datastore {
 		t.Fatal("expected a postgres datastore")
 	}
 
-	if found.Definition.Name != "postgres-19" {
-		t.Fatalf("expected postgres to default to its newest definition, got %q", found.Definition.Name)
+	if newest := newestShipping(t, found, "postgres"); found.Definition.Name != newest {
+		t.Fatalf("expected postgres to default to its newest definition %s, got %q", newest, found.Definition.Name)
 	}
 
 	return found
+}
+
+// newestShipping is the newest of a datastore's definitions shipping an image,
+// which its definitions list last of those, since each line of majors is kept
+// oldest first. A test that means the newest asks for it here rather than
+// naming it, so that adding a major moves the test along with it.
+func newestShipping(t *testing.T, datastore *Datastore, image string) string {
+	t.Helper()
+
+	newest := ""
+	for _, found := range datastore.Definitions() {
+		if found.DefaultImage == image {
+			newest = found.Name
+		}
+	}
+
+	if newest == "" {
+		t.Fatalf("expected a definition shipping %s", image)
+	}
+
+	return newest
 }
 
 // A service created on an older major runs that major's definition, which is the
@@ -32,6 +53,7 @@ func postgresDatastore(t *testing.T) *Datastore {
 // up from where postgres 17 keeps it.
 func TestForImageSelectsTheMajor(t *testing.T) {
 	postgres := postgresDatastore(t)
+	newest := newestShipping(t, postgres, "postgres")
 
 	tests := []struct {
 		imageVersion string
@@ -45,8 +67,8 @@ func TestForImageSelectsTheMajor(t *testing.T) {
 		{imageVersion: "19.0", expected: "postgres-19"},
 		// a version no definition claims falls back to the newest rather than
 		// failing: a service has to stay operable either way
-		{imageVersion: "12.1", expected: "postgres-19"},
-		{imageVersion: "", expected: "postgres-19"},
+		{imageVersion: "12.1", expected: newest},
+		{imageVersion: "", expected: newest},
 	}
 
 	for _, test := range tests {
@@ -64,6 +86,7 @@ func TestForImageSelectsTheMajor(t *testing.T) {
 // postgres-18 and its data directory.
 func TestForImageSelectsTheFlavor(t *testing.T) {
 	postgres := postgresDatastore(t)
+	newestPgvector := newestShipping(t, postgres, "pgvector/pgvector")
 
 	tests := []struct {
 		image        string
@@ -81,8 +104,8 @@ func TestForImageSelectsTheFlavor(t *testing.T) {
 		{image: "postgis/postgis", imageVersion: "17-3.5", expected: "postgres-postgis-pg17"},
 		{image: "postgis/postgis", imageVersion: "18-3.6", expected: "postgres-postgis-pg18"},
 		// the newest of the flavor, whose own version then applies
-		{image: "pgvector/pgvector", imageVersion: "", expected: "postgres-pgvector-pg19"},
-		{image: "pgvector/pgvector", imageVersion: "pg12", expected: "postgres-pgvector-pg19"},
+		{image: "pgvector/pgvector", imageVersion: "", expected: newestPgvector},
+		{image: "pgvector/pgvector", imageVersion: "pg12", expected: newestPgvector},
 		// an image no definition ships runs on the datastore's own, as it did
 		{image: "registry.example.com/postgres", imageVersion: "17.8", expected: "postgres-17"},
 		{image: "postgres", imageVersion: "17.8", expected: "postgres-17"},
@@ -419,8 +442,8 @@ func TestWithDefinitionNamedDoesNotChangeTheDatastore(t *testing.T) {
 		t.Fatalf("expected postgres-17 to resolve, got %v", err)
 	}
 
-	if postgres.DefinitionName() != "postgres-19" {
-		t.Errorf("expected the shared datastore to stay on postgres-19, got %s", postgres.DefinitionName())
+	if newest := newestShipping(t, postgres, "postgres"); postgres.DefinitionName() != newest {
+		t.Errorf("expected the shared datastore to stay on %s, got %s", newest, postgres.DefinitionName())
 	}
 }
 

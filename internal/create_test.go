@@ -270,16 +270,18 @@ func TestCreateServiceRefusesAnUnknownDefinition(t *testing.T) {
 // for. A flavor is only ever chosen by naming its image or the definition itself.
 func TestCreateServiceResolvesTheDefinition(t *testing.T) {
 	datastore := service.Datastores["postgres"]
+	newest := newestShipping(t, datastore, "postgres")
+	newestPgvector := newestShipping(t, datastore, "pgvector/pgvector")
 
 	tests := []struct {
 		name     string
 		input    CreateServiceInput
 		expected string
 	}{
-		{name: "no options", input: CreateServiceInput{}, expected: "postgres-19"},
+		{name: "no options", input: CreateServiceInput{}, expected: newest},
 		{name: "an older version", input: CreateServiceInput{ImageVersion: "17.2"}, expected: "postgres-17"},
-		{name: "a flavor's version with no image", input: CreateServiceInput{ImageVersion: "pg17"}, expected: "postgres-19"},
-		{name: "a flavor's image", input: CreateServiceInput{Image: "pgvector/pgvector"}, expected: "postgres-pgvector-pg19"},
+		{name: "a flavor's version with no image", input: CreateServiceInput{ImageVersion: "pg17"}, expected: newest},
+		{name: "a flavor's image", input: CreateServiceInput{Image: "pgvector/pgvector"}, expected: newestPgvector},
 		{name: "a flavor named outright", input: CreateServiceInput{Definition: "postgres-postgis-pg17"}, expected: "postgres-postgis-pg17"},
 	}
 
@@ -340,4 +342,25 @@ func TestCreateServiceRefusesAnUnusableMemory(t *testing.T) {
 			}
 		})
 	}
+}
+
+// newestShipping is the newest of a datastore's definitions shipping an image,
+// which its definitions list last of those, since each line of majors is kept
+// oldest first. A test that means the newest asks for it here rather than
+// naming it, so that adding a major moves the test along with it.
+func newestShipping(t *testing.T, datastore *service.Datastore, image string) string {
+	t.Helper()
+
+	newest := ""
+	for _, found := range datastore.Definitions() {
+		if found.DefaultImage == image {
+			newest = found.Name
+		}
+	}
+
+	if newest == "" {
+		t.Fatalf("expected a definition shipping %s", image)
+	}
+
+	return newest
 }

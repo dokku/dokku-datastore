@@ -225,6 +225,7 @@ func TestUpgradeVersionOfANamedDefinition(t *testing.T) {
 // data is in, unless the upgrade named a definition outright.
 func TestUpgradeTarget(t *testing.T) {
 	postgres := service.Datastores["postgres"]
+	newest := newestShipping(t, postgres, "postgres")
 
 	named := func(name string) *service.Datastore {
 		found, err := postgres.WithDefinitionNamed(name)
@@ -301,7 +302,7 @@ func TestUpgradeTarget(t *testing.T) {
 			recorded: service.RecordedImage{Image: "postgres", ImageVersion: "17.0"},
 			image:    "myorg/postgres",
 			version:  "custom-3",
-			expected: "postgres-19",
+			expected: newest,
 		},
 		{
 			name:     "a custom tag with a name stays on it",
