@@ -46,7 +46,7 @@ func TestGeneratedDefinitionsLoadBack(t *testing.T) {
 	}
 
 	// every major of the datastore's own and of each flavor
-	if names, expected := loaded.NamesFor("postgres"), postgresDefinitionNames(); !slices.Equal(names, expected) {
+	if names, expected := loaded.NamesFor("postgres"), postgresDefinitionNames(t); !slices.Equal(names, expected) {
 		t.Fatalf("expected %v to come back, got %v", expected, names)
 	}
 
@@ -75,31 +75,31 @@ func TestGenerateWritesEveryVariant(t *testing.T) {
 	}
 	sort.Strings(names)
 
-	expected := postgresDefinitionNames()
+	expected := postgresDefinitionNames(t)
 	sort.Strings(expected)
 	if !slices.Equal(names, expected) {
 		t.Errorf("expected %v, got %v", expected, names)
 	}
 }
 
-// postgresDefinitionNames is every postgres definition, in the order the
-// registry keeps them: the datastore's own majors, then each flavor's.
-func postgresDefinitionNames() []string {
-	return []string{
-		"postgres-14",
-		"postgres-15",
-		"postgres-16",
-		"postgres-17",
-		"postgres-18",
-		"postgres-19",
-		"postgres-pgvector-pg17",
-		"postgres-pgvector-pg18",
-		"postgres-pgvector-pg19",
-		"postgres-postgis-pg17",
-		"postgres-postgis-pg18",
-		"postgres-timescaledb-pg17",
-		"postgres-timescaledb-pg18",
+// postgresDefinitionNames is every postgres definition the binary embeds, in
+// the order the registry keeps them: the datastore's own majors, then each
+// flavor's. Read from the embedded set rather than written out, so a major
+// added there is one generate is expected to write without this changing.
+func postgresDefinitionNames(t *testing.T) []string {
+	t.Helper()
+
+	embedded, err := registry.Load(registry.LoadInput{})
+	if err != nil {
+		t.Fatalf("unable to load the embedded registry: %s", err)
 	}
+
+	names := embedded.NamesFor("postgres")
+	if len(names) < 2 {
+		t.Fatalf("expected more than one embedded postgres definition, got %v", names)
+	}
+
+	return names
 }
 
 // The compose file is copied rather than re-serialised: a definition may use

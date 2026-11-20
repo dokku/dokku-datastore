@@ -3,6 +3,9 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -284,31 +287,60 @@ func TestDocumentationIsDeclaredOnceAcrossTheMajors(t *testing.T) {
 func TestDefinitionsSpansTheMajors(t *testing.T) {
 	postgres := postgresDatastore(t)
 
+	// every postgres definition the plugin ships, read from the directories
+	// they are embedded from rather than written out, so adding a major does
+	// not mean changing this
+	entries, err := os.ReadDir(filepath.Join("..", "registry", "definitions"))
+	if err != nil {
+		t.Fatalf("unable to read the definitions: %s", err)
+	}
+	shipped := []string{}
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "postgres-") {
+			shipped = append(shipped, entry.Name())
+		}
+	}
+
 	names := []string{}
+	images := []string{}
+	majors := []int{}
 	for _, found := range postgres.Definitions() {
 		names = append(names, found.Name)
+		images = append(images, found.DefaultImage)
+
+		major, err := strconv.Atoi(trailingDigits.FindString(found.Name))
+		if err != nil {
+			t.Fatalf("expected %s to end in its major", found.Name)
+		}
+		majors = append(majors, major)
+	}
+
+	if !slices.Equal(slices.Sorted(slices.Values(names)), slices.Sorted(slices.Values(shipped))) {
+		t.Fatalf("expected every postgres definition %v, got %v", shipped, names)
 	}
 
 	// the datastore's own first, then each flavor, every one oldest first
-	expected := []string{
-		"postgres-14",
-		"postgres-15",
-		"postgres-16",
-		"postgres-17",
-		"postgres-18",
-		"postgres-19",
-		"postgres-pgvector-pg17",
-		"postgres-pgvector-pg18",
-		"postgres-pgvector-pg19",
-		"postgres-postgis-pg17",
-		"postgres-postgis-pg18",
-		"postgres-timescaledb-pg17",
-		"postgres-timescaledb-pg18",
+	if images[0] != "postgres" {
+		t.Errorf("expected the datastore's own definitions first, got %v", names)
 	}
-	if strings.Join(names, " ") != strings.Join(expected, " ") {
-		t.Errorf("expected %v, got %v", expected, names)
+	seen := map[string]bool{}
+	for index := range names {
+		if index > 0 && images[index] == images[index-1] {
+			if majors[index] <= majors[index-1] {
+				t.Errorf("expected %s after %s, oldest first, got %v", names[index-1], names[index], names)
+			}
+			continue
+		}
+
+		if seen[images[index]] {
+			t.Errorf("expected the definitions shipping %s together, got %v", images[index], names)
+		}
+		seen[images[index]] = true
 	}
 }
+
+// trailingDigits is the major a definition's name ends in.
+var trailingDigits = regexp.MustCompile(`[0-9]+$`)
 
 func writeServiceFile(t *testing.T, filename string, contents string) {
 	t.Helper()

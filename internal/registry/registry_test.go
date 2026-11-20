@@ -873,6 +873,34 @@ func TestForImageMajorNeverFallsBack(t *testing.T) {
 	}
 }
 
+// postgresDirectories is every postgres definition the plugin ships, read from
+// the directories they are embedded from and put in the order the registry
+// keeps them. A test that runs over every postgres definition checks it ran
+// over these, so a definition that did not load as postgres is caught without
+// the count being written out and changed with every major added.
+func postgresDirectories(t *testing.T) []string {
+	t.Helper()
+
+	entries, err := os.ReadDir("definitions")
+	if err != nil {
+		t.Fatalf("unable to read the definitions: %s", err)
+	}
+
+	names := []string{}
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "postgres-") {
+			names = append(names, entry.Name())
+		}
+	}
+	sortVariants(names)
+
+	if len(names) < 2 {
+		t.Fatalf("expected more than one postgres definition, got %v", names)
+	}
+
+	return names
+}
+
 // newestOf is the newest definition of a plugin's own, or of one of its
 // flavors. A test that means the newest asks for it here rather than naming
 // it, so that adding a major moves the test along with it; the test below is
@@ -1218,8 +1246,8 @@ func TestEveryPostgresDefinitionDocumentsItsCertificate(t *testing.T) {
 		})
 	}
 
-	if len(names) != 13 {
-		t.Errorf("expected thirteen postgres definitions, got %v", names)
+	if expected := postgresDirectories(t); !slices.Equal(names, expected) {
+		t.Errorf("expected the postgres definitions %v, got %v", expected, names)
 	}
 }
 
@@ -1563,8 +1591,8 @@ func TestResetsAreTheSameWhereTheDatastoreIs(t *testing.T) {
 	}
 
 	postgres := loaded.NamesFor("postgres")
-	if len(postgres) != 13 {
-		t.Errorf("expected thirteen postgres definitions, got %v", postgres)
+	if expected := postgresDirectories(t); !slices.Equal(postgres, expected) {
+		t.Errorf("expected the postgres definitions %v, got %v", expected, postgres)
 	}
 	for _, name := range postgres[1:] {
 		if resetScript(name) != resetScript(postgres[0]) {
@@ -2971,8 +2999,8 @@ func TestSecretChangesAreTheSameWhereTheDatastoreIs(t *testing.T) {
 	}
 
 	postgres := loaded.NamesFor("postgres")
-	if len(postgres) != 13 {
-		t.Errorf("expected thirteen postgres definitions, got %v", postgres)
+	if expected := postgresDirectories(t); !slices.Equal(postgres, expected) {
+		t.Errorf("expected the postgres definitions %v, got %v", expected, postgres)
 	}
 	for _, name := range postgres[1:] {
 		if changeScript(name, "password") != changeScript(postgres[0], "password") {
