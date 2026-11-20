@@ -796,20 +796,26 @@ func TestForImagePicksTheFlavor(t *testing.T) {
 		t.Fatalf("unable to load the registry: %s", err)
 	}
 
+	newest := newestOf(t, loaded, "postgres", "")
+	newestPgvector := newestOf(t, loaded, "postgres", "pgvector")
+
 	tests := []struct {
 		image    string
 		version  string
 		expected string
 	}{
-		{image: "", version: "", expected: "postgres-18"},
-		{image: "", version: "pg17", expected: "postgres-18"},
+		{image: "", version: "", expected: newest},
+		{image: "", version: "pg17", expected: newest},
 		{image: "postgres", version: "14.24", expected: "postgres-14"},
 		{image: "postgres", version: "15.7", expected: "postgres-15"},
 		{image: "postgres", version: "16.15", expected: "postgres-16"},
 		{image: "postgres", version: "17.11", expected: "postgres-17"},
+		{image: "postgres", version: "18.7", expected: "postgres-18"},
+		{image: "postgres", version: "19.0", expected: "postgres-19"},
 		{image: "ghcr.io/example/postgres", version: "17.11", expected: "postgres-17"},
 		{image: "pgvector/pgvector", version: "pg17", expected: "postgres-pgvector-pg17"},
-		{image: "pgvector/pgvector", version: "", expected: "postgres-pgvector-pg18"},
+		{image: "pgvector/pgvector", version: "", expected: newestPgvector},
+		{image: "pgvector/pgvector", version: "0.8.7-pg18", expected: "postgres-pgvector-pg18"},
 		{image: "postgis/postgis", version: "17-3.5", expected: "postgres-postgis-pg17"},
 		{image: "timescale/timescaledb", version: "2.30.1-pg17", expected: "postgres-timescaledb-pg17"},
 		{image: "timescale/timescaledb", version: "2.30.1-pg18", expected: "postgres-timescaledb-pg18"},
@@ -867,6 +873,56 @@ func TestForImageMajorNeverFallsBack(t *testing.T) {
 	}
 }
 
+// postgresDirectories is every postgres definition the plugin ships, read from
+// the directories they are embedded from and put in the order the registry
+// keeps them. A test that runs over every postgres definition checks it ran
+// over these, so a definition that did not load as postgres is caught without
+// the count being written out and changed with every major added.
+func postgresDirectories(t *testing.T) []string {
+	t.Helper()
+
+	entries, err := os.ReadDir("definitions")
+	if err != nil {
+		t.Fatalf("unable to read the definitions: %s", err)
+	}
+
+	names := []string{}
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "postgres-") {
+			names = append(names, entry.Name())
+		}
+	}
+	sortVariants(names)
+
+	if len(names) < 2 {
+		t.Fatalf("expected more than one postgres definition, got %v", names)
+	}
+
+	return names
+}
+
+// newestOf is the newest definition of a plugin's own, or of one of its
+// flavors. A test that means the newest asks for it here rather than naming
+// it, so that adding a major moves the test along with it; the test below is
+// the one place the newest is spelled out.
+func newestOf(t *testing.T, loaded *Registry, plugin string, flavor string) string {
+	t.Helper()
+
+	newest := ""
+	for _, name := range loaded.NamesFor(plugin) {
+		found := parseVariant(name)
+		if found.flavor == flavor && (newest == "" || found.major > parseVariant(newest).major) {
+			newest = name
+		}
+	}
+
+	if newest == "" {
+		t.Fatalf("expected %s to have a definition of flavor %q", plugin, flavor)
+	}
+
+	return newest
+}
+
 // A service created with no image, version or definition runs the datastore's
 // own image on its newest major. A flavor is postgres with an extension the
 // operator did not ask for, so it is never what a bare create lands on, however
@@ -880,7 +936,7 @@ func TestTheDefaultIsTheNewestPlainDefinition(t *testing.T) {
 	// spelled out, so that a change to any of these names the datastore it moved
 	expected := map[string]string{
 		"elasticsearch": "elasticsearch-9",
-		"postgres":      "postgres-18",
+		"postgres":      "postgres-19",
 		"redis":         "redis",
 		"solr":          "solr-8",
 	}
@@ -1065,6 +1121,7 @@ func TestPostgresMountsItsDataWhereTheVersionKeepsIt(t *testing.T) {
 		{name: "sixteen", variant: "postgres-16", expected: "/var/lib/postgresql/data"},
 		{name: "before eighteen", variant: "postgres-17", expected: "/var/lib/postgresql/data"},
 		{name: "eighteen and since", variant: "postgres-18", expected: "/var/lib/postgresql"},
+		{name: "nineteen", variant: "postgres-19", expected: "/var/lib/postgresql"},
 	}
 
 	for _, test := range tests {
@@ -1189,8 +1246,8 @@ func TestEveryPostgresDefinitionDocumentsItsCertificate(t *testing.T) {
 		})
 	}
 
-	if len(names) != 11 {
-		t.Errorf("expected eleven postgres definitions, got %v", names)
+	if expected := postgresDirectories(t); !slices.Equal(names, expected) {
+		t.Errorf("expected the postgres definitions %v, got %v", expected, names)
 	}
 }
 
@@ -1534,8 +1591,8 @@ func TestResetsAreTheSameWhereTheDatastoreIs(t *testing.T) {
 	}
 
 	postgres := loaded.NamesFor("postgres")
-	if len(postgres) != 11 {
-		t.Errorf("expected eleven postgres definitions, got %v", postgres)
+	if expected := postgresDirectories(t); !slices.Equal(postgres, expected) {
+		t.Errorf("expected the postgres definitions %v, got %v", expected, postgres)
 	}
 	for _, name := range postgres[1:] {
 		if resetScript(name) != resetScript(postgres[0]) {
@@ -2365,11 +2422,13 @@ func TestExtraArgsAreDeclaredWhereTheToolReadsThem(t *testing.T) {
 		"postgres-16": true,
 		"postgres-17": true,
 		"postgres-18": true,
+		"postgres-19": true,
 		// the flavors run the same pg_dump and pg_restore, timescaledb's
 		// restore wrapped to stop its background workers around it
 
 		"postgres-pgvector-pg17":    true,
 		"postgres-pgvector-pg18":    true,
+		"postgres-pgvector-pg19":    true,
 		"postgres-postgis-pg17":     true,
 		"postgres-postgis-pg18":     true,
 		"postgres-timescaledb-pg17": true,
@@ -2579,8 +2638,10 @@ func TestVolumeKeysArePinned(t *testing.T) {
 		"postgres-16":               postgres,
 		"postgres-17":               postgres,
 		"postgres-18":               postgres,
+		"postgres-19":               postgres,
 		"postgres-pgvector-pg17":    postgres,
 		"postgres-pgvector-pg18":    postgres,
+		"postgres-pgvector-pg19":    postgres,
 		"postgres-postgis-pg17":     postgres,
 		"postgres-postgis-pg18":     postgres,
 		"postgres-timescaledb-pg17": postgres,
@@ -2655,14 +2716,27 @@ func TestUpgradeStepsMoveForwardWithinAPlugin(t *testing.T) {
 }
 
 // Every postgres major on the official image is moved onto any newer one with
-// pg_upgrade, so each of them declares a step for every older one. The steps
-// are one script, written once and copied: they differ only in the pair of
-// majors the image is published for and in where the new major keeps its data,
-// which moved up a directory in eighteen.
+// pg_upgrade, where tianon publishes an image for that pair of majors, so each
+// of them declares a step for every older one it has a pair from. The steps are
+// one script, written once and copied: they differ only in the pair of majors
+// the image is published for and in where the new major keeps its data, which
+// moved up a directory in eighteen.
 func TestPostgresUpgradesInPlaceFromEveryOlderMajor(t *testing.T) {
 	loaded, err := Load(LoadInput{})
 	if err != nil {
 		t.Fatalf("unable to load the registry: %s", err)
+	}
+
+	// the pairs tianon/postgres-upgrade publishes no image for, which a
+	// service moved across is exported and imported for instead. Nothing onto
+	// nineteen is published yet; once a pair is, its step is added and the pair
+	// taken out of here
+	unpublished := map[string]bool{
+		"postgres-14 to postgres-19": true,
+		"postgres-15 to postgres-19": true,
+		"postgres-16 to postgres-19": true,
+		"postgres-17 to postgres-19": true,
+		"postgres-18 to postgres-19": true,
 	}
 
 	plain := []string{}
@@ -2676,10 +2750,19 @@ func TestPostgresUpgradesInPlaceFromEveryOlderMajor(t *testing.T) {
 		t.Fatalf("expected more than one plain postgres definition, got %v", plain)
 	}
 
-	newest, _ := loaded.Definition(plain[len(plain)-1])
-	expected, ok := newest.Dokku.Upgrade.From[plain[len(plain)-2]]
-	if !ok {
-		t.Fatalf("expected %s to declare a step from %s", newest.Name, plain[len(plain)-2])
+	// the step every other is held to: the newest major's from the one below
+	// it, of the majors that declare one
+	var expected definition.Command
+	reference := ""
+	for index := len(plain) - 1; index > 0 && reference == ""; index-- {
+		found, _ := loaded.Definition(plain[index])
+		if step, ok := found.Dokku.Upgrade.From[plain[index-1]]; ok {
+			expected = step
+			reference = plain[index] + " from " + plain[index-1]
+		}
+	}
+	if reference == "" {
+		t.Fatalf("expected a plain postgres definition to declare a step from the one below it, got none in %v", plain)
 	}
 
 	for index, name := range plain {
@@ -2688,12 +2771,19 @@ func TestPostgresUpgradesInPlaceFromEveryOlderMajor(t *testing.T) {
 
 		dataNew := "/service/data"
 		if major >= 18 {
-			dataNew = "/service/data/18/docker"
+			dataNew = fmt.Sprintf("/service/data/%d/docker", major)
 		}
 
 		for _, from := range plain[:index] {
 			t.Run(name+" from "+from, func(t *testing.T) {
 				step, ok := found.Dokku.Upgrade.From[from]
+				if unpublished[from+" to "+name] {
+					if ok {
+						t.Errorf("expected %s to declare no step from %s, whose pair tianon does not publish", name, from)
+					}
+					return
+				}
+
 				if !ok {
 					t.Fatalf("expected %s to declare a step from %s", name, from)
 				}
@@ -2711,7 +2801,7 @@ func TestPostgresUpgradesInPlaceFromEveryOlderMajor(t *testing.T) {
 				}
 
 				if strings.Join(step.Exec, "\n") != strings.Join(expected.Exec, "\n") {
-					t.Errorf("expected the step to run as %s from %s does", newest.Name, plain[len(plain)-2])
+					t.Errorf("expected the step to run as %s does", reference)
 				}
 
 				if step.User != expected.User || fmt.Sprint(step.Volumes) != fmt.Sprint(expected.Volumes) {
@@ -2909,8 +2999,8 @@ func TestSecretChangesAreTheSameWhereTheDatastoreIs(t *testing.T) {
 	}
 
 	postgres := loaded.NamesFor("postgres")
-	if len(postgres) != 11 {
-		t.Errorf("expected eleven postgres definitions, got %v", postgres)
+	if expected := postgresDirectories(t); !slices.Equal(postgres, expected) {
+		t.Errorf("expected the postgres definitions %v, got %v", expected, postgres)
 	}
 	for _, name := range postgres[1:] {
 		if changeScript(name, "password") != changeScript(postgres[0], "password") {

@@ -128,7 +128,7 @@ The practical consequence is the ordinary one for plugins: install only plugins 
 
 ## Datastores split by major version
 
-A datastore whose data format changes between major versions has more than one definition - `postgres-14` through `postgres-18`, `solr-7` and `solr-8` - because they are not interchangeable: no postgres major reads another's cluster, and postgres moved its data directory up one level in eighteen, so the same bind mount points at an empty directory under the other definition.
+A datastore whose data format changes between major versions has more than one definition - `postgres-14` through `postgres-19`, `solr-7` and `solr-8` - because they are not interchangeable: no postgres major reads another's cluster, and postgres moved its data directory up one level in eighteen, so the same bind mount points at an empty directory under the other definition.
 
 A service records which one it was created with, in a `DEFINITION` file beside its `IMAGE` and `IMAGE_VERSION`, and keeps it. A release that adds a newer definition does not move services that already exist onto it, and a service created before this file existed takes the definition its recorded image version resolves to.
 
@@ -136,8 +136,8 @@ A service records which one it was created with, in a `DEFINITION` file beside i
 # creates a service on the postgres-17 definition
 dokku-datastore create postgres db --image-version 17.8
 
-# and on postgres-18, which is the newest
-dokku-datastore create postgres db --image-version 18.4
+# and on postgres-19, which is the newest
+dokku-datastore create postgres db --image-version 19.0
 ```
 
 A release that adds a definition for an older major can move a service onto it, once: before `postgres-14`, `postgres-15` and `postgres-16` existed, a service running one of those majors resolved to the newest definition, and was pinned to it the next time the plugin was installed. When the plugin is installed, a service whose recorded image is the one its pinned definition ships, at a version naming the major of another of its definitions outright, is pinned to that definition instead, with a warning naming both. Where the two definitions mount the data in different places, the service's container has to mount it where the definition it is moved onto would, which is the case for a service still running the container the bash plugin made. A service with no container, or whose container mounts the data where its pin does, keeps its pin, since its server may have made its cluster there. Nothing about the container or the data is changed.
@@ -172,9 +172,12 @@ A definition that cannot read the data another of its datastore's definitions le
 ```shell
 # the linked apps are stopped while the data is copied, so nothing they write is lost
 dokku-datastore upgrade postgres db --definition postgres-18 --restart-apps
+
+# onto postgres-19 or a flavor the data is exported and imported, which --force agrees to without being asked
+dokku-datastore upgrade postgres db --definition postgres-19 --restart-apps --force
 ```
 
-The upgrade is refused without `--restart-apps`, before anything is touched. The service's data directory is moved aside to `data.<definition>.<timestamp>` under the service root, and the new definition starts from an empty one. The data is then carried across by the step the new definition declares under `x-dokku.upgrade.from.<definition>` for the one the service is moved off, where there is one: each of `postgres-15` through `postgres-18` runs `pg_upgrade` from `tianon/postgres-upgrade:<old>-to-<new>` for a service moved off any older one, such as `tianon/postgres-upgrade:15-to-18` for one moved off `postgres-15`. Only the pairs onto eighteen are published for arm64, so on an arm64 host a move onto an older major falls back. Anywhere else, or when that step fails, the data is exported from the old definition and imported into the new one. A definition declares `x-dokku.upgrade.export` and `x-dokku.upgrade.import` for that where its `export` and `import` dump less than everything the service holds: postgres's dump the service's own database, so a migration uses `pg_dumpall` instead, which carries every database and role. The pair is used when the old definition declares the export and the new one the import, and otherwise the `export` and `import` subcommands are, which is why a definition that migrates has to implement both. Neither is given the service's `export-args` or `import-args`, which shape a dump an operator asked for rather than one that has to carry everything. A step is given the directory the old data was moved to as `{{ .PreviousData }}`, relative to the service root, and nothing but a step may name it.
+The upgrade is refused without `--restart-apps`, before anything is touched. The service's data directory is moved aside to `data.<definition>.<timestamp>` under the service root, and the new definition starts from an empty one. The data is then carried across by the step the new definition declares under `x-dokku.upgrade.from.<definition>` for the one the service is moved off, where there is one: each of `postgres-15` through `postgres-18` runs `pg_upgrade` from `tianon/postgres-upgrade:<old>-to-<new>` for a service moved off any older one, such as `tianon/postgres-upgrade:15-to-18` for one moved off `postgres-15`. `postgres-19` declares no step yet, since `tianon/postgres-upgrade` publishes no pair onto nineteen, so a service moved onto it is exported and imported. Anywhere else the data is exported from the old definition and imported into the new one, which the upgrade asks about first: once every other check has passed and before anything is touched, it says the data will be exported and imported and asks to go ahead, and changes nothing if the answer is no or there is nobody to answer. `--force` goes ahead without asking. A step that fails is undone, and is only followed by an export and an import when the upgrade was given `--force`. Only the pairs onto eighteen are published for arm64, so on an arm64 host a move onto an older major fails its step and needs `--force` to fall back. A definition declares `x-dokku.upgrade.export` and `x-dokku.upgrade.import` for that where its `export` and `import` dump less than everything the service holds: postgres's dump the service's own database, so a migration uses `pg_dumpall` instead, which carries every database and role. The pair is used when the old definition declares the export and the new one the import, and otherwise the `export` and `import` subcommands are, which is why a definition that migrates has to implement both. Neither is given the service's `export-args` or `import-args`, which shape a dump an operator asked for rather than one that has to carry everything. A step is given the directory the old data was moved to as `{{ .PreviousData }}`, relative to the service root, and nothing but a step may name it.
 
 A migration the new image cannot restore is also refused before anything is touched. The old definition declares `x-dokku.upgrade.requires`, which runs against the running service and prints what its data needs, and the new one declares `x-dokku.upgrade.check`, which runs in a container of the new image, reads that on stdin, and fails when the image cannot hold the data. The pair is used when the old definition declares the requires and the new one the check. Every postgres definition declares both: timescaledb only restores a dump into the version of the extension that made it, so an upgrade onto an image that installs another version is refused until the two match.
 
@@ -194,6 +197,7 @@ A flavor is a datastore on an image other than its own, shipped as definitions o
 | --- | --- | --- |
 | `postgres-pgvector-pg17` | `pgvector/pgvector` | `*-pg17` |
 | `postgres-pgvector-pg18` | `pgvector/pgvector` | `*-pg18` |
+| `postgres-pgvector-pg19` | `pgvector/pgvector` | `*-pg19` |
 | `postgres-postgis-pg17` | `postgis/postgis` | `17-*` |
 | `postgres-postgis-pg18` | `postgis/postgis` | `18-*` |
 | `postgres-timescaledb-pg17` | `timescale/timescaledb` | `*-pg17` |
@@ -205,11 +209,11 @@ The image picks the flavor and the version picks the major within it, however th
 # creates a service on the postgres-pgvector-pg17 definition
 dokku-datastore create postgres db --image pgvector/pgvector --image-version pg17
 
-# and on postgres-pgvector-pg18, the newest pgvector, at the version it pins
+# and on postgres-pgvector-pg19, the newest pgvector, at the version it pins
 dokku-datastore create postgres db --image pgvector/pgvector
 ```
 
-A flavor is only used when its image or its definition is named. A create naming no image, version or definition runs the datastore's own image on its newest major, so `dokku-datastore create postgres db` lands on `postgres-18` and never on a flavor.
+A flavor is only used when its image or its definition is named. A create naming no image, version or definition runs the datastore's own image on its newest major, so `dokku-datastore create postgres db` lands on `postgres-19` and never on a flavor.
 
 An image no definition ships still runs on the datastore's own definitions, as it did before flavors existed. A service pinned to one of those keeps its pin: a service created with `pgvector/pgvector:pg17` before pgvector had definitions of its own was placed on `postgres-18`, and its data is where that definition mounts it. `upgrade` only moves a service onto a flavor's definition when the image it ran and the one it is moved to resolve to different definitions, so an upgrade inside a major leaves such a service where it is, and one across a major or onto another image moves it. An image of your own built on a flavor can be kept on that flavor's definition with `--definition`, such as `--definition postgres-pgvector-pg17`.
 

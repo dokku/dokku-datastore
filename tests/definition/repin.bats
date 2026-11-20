@@ -64,6 +64,11 @@ needs_root() {
   fi
 }
 
+# where a definition mounts the service's data in its container
+data_target() {
+  grep -A1 'source: "{{ .HostRoot }}/data"$' "$REPO_ROOT/internal/registry/definitions/$1/docker-compose.yml" | awk '/target:/ { print $2; exit }'
+}
+
 # the directories an upgrade kept the old data in, one per line
 previous_data() {
   find "$(service_root)" -mindepth 1 -maxdepth 1 -type d -name 'data.*' -exec basename {} \;
@@ -117,6 +122,11 @@ previous_data() {
 
 @test "($DEFINITION) install keeps a pin its container agrees with" {
   needs_root
+
+  # where both mount the data in the same place, the cluster is where either
+  # looks for it, so nothing is hidden and the pin is put back on this major
+  # whatever the container says
+  [[ "$(data_target "$DEFINITION")" != "$(data_target "$NEWEST")" ]] || skip "$DEFINITION mounts its data where $NEWEST does"
 
   # this major placed on the newest definition from the start, so its server
   # made its cluster where that definition mounts the data

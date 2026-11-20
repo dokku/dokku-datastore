@@ -70,6 +70,31 @@ flavor_extension() {
   assert_output ""
 }
 
+@test "($DEFINITION) an upgrade that exports and imports the data asks first" {
+  ! migrates_in_place || skip "$NEXT_DEFINITION migrates the data of $DEFINITION in place"
+
+  run "$(probe_path)" write "$SERVICE"
+  assert_success
+
+  run "$BIN" upgrade "$PLUGIN" "$SERVICE" --definition "$NEXT_DEFINITION" --restart-apps <<<"n"
+  assert_failure
+  assert_output --partial "Export and import $SERVICE now?"
+  assert_output --partial "nothing was changed"
+  assert_output --partial "--force"
+  refute_output --partial "Stopping all linked apps"
+
+  # refused before anything was touched, so the service runs on as it was
+  run cat "$(service_root)/DEFINITION"
+  assert_output "$DEFINITION"
+
+  run --separate-stderr "$(probe_path)" read "$SERVICE"
+  assert_success
+  assert_output "known"
+
+  run previous_data
+  assert_output ""
+}
+
 @test "($DEFINITION) an upgrade onto an image that cannot restore the data is refused first" {
   [[ "$(flavor_extension)" == "timescaledb" ]] || skip "only timescaledb restores into the version that made the dump alone"
 
@@ -132,7 +157,7 @@ flavor_extension() {
   local templates
   templates="$("$(probe_path)" templates "$SERVICE")"
 
-  run --separate-stderr "$BIN" upgrade "$PLUGIN" "$SERVICE" --definition "$NEXT_DEFINITION" --restart-apps
+  run --separate-stderr "$BIN" upgrade "$PLUGIN" "$SERVICE" --definition "$NEXT_DEFINITION" --restart-apps --force
   assert_success
 
   # the official image migrates in place, and a step that fell back to an
