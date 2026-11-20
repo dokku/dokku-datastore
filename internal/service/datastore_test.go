@@ -34,8 +34,8 @@ func TestTheDefaultDefinitionIsNotAFlavor(t *testing.T) {
 		t.Fatal("expected postgres to be registered")
 	}
 
-	if postgres.Definition.Name != "postgres-18" {
-		t.Errorf("expected postgres-18, got %s", postgres.Definition.Name)
+	if postgres.Definition.Name != "postgres-19" {
+		t.Errorf("expected postgres-19, got %s", postgres.Definition.Name)
 	}
 
 	if postgres.Definition.DefaultImage != "postgres" {

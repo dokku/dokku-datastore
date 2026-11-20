@@ -80,8 +80,8 @@ updates:
     schedule:
       interval: "daily"
 
-  # postgres-14, postgres-15 and postgres-16 are held inside their majors the
-  # way postgres-17 is
+  # postgres-14, postgres-15, postgres-16 and postgres-18 are held inside their
+  # majors the way postgres-17 is
   - package-ecosystem: "docker"
     directory: "/internal/registry/definitions/postgres-14"
     schedule:
@@ -120,6 +120,14 @@ updates:
     directory: "/internal/registry/definitions/postgres-18"
     schedule:
       interval: "daily"
+    ignore:
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/postgres-19"
+    schedule:
+      interval: "daily"
 
   # pgvector writes the postgres major as a -pg17 suffix, and dependabot only
   # moves a tag to one with the same suffix, so neither of these can cross a
@@ -132,6 +140,11 @@ updates:
 
   - package-ecosystem: "docker"
     directory: "/internal/registry/definitions/postgres-pgvector-pg18"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "docker"
+    directory: "/internal/registry/definitions/postgres-pgvector-pg19"
     schedule:
       interval: "daily"
 

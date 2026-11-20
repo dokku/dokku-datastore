@@ -19,7 +19,7 @@ func postgresDatastore(t *testing.T) *Datastore {
 		t.Fatal("expected a postgres datastore")
 	}
 
-	if found.Definition.Name != "postgres-18" {
+	if found.Definition.Name != "postgres-19" {
 		t.Fatalf("expected postgres to default to its newest definition, got %q", found.Definition.Name)
 	}
 
@@ -42,10 +42,11 @@ func TestForImageSelectsTheMajor(t *testing.T) {
 		{imageVersion: "16.15", expected: "postgres-16"},
 		{imageVersion: "17.8", expected: "postgres-17"},
 		{imageVersion: "18.4", expected: "postgres-18"},
+		{imageVersion: "19.0", expected: "postgres-19"},
 		// a version no definition claims falls back to the newest rather than
 		// failing: a service has to stay operable either way
-		{imageVersion: "12.1", expected: "postgres-18"},
-		{imageVersion: "", expected: "postgres-18"},
+		{imageVersion: "12.1", expected: "postgres-19"},
+		{imageVersion: "", expected: "postgres-19"},
 	}
 
 	for _, test := range tests {
@@ -71,6 +72,7 @@ func TestForImageSelectsTheFlavor(t *testing.T) {
 	}{
 		{image: "pgvector/pgvector", imageVersion: "pg17", expected: "postgres-pgvector-pg17"},
 		{image: "pgvector/pgvector", imageVersion: "pg18", expected: "postgres-pgvector-pg18"},
+		{image: "pgvector/pgvector", imageVersion: "0.8.7-pg19", expected: "postgres-pgvector-pg19"},
 		{image: "pgvector/pgvector", imageVersion: "0.8.1-pg17", expected: "postgres-pgvector-pg17"},
 		{image: "pgvector/pgvector", imageVersion: "0.8.1-pg17-trixie", expected: "postgres-pgvector-pg17"},
 		{image: "docker.io/pgvector/pgvector", imageVersion: "pg17", expected: "postgres-pgvector-pg17"},
@@ -79,8 +81,8 @@ func TestForImageSelectsTheFlavor(t *testing.T) {
 		{image: "postgis/postgis", imageVersion: "17-3.5", expected: "postgres-postgis-pg17"},
 		{image: "postgis/postgis", imageVersion: "18-3.6", expected: "postgres-postgis-pg18"},
 		// the newest of the flavor, whose own version then applies
-		{image: "pgvector/pgvector", imageVersion: "", expected: "postgres-pgvector-pg18"},
-		{image: "pgvector/pgvector", imageVersion: "pg12", expected: "postgres-pgvector-pg18"},
+		{image: "pgvector/pgvector", imageVersion: "", expected: "postgres-pgvector-pg19"},
+		{image: "pgvector/pgvector", imageVersion: "pg12", expected: "postgres-pgvector-pg19"},
 		// an image no definition ships runs on the datastore's own, as it did
 		{image: "registry.example.com/postgres", imageVersion: "17.8", expected: "postgres-17"},
 		{image: "postgres", imageVersion: "17.8", expected: "postgres-17"},
@@ -271,8 +273,10 @@ func TestDefinitionsSpansTheMajors(t *testing.T) {
 		"postgres-16",
 		"postgres-17",
 		"postgres-18",
+		"postgres-19",
 		"postgres-pgvector-pg17",
 		"postgres-pgvector-pg18",
+		"postgres-pgvector-pg19",
 		"postgres-postgis-pg17",
 		"postgres-postgis-pg18",
 		"postgres-timescaledb-pg17",
@@ -415,8 +419,8 @@ func TestWithDefinitionNamedDoesNotChangeTheDatastore(t *testing.T) {
 		t.Fatalf("expected postgres-17 to resolve, got %v", err)
 	}
 
-	if postgres.DefinitionName() != "postgres-18" {
-		t.Errorf("expected the shared datastore to stay on postgres-18, got %s", postgres.DefinitionName())
+	if postgres.DefinitionName() != "postgres-19" {
+		t.Errorf("expected the shared datastore to stay on postgres-19, got %s", postgres.DefinitionName())
 	}
 }
 
@@ -435,7 +439,8 @@ func TestMisplacedPinIsReadFromTheServiceFiles(t *testing.T) {
 		imageVersion string
 		expected     string
 	}{
-		{name: "pinned to the newest", pinned: "postgres-18", image: "postgres", imageVersion: "15.7", expected: "postgres-15"},
+		{name: "pinned to the newest", pinned: "postgres-19", image: "postgres", imageVersion: "18.7", expected: "postgres-18"},
+		{name: "pinned to the newest before nineteen", pinned: "postgres-18", image: "postgres", imageVersion: "15.7", expected: "postgres-15"},
 		{name: "pinned to another plain major", pinned: "postgres-17", image: "postgres", imageVersion: "14.24", expected: "postgres-14"},
 		{name: "a hub image written out", pinned: "postgres-18", image: "docker.io/library/postgres", imageVersion: "16.15", expected: "postgres-16"},
 		{name: "no image recorded", pinned: "postgres-18", imageVersion: "15.7", expected: "postgres-15"},

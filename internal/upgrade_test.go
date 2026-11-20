@@ -301,7 +301,7 @@ func TestUpgradeTarget(t *testing.T) {
 			recorded: service.RecordedImage{Image: "postgres", ImageVersion: "17.0"},
 			image:    "myorg/postgres",
 			version:  "custom-3",
-			expected: "postgres-18",
+			expected: "postgres-19",
 		},
 		{
 			name:     "a custom tag with a name stays on it",

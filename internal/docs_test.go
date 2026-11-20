@@ -131,7 +131,7 @@ func TestNewDocumentationDataFlavors(t *testing.T) {
 	// taken from the definitions rather than written out, because the version
 	// each pins is changed by every image bump
 	newest := map[string]string{}
-	for _, name := range []string{"postgres-pgvector-pg18", "postgres-postgis-pg18", "postgres-timescaledb-pg18"} {
+	for _, name := range []string{"postgres-pgvector-pg19", "postgres-postgis-pg18", "postgres-timescaledb-pg18"} {
 		for _, found := range service.Datastores["postgres"].Definitions() {
 			if found.Name == name {
 				newest[found.DefaultImage] = found.DefaultImageVersion

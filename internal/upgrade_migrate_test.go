@@ -47,6 +47,20 @@ func TestUpgradeMigration(t *testing.T) {
 			expected: migrationStep,
 		},
 		{
+			// tianon publishes no pg_upgrade image onto nineteen yet, so the
+			// data is exported and imported
+			name:     "onto a major with no step",
+			current:  named("postgres", "postgres-18"),
+			target:   named("postgres", "postgres-19"),
+			expected: migrationExport,
+		},
+		{
+			name:     "onto the newest major of a flavor",
+			current:  named("postgres", "postgres-pgvector-pg18"),
+			target:   named("postgres", "postgres-pgvector-pg19"),
+			expected: migrationExport,
+		},
+		{
 			name:     "across a major of a flavor",
 			current:  named("postgres", "postgres-pgvector-pg17"),
 			target:   named("postgres", "postgres-pgvector-pg18"),

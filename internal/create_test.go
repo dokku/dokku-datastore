@@ -276,10 +276,10 @@ func TestCreateServiceResolvesTheDefinition(t *testing.T) {
 		input    CreateServiceInput
 		expected string
 	}{
-		{name: "no options", input: CreateServiceInput{}, expected: "postgres-18"},
+		{name: "no options", input: CreateServiceInput{}, expected: "postgres-19"},
 		{name: "an older version", input: CreateServiceInput{ImageVersion: "17.2"}, expected: "postgres-17"},
-		{name: "a flavor's version with no image", input: CreateServiceInput{ImageVersion: "pg17"}, expected: "postgres-18"},
-		{name: "a flavor's image", input: CreateServiceInput{Image: "pgvector/pgvector"}, expected: "postgres-pgvector-pg18"},
+		{name: "a flavor's version with no image", input: CreateServiceInput{ImageVersion: "pg17"}, expected: "postgres-19"},
+		{name: "a flavor's image", input: CreateServiceInput{Image: "pgvector/pgvector"}, expected: "postgres-pgvector-pg19"},
 		{name: "a flavor named outright", input: CreateServiceInput{Definition: "postgres-postgis-pg17"}, expected: "postgres-postgis-pg17"},
 	}
 
