@@ -249,7 +249,7 @@ x-dokku:
       # the timescaledb image ships no openssl. Any postgres image would do;
       # this one is kept to the tag the postgres-17 definition pins, which a
       # test holds it to, so a host running both pulls one image rather than two
-      image: postgres:17.11
+      image: postgres:17.12
       user: "0"
       entrypoint: ""
       volumes:
