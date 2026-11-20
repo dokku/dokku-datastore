@@ -1,6 +1,9 @@
 package internal
 
 import (
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -189,5 +192,111 @@ func TestDestroyWidensTheDataAnUpgradeKeptAside(t *testing.T) {
 		if !strings.Contains(joined, expected) {
 			t.Errorf("expected %s to be widened, got %v", expected, directories)
 		}
+	}
+}
+
+// Exporting and importing the data is a dump and a restore rather than a
+// migration in place, so it is only done when it is asked for, either by
+// --force or by an answer of yes, and anything else is a refusal that says how
+// to go ahead. An upgrade that migrates in place, or not at all, asks nothing.
+func TestConfirmMigration(t *testing.T) {
+	current, err := service.Datastores["postgres"].WithDefinitionNamed("postgres-17")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	target, err := service.Datastores["postgres"].WithDefinitionNamed("postgres-pgvector-pg17")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	tests := []struct {
+		name     string
+		plan     migration
+		force    bool
+		ask      func(string) (string, error)
+		accepted bool
+	}{
+		{name: "forced", plan: migrationExport, force: true, accepted: true},
+		{name: "yes", plan: migrationExport, ask: answer("y"), accepted: true},
+		{name: "yes in full", plan: migrationExport, ask: answer(" YES \n"), accepted: true},
+		{name: "no", plan: migrationExport, ask: answer("n")},
+		{name: "nothing", plan: migrationExport, ask: answer("")},
+		{name: "no input left", plan: migrationExport, ask: func(string) (string, error) { return "", io.EOF }},
+		{name: "nobody to ask", plan: migrationExport},
+		{name: "in place", plan: migrationStep, accepted: true},
+		{name: "not migrated", plan: migrationNone, accepted: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			asked := ""
+			ask := test.ask
+			if ask != nil {
+				ask = func(question string) (string, error) {
+					asked = question
+					return test.ask(question)
+				}
+			}
+
+			err := confirmMigration(UpgradeServiceInput{
+				Datastore:   current,
+				ServiceName: "lollipop",
+				Logger:      Ui{Quiet: true, Stderr: io.Discard, Stdout: io.Discard, Format: "json"},
+				Force:       test.force,
+				Ask:         ask,
+			}, target, test.plan)
+
+			if test.accepted && err != nil {
+				t.Fatalf("expected the upgrade to go ahead, got %q", err)
+			}
+
+			if !test.accepted {
+				if err == nil {
+					t.Fatal("expected the upgrade to be refused")
+				}
+
+				if !strings.Contains(err.Error(), "nothing was changed") || !strings.Contains(err.Error(), "--force") {
+					t.Errorf("expected the refusal to say nothing changed and how to go ahead, got %q", err)
+				}
+			}
+
+			if (test.force || test.plan != migrationExport) && asked != "" {
+				t.Errorf("expected nothing to be asked, got %q", asked)
+			}
+
+			if !test.force && test.plan == migrationExport && test.ask != nil && !strings.Contains(asked, "Export and import lollipop now?") {
+				t.Errorf("expected to be asked about the service, got %q", asked)
+			}
+		})
+	}
+}
+
+// A step that fails is only tried again as an export and an import when the
+// upgrade was forced, since that is not the migration the operator ran, and
+// never once the service could not be put back on what it ran.
+func TestFallsBackToExport(t *testing.T) {
+	failed := errors.New("pg_upgrade failed")
+	stuck := fmt.Errorf("%w: %w", errNotUndone, failed)
+
+	tests := []struct {
+		name     string
+		plan     migration
+		force    bool
+		err      error
+		expected bool
+	}{
+		{name: "a forced step", plan: migrationStep, force: true, err: failed, expected: true},
+		{name: "a step", plan: migrationStep, err: failed},
+		{name: "a forced step that was not undone", plan: migrationStep, force: true, err: stuck},
+		{name: "a forced export", plan: migrationExport, force: true, err: failed},
+		{name: "an export", plan: migrationExport, err: failed},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if actual := fallsBackToExport(test.plan, test.force, test.err); actual != test.expected {
+				t.Errorf("expected %t, got %t", test.expected, actual)
+			}
+		})
 	}
 }

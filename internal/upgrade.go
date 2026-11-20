@@ -92,6 +92,15 @@ type UpgradeServiceInput struct {
 	// RestartApps is whether to stop and start the linked apps around the upgrade
 	RestartApps bool
 
+	// Force is whether data that cannot be migrated in place is exported and
+	// imported without asking, and whether an in-place migration that fails
+	// falls back to exporting and importing it
+	Force bool
+
+	// Ask asks whether the data may be exported and imported. Nil is the same
+	// as an answer of no
+	Ask func(string) (string, error)
+
 	// ServiceName is the name of the service to upgrade
 	ServiceName string
 
@@ -307,6 +316,9 @@ func UpgradeService(ctx context.Context, input UpgradeServiceInput) error {
 		return err
 	}
 	if err := checkUpgradeCompatible(ctx, input, target, plan, taggedImage); err != nil {
+		return err
+	}
+	if err := confirmMigration(input, target, plan); err != nil {
 		return err
 	}
 	if plan != migrationNone {
