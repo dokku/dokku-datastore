@@ -34,6 +34,9 @@ type UpgradeCommand struct {
 	noMigrate bool
 	// restartApps is whether to stop and start linked apps around the upgrade
 	restartApps bool
+	// force is whether data that cannot be migrated in place is exported and
+	// imported without asking
+	force bool
 	// configOptions are extra arguments passed to the container create command
 	configOptions string
 	// customEnv is the environment the service is started with
@@ -130,6 +133,7 @@ func (c *UpgradeCommand) FlagSet() *flag.FlagSet {
 	f.StringVarP(&c.imageVersion, "image-version", "I", "", "the image version to upgrade the service to")
 	f.BoolVar(&c.noMigrate, "no-migrate", false, "place the service on the --definition named with its data left where it is, for a service whose data that definition already reads")
 	f.BoolVarP(&c.restartApps, "restart-apps", "R", false, "whether to stop and start the linked apps around the upgrade, required for one that migrates the data")
+	f.BoolVarP(&c.force, "force", "f", false, "export and import the data without asking when the upgrade cannot migrate it in place, and fall back to that when an in-place migration fails")
 	f.StringVarP(&c.configOptions, "config-options", "c", "", "extra arguments for the process the service container runs, not docker flags; use mount for mounts")
 	f.StringVarP(&c.customEnv, "custom-env", "C", "", "semi-colon delimited environment variables to start the service with")
 	f.StringVarP(&c.initialNetwork, "initial-network", "N", "", "the initial network to attach the service to")
@@ -158,7 +162,9 @@ func (c *UpgradeCommand) AutocompleteFlags() complete.Flags {
 		c.Meta.AutocompleteFlags(command.FlagSetClient),
 		c.AutocompleteGlobalFlags(),
 		c.AutocompleteAmbassadorImageFlags(),
-		complete.Flags{},
+		complete.Flags{
+			"--force": complete.PredictNothing,
+		},
 	)
 }
 
@@ -274,6 +280,8 @@ func (c *UpgradeCommand) Run(args []string) int {
 		Logger:       logger,
 		NoMigrate:    c.noMigrate,
 		RestartApps:  c.restartApps,
+		Force:        c.force,
+		Ask:          c.Ui.Ask,
 		ServiceName:  serviceName,
 
 		// what the service already has is kept unless a flag asked otherwise,

@@ -129,14 +129,12 @@ func TestNewDocumentationDataFlavors(t *testing.T) {
 	postgres := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["postgres"]})
 
 	// taken from the definitions rather than written out, because the version
-	// each pins is changed by every image bump
+	// each pins is changed by every image bump, and which definition is the
+	// newest by every major added. Each line of majors is kept oldest first, so
+	// the last definition shipping an image is its newest
 	newest := map[string]string{}
-	for _, name := range []string{"postgres-pgvector-pg18", "postgres-postgis-pg18", "postgres-timescaledb-pg18"} {
-		for _, found := range service.Datastores["postgres"].Definitions() {
-			if found.Name == name {
-				newest[found.DefaultImage] = found.DefaultImageVersion
-			}
-		}
+	for _, found := range service.Datastores["postgres"].Definitions() {
+		newest[found.DefaultImage] = found.DefaultImageVersion
 	}
 
 	expected := []string{"pgvector/pgvector", "postgis/postgis", "timescale/timescaledb"}

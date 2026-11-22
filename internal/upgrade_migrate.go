@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dokku/dokku-datastore/internal/execx"
@@ -25,7 +26,8 @@ const (
 	migrationNone migration = iota
 
 	// migrationStep runs the step the definition declares for the one the
-	// service is moved off, falling back to migrationExport if it fails
+	// service is moved off, falling back to migrationExport if it fails and
+	// the upgrade was forced
 	migrationStep
 
 	// migrationExport exports the data from the old definition and imports it
@@ -86,6 +88,49 @@ func checkMigration(input UpgradeServiceInput, target *service.Datastore, plan m
 	return nil
 }
 
+// confirmMigration asks whether a service's data may be exported from the
+// definition it is moved off and imported into the one it is moved onto, since
+// that is a dump and a restore rather than a migration in place: slower, and
+// carrying only what the dump does.
+//
+// It is asked after every check that could refuse the upgrade, so nobody is
+// asked to agree to one that would not run, and before anything is changed, so
+// an answer of no, or no answer at all, leaves the service exactly as it was.
+func confirmMigration(input UpgradeServiceInput, target *service.Datastore, plan migration) error {
+	if plan != migrationExport || input.Force {
+		return nil
+	}
+
+	input.Logger.Warn(WarnInput{
+		Warning: fmt.Sprintf("The data of %s cannot be migrated from %s to %s in place, so it will be exported from %s and imported into %s", input.ServiceName, input.Datastore.DefinitionName(), target.DefinitionName(), input.Datastore.DefinitionName(), target.DefinitionName()),
+	})
+
+	declined := fmt.Errorf("aborted, nothing was changed; rerun with --force to export and import %s without being asked", input.ServiceName)
+	if input.Ask == nil {
+		return declined
+	}
+
+	answer, err := input.Ask(fmt.Sprintf("Export and import %s now? [y/N]", input.ServiceName))
+	if err != nil {
+		return declined
+	}
+
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return nil
+	}
+
+	return declined
+}
+
+// fallsBackToExport reports whether a migration that failed is tried again by
+// exporting and importing the data. Only a step falls back, only when the
+// upgrade was forced, since an export was not what the operator agreed to, and
+// never when the step could not be undone.
+func fallsBackToExport(plan migration, force bool, err error) bool {
+	return plan == migrationStep && force && !errors.Is(err, errNotUndone)
+}
+
 // migrateServiceInput is the input for migrateService.
 type migrateServiceInput struct {
 	// Upgrade is the upgrade being run, with the service on its old definition
@@ -113,9 +158,10 @@ type migrateServiceInput struct {
 // once the migration succeeds as well, for the operator to remove once they are
 // satisfied with the new.
 //
-// A step that fails is undone and the data is exported and imported instead,
-// which is slower but needs nothing from the definition beyond the export and
-// import it already has.
+// A step that fails is undone. On a forced upgrade the data is then exported
+// and imported instead, which is slower but needs nothing from the definition
+// beyond the export and import it already has; otherwise the upgrade stops
+// there, with the service back on what it ran.
 func migrateService(ctx context.Context, input migrateServiceInput) error {
 	upgrade := input.Upgrade
 	current := upgrade.Datastore
@@ -127,7 +173,10 @@ func migrateService(ctx context.Context, input migrateServiceInput) error {
 			return nil
 		}
 
-		if plan != migrationStep || errors.Is(err, errNotUndone) {
+		if !fallsBackToExport(plan, upgrade.Force, err) {
+			if plan == migrationStep && !errors.Is(err, errNotUndone) {
+				return fmt.Errorf("%w; rerun with --force to export and import %s instead", err, upgrade.ServiceName)
+			}
 			return err
 		}
 
