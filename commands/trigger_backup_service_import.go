@@ -18,7 +18,9 @@ import (
 // service it restores. It does nothing unless the service is one of the
 // datastore's own, and otherwise makes the service again from what the export
 // wrote into the scope directory, as internal.ImportServiceBackup describes. A
-// service that already exists is refused.
+// service that already exists is refused, unless DOKKU_BACKUP_FORCE is 1, which
+// dokku sets when backup:import is given --force: it is then destroyed and made
+// again from the backup.
 type TriggerBackupServiceImportCommand struct {
 	// Meta is the command meta
 	command.Meta
@@ -170,6 +172,7 @@ func (c *TriggerBackupServiceImportCommand) Run(args []string) int {
 		ServiceType: arguments["service-type"].StringValue(),
 		ServiceName: arguments["service-name"].StringValue(),
 		ScopeDir:    arguments["scope-dir"].StringValue(),
+		Force:       internal.BackupForceRequested(),
 	}); err != nil {
 		logger.Error(internal.ErrorInput{Error: err})
 		return 1

@@ -100,7 +100,9 @@ type ServiceBackup struct {
 	Databases []string `json:"databases,omitempty"`
 
 	// Dumped is whether the backup holds a dump of the service's data, which
-	// it does not for a datastore whose definition cannot export one
+	// it does not for a datastore whose definition cannot export one or for a
+	// service that was not running when it was backed up. A restore of a
+	// backup without one makes the service with no data
 	Dumped bool `json:"dumped"`
 }
 
@@ -119,7 +121,28 @@ type BackupServiceInput struct {
 	// slices under its config directory and everything else under its data
 	// directory
 	ScopeDir string
+
+	// Force is whether a restore may destroy a service that already exists to
+	// make it again from the backup, which dokku asks for by setting
+	// DOKKU_BACKUP_FORCE when backup:import is given --force
+	Force bool
 }
+
+// BackupForceEnv is the environment variable dokku sets to 1 on the
+// backup-service-import trigger when backup:import is given --force and the
+// service already exists
+const BackupForceEnv = "DOKKU_BACKUP_FORCE"
+
+// BackupForceRequested reports whether dokku asked for a restore to replace a
+// service that already exists. Only 1 asks for it.
+func BackupForceRequested() bool {
+	return os.Getenv(BackupForceEnv) == "1"
+}
+
+// destroyExistingService destroys the service a forced restore replaces. A
+// variable so that a test can see the destroy asked for without a docker
+// daemon to run it against.
+var destroyExistingService = DestroyService
 
 // handles reports whether the input names a service of the datastore the
 // trigger runs for, which every other datastore leaves alone
@@ -163,7 +186,9 @@ func (input BackupServiceInput) configDir() string {
 // serviceBackupSeedFolders under serviceBackupSeedRoot, and the logical dumps
 // under serviceBackupDumps: one of the service's own database, and one for each
 // database made in it. A definition that cannot export has no dumps, and its
-// service is restored with its settings but none of its data. The scope's
+// service is restored with its settings but none of its data. A service that is
+// not running has no dumps either, and is only warned about, so that one
+// stopped service does not stop the rest of a backup. The scope's
 // config directory gets a recipe slice that creates the service and links it to
 // its apps, which is there to be read and is never read back.
 func ExportServiceBackup(ctx context.Context, input BackupServiceInput) error {
@@ -198,15 +223,20 @@ func ExportServiceBackup(ctx context.Context, input BackupServiceInput) error {
 		return err
 	}
 
-	if datastore.Definition.Implements("export") {
+	switch {
+	case !datastore.Definition.Implements("export"):
+		input.Logger.Warn(WarnInput{
+			Warning: fmt.Sprintf("the %s datastore cannot export its data, so only the settings of %s are backed up", datastore.Definition.Dokku.Plugin, input.ServiceName),
+		})
+	case !serviceRunning(ctx, datastore, input.ServiceName):
+		input.Logger.Warn(WarnInput{
+			Warning: fmt.Sprintf("%s service %s is not running, so only its settings are backed up and not its data; start it and back it up again to include its data", input.ServiceType, input.ServiceName),
+		})
+	default:
 		if err := exportServiceDumps(ctx, input, record); err != nil {
 			return err
 		}
 		record.Dumped = true
-	} else {
-		input.Logger.Warn(WarnInput{
-			Warning: fmt.Sprintf("the %s datastore cannot export its data, so only the settings of %s are backed up", datastore.Definition.Dokku.Plugin, input.ServiceName),
-		})
 	}
 
 	if err := writeServiceBackupManifest(filepath.Join(input.dataDir(), ServiceBackupManifest), record); err != nil {
@@ -357,18 +387,19 @@ func copyTree(source string, destination string) error {
 	})
 }
 
-// exportServiceDumps writes a dump of the service's own database, and one of
-// each database made in it, under the scope's dumps directory. The service has
-// to be running for its datastore to make them.
-func exportServiceDumps(ctx context.Context, input BackupServiceInput, record ServiceBackup) error {
-	status := strings.ToLower(service.Status(ctx, service.StatusInput{
-		Datastore:   input.Datastore,
-		ServiceName: input.ServiceName,
-	}))
-	if status != "running" {
-		return fmt.Errorf("unable to back up the data of %s, which is not running; start it and back it up again", input.ServiceName)
-	}
+// serviceRunning reports whether a service is running, which its datastore
+// has to be for its data to be exported
+func serviceRunning(ctx context.Context, datastore *service.Datastore, serviceName string) bool {
+	status := service.Status(ctx, service.StatusInput{
+		Datastore:   datastore,
+		ServiceName: serviceName,
+	})
+	return strings.ToLower(status) == "running"
+}
 
+// exportServiceDumps writes a dump of the service's own database, and one of
+// each database made in it, under the scope's dumps directory
+func exportServiceDumps(ctx context.Context, input BackupServiceInput, record ServiceBackup) error {
 	dumps := filepath.Join(input.dataDir(), serviceBackupDumps)
 	if err := os.MkdirAll(filepath.Join(dumps, serviceBackupDatabaseDumps), 0700); err != nil {
 		return fmt.Errorf("unable to create %s: %w", dumps, err)
@@ -524,7 +555,11 @@ func writeServiceRecipe(directory string, record ServiceBackup, linkedApps []str
 
 // ImportServiceBackup makes a service again from what ExportServiceBackup wrote
 // into its scope directory, and does nothing for a service of another
-// datastore. A service that already exists is refused rather than replaced.
+// datastore. A service that already exists is refused rather than replaced,
+// unless the input is forced: it is then destroyed the way destroy does it,
+// without the check for linked apps and without unlinking them, so that the
+// apps keep the config they were given and the restored links file and
+// secrets make it point at the restored service again.
 //
 // The service is created through CreateService on the definition, image,
 // version, backend and settings it was backed up with, seeded with its
@@ -533,9 +568,10 @@ func writeServiceRecipe(directory string, record ServiceBackup, linkedApps []str
 // back as they were, its users are made with their passwords, its own dump is
 // loaded, and each database made in it is made and loaded in turn, the way
 // clone carries a service's data across. A service that was exposed is exposed
-// on the same ports again, and dokku is told to write its crontab when the
-// service has a scheduled backup; either failing is warned about, since the
-// service and its data are back by then.
+// on the same ports again, the running containers of each linked app are
+// attached to the networks of their links again, and dokku is told to write
+// its crontab when the service has a scheduled backup; any of these failing is
+// warned about, since the service and its data are back by then.
 func ImportServiceBackup(ctx context.Context, input BackupServiceInput) error {
 	if !input.handles() {
 		return nil
@@ -561,7 +597,9 @@ func ImportServiceBackup(ctx context.Context, input BackupServiceInput) error {
 	input.Datastore = datastore
 
 	if service.Exists(ctx, datastore, input.ServiceName) {
-		return fmt.Errorf("unable to restore %s service %s, which already exists; destroy it first to restore it from the backup", input.ServiceType, input.ServiceName)
+		if err := replaceExistingService(ctx, input); err != nil {
+			return err
+		}
 	}
 
 	input.Logger.Header2(fmt.Sprintf("Restoring %s service %s", input.ServiceType, input.ServiceName)) //nolint:errcheck
@@ -604,9 +642,74 @@ func ImportServiceBackup(ctx context.Context, input BackupServiceInput) error {
 	}
 
 	restoreExposure(ctx, input, record)
+	restoreLinkNetworks(ctx, input)
 	restoreCrontab(ctx, input)
 
 	input.Logger.Header2("Done") //nolint:errcheck
+	return nil
+}
+
+// replaceExistingService destroys a service a forced restore makes again, on
+// the definition the service itself runs, and refuses one that is not forced
+func replaceExistingService(ctx context.Context, input BackupServiceInput) error {
+	if !input.Force {
+		return fmt.Errorf("unable to restore %s service %s, which already exists; destroy it first or import the backup with --force to replace it", input.ServiceType, input.ServiceName)
+	}
+
+	existing, unresolved := input.Datastore.ForService(input.ServiceName)
+	if unresolved != nil {
+		input.Logger.Warn(WarnInput{Warning: unresolved.Error()})
+	}
+
+	input.Logger.Info(fmt.Sprintf("Destroying %s service %s to restore it from the backup", input.ServiceType, input.ServiceName))
+	if err := destroyExistingService(ctx, DestroyServiceInput{
+		Datastore:   existing,
+		ServiceName: input.ServiceName,
+	}); err != nil {
+		return fmt.Errorf("unable to replace %s service %s: %w", input.ServiceType, input.ServiceName, err)
+	}
+
+	return nil
+}
+
+// restoreLinkNetworks attaches the running containers of every linked app that
+// exists to the network of its link again. A forced restore destroyed the
+// networks along with the old service, and an app that is not redeployed would
+// otherwise not reach the restored one until its containers were made again.
+// A link still on the container link an earlier version gave the app has no
+// network, and a failure is warned about rather than undoing the restore.
+func restoreLinkNetworks(ctx context.Context, input BackupServiceInput) {
+	for _, appName := range service.LiveLinkedApps(ctx, linkedAppsInput(input.Datastore, input.ServiceName)) {
+		if service.HasLegacyLink(input.Datastore, input.ServiceName, appName) {
+			continue
+		}
+
+		if err := reattachLinkedApp(ctx, input, appName); err != nil {
+			input.Logger.Warn(WarnInput{
+				Warning: fmt.Sprintf("unable to attach app %s to %s again: %s", appName, input.ServiceName, err),
+			})
+		}
+	}
+}
+
+// reattachLinkedApp makes the network of an app's link to a restored service
+// and attaches each of the app's running containers to it
+func reattachLinkedApp(ctx context.Context, input BackupServiceInput, appName string) error {
+	if err := ensureLinkNetwork(ctx, input.Datastore, input.ServiceName, appName); err != nil {
+		return err
+	}
+
+	containers, err := service.AppContainerIDs(ctx, appName)
+	if err != nil {
+		return err
+	}
+
+	for _, containerID := range containers {
+		if err := connectAppContainer(ctx, input.Logger, input.Datastore, input.ServiceName, appName, containerID); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

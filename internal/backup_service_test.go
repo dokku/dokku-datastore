@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/dokku/dokku-datastore/internal/service"
 	"github.com/dokku/dokku/plugins/common"
+	"github.com/mitchellh/cli"
 )
 
 // backedUpService writes a service of a datastore onto a temporary services
@@ -330,10 +333,31 @@ func TestRestorePropertiesWritesEveryProperty(t *testing.T) {
 
 // dokku decides whether to call import at all, so one that is called for a
 // service that is there is refused rather than written over
+// stubDestroy replaces the destroy a forced restore runs with one that records
+// the service it was asked to destroy and fails with errStubDestroy, so a test
+// sees the destroy asked for and stops before anything needs docker
+func stubDestroy(t *testing.T) *[]string {
+	t.Helper()
+
+	destroyed := []string{}
+	previous := destroyExistingService
+	destroyExistingService = func(ctx context.Context, input DestroyServiceInput) error {
+		destroyed = append(destroyed, input.ServiceName)
+		return errStubDestroy
+	}
+	t.Cleanup(func() { destroyExistingService = previous })
+
+	return &destroyed
+}
+
+// errStubDestroy is what stubDestroy fails with
+var errStubDestroy = errors.New("destroy stubbed out")
+
 func TestImportServiceBackupRefusesAnExistingService(t *testing.T) {
 	datastore := service.Datastores["memcached"]
 	backedUpService(t, datastore, "lollipop")
 	scope := t.TempDir()
+	destroyed := stubDestroy(t)
 
 	if err := ExportServiceBackup(t.Context(), backupServiceInput(datastore, "memcached", "lollipop", scope)); err != nil {
 		t.Fatalf("failed to export the service: %s", err)
@@ -346,6 +370,118 @@ func TestImportServiceBackupRefusesAnExistingService(t *testing.T) {
 
 	if _, err := os.Stat(service.Files(datastore, "lollipop").ID); err != nil {
 		t.Errorf("expected the existing service to be left alone: %s", err)
+	}
+
+	if len(*destroyed) != 0 {
+		t.Errorf("expected nothing destroyed without --force, got %v", *destroyed)
+	}
+}
+
+// backup:import --force replaces a service that is there, through the destroy
+// that destroy runs, before restoring it
+func TestImportServiceBackupForcedDestroysTheExistingService(t *testing.T) {
+	datastore := service.Datastores["memcached"]
+	backedUpService(t, datastore, "lollipop")
+	scope := t.TempDir()
+	destroyed := stubDestroy(t)
+
+	if err := ExportServiceBackup(t.Context(), backupServiceInput(datastore, "memcached", "lollipop", scope)); err != nil {
+		t.Fatalf("failed to export the service: %s", err)
+	}
+
+	input := backupServiceInput(datastore, "memcached", "lollipop", scope)
+	input.Force = true
+	if err := ImportServiceBackup(t.Context(), input); !errors.Is(err, errStubDestroy) {
+		t.Errorf("expected the import to destroy the existing service, got %v", err)
+	}
+
+	if !slices.Equal(*destroyed, []string{"lollipop"}) {
+		t.Errorf("expected lollipop to be destroyed, got %v", *destroyed)
+	}
+
+	// the links are the restored service's to keep, so they are never undone
+	assertLinkedApps(t, datastore, "lollipop", []string{"my-app"})
+}
+
+func TestBackupForceRequested(t *testing.T) {
+	tests := []struct {
+		value    string
+		expected bool
+	}{
+		{value: "1", expected: true},
+		{value: "", expected: false},
+		{value: "0", expected: false},
+		{value: "true", expected: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.value, func(t *testing.T) {
+			t.Setenv(BackupForceEnv, test.value)
+			if actual := BackupForceRequested(); actual != test.expected {
+				t.Errorf("expected %s=%q to ask for force: %v, got %v", BackupForceEnv, test.value, test.expected, actual)
+			}
+		})
+	}
+}
+
+// A stopped service is backed up with everything but its data, and warned
+// about, so that one stopped service does not stop the rest of a backup
+func TestExportServiceBackupOfAStoppedService(t *testing.T) {
+	datastore := service.Datastores["redis"]
+	if !datastore.Definition.Implements("export") {
+		t.Fatal("expected redis to export")
+	}
+
+	backedUpService(t, datastore, "lollipop")
+	scope := t.TempDir()
+
+	ui := cli.NewMockUi()
+	input := backupServiceInput(datastore, "redis", "lollipop", scope)
+	input.Logger = Ui{Ui: ui}
+
+	if err := ExportServiceBackup(t.Context(), input); err != nil {
+		t.Fatalf("expected a stopped service to be backed up, got %s", err)
+	}
+
+	if !strings.Contains(ui.ErrorWriter.String(), "is not running") {
+		t.Errorf("expected a warning that the service is not running, got %q", ui.ErrorWriter.String())
+	}
+
+	record, err := readServiceBackupManifest(filepath.Join(scope, "data", ServiceBackupManifest))
+	if err != nil {
+		t.Fatalf("failed to read the manifest: %s", err)
+	}
+	if record.Dumped {
+		t.Error("expected the manifest to record that no dump was taken")
+	}
+
+	if _, err := os.Stat(filepath.Join(scope, "data", serviceBackupDumps)); !os.IsNotExist(err) {
+		t.Errorf("expected no dumps directory, got %v", err)
+	}
+
+	for _, name := range []string{
+		filepath.Join("data", serviceBackupSeedRoot, "LINKS"),
+		filepath.Join("data", serviceBackupSeedRoot, "config", "edited.conf"),
+		filepath.Join("config", "redis.yml"),
+	} {
+		if _, err := os.Stat(filepath.Join(scope, name)); err != nil {
+			t.Errorf("expected %s to be backed up: %s", name, err)
+		}
+	}
+}
+
+// A backup with no dump restores the service without reading one, even for a
+// datastore that imports
+func TestRestoreServiceDataSkipsAMissingDump(t *testing.T) {
+	withDataRoot(t)
+	datastore := service.Datastores["redis"]
+	if !datastore.Definition.Implements("import") {
+		t.Fatal("expected redis to import")
+	}
+
+	input := backupServiceInput(datastore, "redis", "lollipop", t.TempDir())
+	if err := restoreServiceData(t.Context(), input, ServiceBackup{Type: "redis", Name: "lollipop"}); err != nil {
+		t.Errorf("expected nothing to be imported, got %s", err)
 	}
 }
 
