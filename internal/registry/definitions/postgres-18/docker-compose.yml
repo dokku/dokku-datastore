@@ -393,6 +393,12 @@ x-dokku:
     # arm64, so on an arm64 host a step onto an older major fails and the data
     # is exported and imported instead.
     #
+    # tianon no longer rebuilds the pairs from fourteen, so the step from
+    # postgres-14 can run an image that trails this major's patch release. It
+    # is kept while its tag can still be pulled, and falls back to an export and
+    # an import when it fails and the upgrade was given --force. No major past
+    # eighteen gets a step from fourteen.
+    #
     # the new cluster is made to match the old one's checksums, which
     # pg_upgrade refuses to mismatch. Eighteen turns them on by default and is
     # the first whose initdb can be told to leave them off, so that is only
