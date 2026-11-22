@@ -125,6 +125,12 @@ type DocumentationData struct {
 	// be told to stop the linked apps for
 	Migrates bool
 
+	// InPlace are the moves between two of the datastore's definitions that a
+	// step migrates the data for in place, ordered by the definition moved onto
+	// and then the one moved off, oldest first. Any other move onto a
+	// definition that migrates exports and imports the data.
+	InPlace []DocumentedMigration
+
 	// Password and RootPassword are whether a service of the datastore has a
 	// password and a root password set can change, so that one without is
 	// never documented as having one
@@ -176,6 +182,14 @@ type DocumentedVolume struct {
 	Definition string
 	Key        string
 	Target     string
+}
+
+// DocumentedMigration is a move between two definitions that migrates the data
+// in place, and the image the step doing it runs.
+type DocumentedMigration struct {
+	From  string
+	To    string
+	Image string
 }
 
 // DocumentationDataInput is the input for the NewDocumentationData function
@@ -245,6 +259,7 @@ func NewDocumentationData(input DocumentationDataInput) DocumentationData {
 		VolumeKey:      documentedVolumeKey(input.Datastore),
 		VolumeKeys:     documentedVolumeKeys(volumes),
 		Migrates:       documentedMigrates(input.Datastore),
+		InPlace:        documentedInPlace(input.Datastore),
 
 		Password:         documentedSecret(input.Datastore, "password").Changeable(),
 		RootPassword:     documentedSecret(input.Datastore, "root_password").Changeable(),
@@ -310,6 +325,35 @@ func documentedMigrates(datastore *service.Datastore) bool {
 	}
 
 	return false
+}
+
+// documentedInPlace is every move between two of a datastore's definitions
+// that a step migrates the data for in place. A step is only run for a
+// definition that migrates, and only from a definition the datastore has, so
+// nothing else is documented.
+func documentedInPlace(datastore *service.Datastore) []DocumentedMigration {
+	definitions := datastore.Definitions()
+	migrations := []DocumentedMigration{}
+	for _, to := range definitions {
+		if !to.Dokku.Upgrade.Migrate {
+			continue
+		}
+
+		for _, from := range definitions {
+			step, ok := to.Dokku.Upgrade.From[from.Name]
+			if !ok {
+				continue
+			}
+
+			migrations = append(migrations, DocumentedMigration{
+				From:  from.Name,
+				To:    to.Name,
+				Image: step.Image,
+			})
+		}
+	}
+
+	return migrations
 }
 
 // documentedVolumeKeys is each volume named once, in the order they are first

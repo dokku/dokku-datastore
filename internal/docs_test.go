@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dokku/dokku-datastore/internal/definition"
 	"github.com/dokku/dokku-datastore/internal/hostenv"
 	"github.com/dokku/dokku-datastore/internal/service"
 
@@ -179,6 +180,67 @@ func TestNewDocumentationDataDefinitions(t *testing.T) {
 
 	if redis := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["redis"]}); len(redis.Definitions) != 0 {
 		t.Errorf("expected redis to document no definitions, got %v", redis.Definitions)
+	}
+}
+
+// Every move a step migrates the data for in place is documented, and nothing
+// else: each pair is one the definition moved onto declares a step for, with
+// the image that step runs, ordered by the definition moved onto and then the
+// one moved off.
+func TestNewDocumentationDataInPlace(t *testing.T) {
+	datastore := service.Datastores["postgres"]
+	postgres := NewDocumentationData(DocumentationDataInput{Datastore: datastore})
+
+	order := map[string]int{}
+	byName := map[string]definition.Definition{}
+	expected := 0
+	for index, found := range datastore.Definitions() {
+		order[found.Name] = index
+		byName[found.Name] = found
+		if found.Dokku.Upgrade.Migrate {
+			expected += len(found.Dokku.Upgrade.From)
+		}
+	}
+
+	if len(postgres.InPlace) == 0 || len(postgres.InPlace) != expected {
+		t.Fatalf("expected %d moves migrated in place, got %+v", expected, postgres.InPlace)
+	}
+
+	for index, migration := range postgres.InPlace {
+		to, ok := byName[migration.To]
+		if !ok {
+			t.Errorf("expected %s to be a postgres definition", migration.To)
+			continue
+		}
+
+		step, declared := to.Dokku.Upgrade.From[migration.From]
+		if !declared {
+			t.Errorf("expected %s to declare a step from %s", migration.To, migration.From)
+			continue
+		}
+
+		if step.Image != migration.Image {
+			t.Errorf("expected the move from %s to %s to run %s, got %s", migration.From, migration.To, step.Image, migration.Image)
+		}
+
+		if index == 0 {
+			continue
+		}
+
+		previous := postgres.InPlace[index-1]
+		if order[previous.To] > order[migration.To] || (previous.To == migration.To && order[previous.From] >= order[migration.From]) {
+			t.Errorf("expected %s to %s to come after %s to %s", migration.From, migration.To, previous.From, previous.To)
+		}
+	}
+
+	for _, migration := range postgres.InPlace {
+		if migration.From == "postgres-14" && migration.To == "postgres-19" {
+			t.Errorf("expected no move from postgres-14 onto postgres-19 to be migrated in place")
+		}
+	}
+
+	if redis := NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores["redis"]}); len(redis.InPlace) != 0 {
+		t.Errorf("expected redis to document no moves migrated in place, got %+v", redis.InPlace)
 	}
 }
 

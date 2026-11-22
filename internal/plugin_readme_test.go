@@ -523,6 +523,74 @@ func TestReadmeVolumeTargets(t *testing.T) {
 	}
 }
 
+// The section is only written for a datastore with a definition that carries
+// the data across, lists each move migrated in place with the image it runs,
+// and says that every other move is exported and imported.
+func TestReadmeMigrations(t *testing.T) {
+	t.Setenv("DOKKU_NO_COLOR", "1")
+	clearImageEnv(t)
+
+	tests := []struct {
+		name       string
+		present    bool
+		expected   []string
+		unexpected []string
+	}{
+		{name: "redis", present: false},
+		{
+			name:    "postgres",
+			present: true,
+			expected: []string{
+				"| Moved off | Moved onto | Migrated in place with |\n| --- | --- | --- |\n| postgres-14 | postgres-15 | `tianon/postgres-upgrade:14-to-15` |",
+				"| postgres-14 | postgres-18 | `tianon/postgres-upgrade:14-to-18` |",
+				"| postgres-17 | postgres-18 | `tianon/postgres-upgrade:17-to-18` |",
+				"Any other move exports the data from the old definition and imports it into the new one.",
+			},
+			unexpected: []string{"| postgres-19 |", "| postgres-pgvector-"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			readme, err := Readme(ReadmeInput{
+				Commands: helpTestCommands(),
+				Data:     NewDocumentationData(DocumentationDataInput{Datastore: service.Datastores[test.name]}),
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			heading := "### Migrating data between definitions"
+			start := strings.Index(readme, heading)
+			if actual := start >= 0; actual != test.present {
+				t.Fatalf("expected the migration section to be present to be %t, got %t", test.present, actual)
+			}
+			if !test.present {
+				return
+			}
+
+			// only the section itself, since the volume targets table names
+			// every definition too
+			section := readme[start+len(heading):]
+			if end := strings.Index(section, "\n### "); end >= 0 {
+				section = section[:end]
+			}
+
+			for _, expected := range test.expected {
+				if !strings.Contains(section, expected) {
+					t.Errorf("expected the section to contain %q", expected)
+				}
+			}
+
+			for _, unexpected := range test.unexpected {
+				if strings.Contains(section, unexpected) {
+					t.Errorf("expected the section not to contain %q", unexpected)
+				}
+			}
+		})
+	}
+}
+
 // The section is only written for a datastore that can be told the memory it
 // uses for itself, names the default a new service is given where there is
 // one, and says whether a change reaches a running service on its own.
