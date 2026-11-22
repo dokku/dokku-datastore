@@ -2720,7 +2720,9 @@ func TestUpgradeStepsMoveForwardWithinAPlugin(t *testing.T) {
 // of them declares a step for every older one it has a pair from. The steps are
 // one script, written once and copied: they differ only in the pair of majors
 // the image is published for and in where the new major keeps its data, which
-// moved up a directory in eighteen.
+// moved up a directory in eighteen. A major whose pairs tianon no longer
+// rebuilds keeps the steps it has, while their tags can still be pulled, but
+// gains none onto a newer major.
 func TestPostgresUpgradesInPlaceFromEveryOlderMajor(t *testing.T) {
 	loaded, err := Load(LoadInput{})
 	if err != nil {
@@ -2732,11 +2734,17 @@ func TestPostgresUpgradesInPlaceFromEveryOlderMajor(t *testing.T) {
 	// nineteen is published yet; once a pair is, its step is added and the pair
 	// taken out of here
 	unpublished := map[string]bool{
-		"postgres-14 to postgres-19": true,
 		"postgres-15 to postgres-19": true,
 		"postgres-16 to postgres-19": true,
 		"postgres-17 to postgres-19": true,
 		"postgres-18 to postgres-19": true,
+	}
+
+	// the majors whose pairs tianon/postgres-upgrade no longer rebuilds, each
+	// with the newest major it keeps a step onto. A service moved off one onto
+	// anything newer is always exported and imported
+	retired := map[int]int{
+		14: 18,
 	}
 
 	plain := []string{}
@@ -2780,6 +2788,13 @@ func TestPostgresUpgradesInPlaceFromEveryOlderMajor(t *testing.T) {
 				if unpublished[from+" to "+name] {
 					if ok {
 						t.Errorf("expected %s to declare no step from %s, whose pair tianon does not publish", name, from)
+					}
+					return
+				}
+
+				if limit, isRetired := retired[parseVariant(from).major]; isRetired && major > limit {
+					if ok {
+						t.Errorf("expected %s to declare no step from %s, whose pairs tianon no longer rebuilds past %d", name, from, limit)
 					}
 					return
 				}

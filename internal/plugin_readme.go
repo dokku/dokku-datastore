@@ -311,6 +311,7 @@ func readmeUsage(input ReadmeInput) ([]string, error) {
 	sections = append(sections, readmeWaitTimeout(input.Data)...)
 	sections = append(sections, readmeServiceMemory(input.Data)...)
 	sections = append(sections, readmeVolumeTargets(input.Data)...)
+	sections = append(sections, readmeMigrations(input.Data)...)
 	sections = append(sections, readmeReservedNames(input.Data)...)
 
 	definitionSections, err := readmeDefinitionSections(input.Data)
@@ -622,6 +623,46 @@ func readmeVolumeTargets(data DocumentationData) []string {
 			fmt.Sprintf("The data stays in the same directory on the host, and a move reaches the container the next time one is built, so use `dokku %s` and then `dokku %s` on a running service. ", data.Command("stop"), data.Command("start")) +
 			"An upgrade onto a definition that does not mount a volume the service moved is refused until the move is cleared or replaced.",
 	}
+}
+
+// readmeMigrations lists the moves between definitions that migrate the data
+// in place, for a datastore with a definition that carries the data across,
+// and says what happens on every other move. The list comes from the steps the
+// definitions declare, so a step added or dropped is documented with it.
+func readmeMigrations(data DocumentationData) []string {
+	if !data.Migrates {
+		return nil
+	}
+
+	sections := []string{
+		"### Migrating data between definitions",
+		fmt.Sprintf("An upgrade that moves a service onto another of its definitions with `dokku %s lollipop --definition <definition> --restart-apps` carries the data across. "+
+			"The old data is kept beside the new under the service's directory, and a move that fails puts the service back on what it ran.", data.Command("upgrade")),
+	}
+
+	if len(data.InPlace) > 0 {
+		// one block, since the sections are joined by blank lines and a table
+		// broken by one is not a table
+		table := []string{
+			"| Moved off | Moved onto | Migrated in place with |",
+			"| --- | --- | --- |",
+		}
+		for _, migration := range data.InPlace {
+			table = append(table, fmt.Sprintf("| %s | %s | `%s` |", migration.From, migration.To, migration.Image))
+		}
+
+		sections = append(sections,
+			"These moves migrate the data in place, in a container of its own run from the image named:",
+			strings.Join(table, "\n"),
+		)
+	}
+
+	return append(sections,
+		"Any other move exports the data from the old definition and imports it into the new one. "+
+			"Before anything is touched, the upgrade says so and asks to go ahead, and changes nothing if the answer is no or there is nobody to answer. "+
+			"Pass `--force` to go ahead without being asked. "+
+			"A migration in place that fails is undone, and is only followed by an export and an import when the upgrade was given `--force`.",
+	)
 }
 
 // readmeWaitTimeout explains how long a service is waited on to become ready,
