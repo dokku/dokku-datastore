@@ -112,29 +112,32 @@ type CloneServiceInput struct {
 // ship a second set of backups to the same bucket. The backup object name is
 // left out for the same reason: a clone backed up to the source's bucket under
 // the source's name would replace the source's backups with its own.
+//
+// A backup of the service records them as json, so that a restore makes the
+// service again with what it ran with.
 type serviceSettings struct {
-	BackupAllDatabases string
-	BackupMailto       string
-	BackupStorageClass string
-	BackupTimestamp    string
-	ConfigOptions      string
-	CustomEnv          string
-	ExportArgs         string
-	ImportArgs         string
-	InitialNetwork     string
-	Keyserver          string
-	Labels             map[string]string
-	LogDriver          string
-	LogOptions         []string
-	Memory             int
-	Mounts             []service.Mount
-	PostCreateNetworks []string
-	PostStartNetworks  []string
-	RestartPolicy      string
-	ServiceMemory      string
-	ShmSize            string
-	VolumeTargets      map[string]string
-	WaitTimeout        string
+	BackupAllDatabases string            `json:"backup_all_databases,omitempty"`
+	BackupMailto       string            `json:"backup_mailto,omitempty"`
+	BackupStorageClass string            `json:"backup_storage_class,omitempty"`
+	BackupTimestamp    string            `json:"backup_timestamp,omitempty"`
+	ConfigOptions      string            `json:"config_options,omitempty"`
+	CustomEnv          string            `json:"custom_env,omitempty"`
+	ExportArgs         string            `json:"export_args,omitempty"`
+	ImportArgs         string            `json:"import_args,omitempty"`
+	InitialNetwork     string            `json:"initial_network,omitempty"`
+	Keyserver          string            `json:"keyserver,omitempty"`
+	Labels             map[string]string `json:"labels,omitempty"`
+	LogDriver          string            `json:"log_driver,omitempty"`
+	LogOptions         []string          `json:"log_options,omitempty"`
+	Memory             int               `json:"memory,omitempty"`
+	Mounts             []service.Mount   `json:"mounts,omitempty"`
+	PostCreateNetworks []string          `json:"post_create_networks,omitempty"`
+	PostStartNetworks  []string          `json:"post_start_networks,omitempty"`
+	RestartPolicy      string            `json:"restart_policy,omitempty"`
+	ServiceMemory      string            `json:"service_memory,omitempty"`
+	ShmSize            string            `json:"shm_size,omitempty"`
+	VolumeTargets      map[string]string `json:"volume_targets,omitempty"`
+	WaitTimeout        string            `json:"wait_timeout,omitempty"`
 }
 
 // readServiceSettings reads the settings a service was created or set with.

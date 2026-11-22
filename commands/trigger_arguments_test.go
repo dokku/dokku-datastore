@@ -100,6 +100,18 @@ func TestTriggerCommandsAcceptExtraArguments(t *testing.T) {
 			args:      []string{"redis"},
 		},
 		{
+			// dokku sends the service type, the service name and the scope
+			// directory
+			name:      "trigger-backup-service-export",
+			arguments: (&TriggerBackupServiceExportCommand{}).Arguments(),
+			args:      []string{"redis", "redis", "lollipop", "/tmp/scope", "something-else"},
+		},
+		{
+			name:      "trigger-backup-service-import",
+			arguments: (&TriggerBackupServiceImportCommand{}).Arguments(),
+			args:      []string{"redis", "redis", "lollipop", "/tmp/scope", "something-else"},
+		},
+		{
 			name:      "trigger-service-list",
 			arguments: (&TriggerServiceListCommand{}).Arguments(),
 			args:      []string{"redis", "redis", "something-else"},

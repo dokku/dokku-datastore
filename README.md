@@ -87,6 +87,8 @@ Available commands are:
     start                                 Starts a service
     stop                                  Stops a service and removes the container
     trigger                               Runs a dokku trigger a datastore implements
+    trigger-backup-service-export         Writes a service into the scope directory of a dokku backup
+    trigger-backup-service-import         Restores a service from the scope directory of a dokku backup
     trigger-cron-entries                  Lists the scheduled backups dokku writes into its crontab
     trigger-help                          Prints the help a dokku plugin's commands script is asked for
     trigger-install                       Prepares the host for a datastore plugin
@@ -625,6 +627,14 @@ Some targets are refused before anything is written:
 - a path a mount already holds, and the other way round, a mount at the path a volume was moved to
 
 The containers `export` and `import` run in beside or in place of the service are given the moved volumes too, so they read and write where the service does. The hooks keep the mounts they declare, which are their own rather than the service's. `upgrade` checks the targets against the definition it lands on, since a volume moved on one definition has to be one the other mounts, and refuses before the old container is taken away until the target is cleared or replaced with `--volume-target`.
+
+## Backing up and restoring with dokku
+
+`dokku backup:export` and `dokku backup:import` back up and restore datastore services through the `backup-service-export` and `backup-service-import` triggers, which this binary implements for every datastore. Each is passed the service type, the service name and the directory the backup keeps the service in, and does nothing for a service of another datastore.
+
+The export writes a recipe slice that creates the service and links it to its apps as `config/<type>.yml`, which is never read back. Under `data/` it writes `service.json`, holding the definition, image, version, backend, settings, properties, exposed ports, the users made in the service with their passwords and the databases made in it; `root/`, holding the service's secrets, links file, database name and its `config`, `backup` and `backup-encryption` folders; and `dumps/`, holding the dump `export` makes of the service's own database and one for each database made in it. The data folder itself is never copied. A datastore whose definition cannot export, such as memcached, is backed up with its settings and no data. A service that is not running is backed up the same way, with a warning, so that one stopped service does not stop the rest of the backup, and `service.json` records that it has no dump.
+
+The import refuses a service that already exists, unless `backup:import` is given `--force`, which dokku passes on as `DOKKU_BACKUP_FORCE=1`. The service is then destroyed, its container, data, service root and properties with it, without unlinking its apps or touching their config, and restored from the backup. Otherwise it creates the service on the same definition, image and settings, with the same secrets, links and config files, so that its linked apps keep the urls they were given, then writes its properties back, makes its users and databases, and imports each dump. A service that was exposed is exposed on the same ports again, the running containers of its linked apps are attached to the networks of their links again, and either is only warned about when it cannot be done. A backup with no dump restores the service with no data.
 
 ## Importing a file on the dokku host
 
