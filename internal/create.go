@@ -122,6 +122,13 @@ type CreateServiceInput struct {
 	// ShmSize is the shared memory size to use for the service
 	ShmSize string
 
+	// SeedRoot is a directory laid out like a service root whose files are
+	// copied into the new service's root once its folders exist and before
+	// anything is generated there. A secret, config file, links file or
+	// database name it holds is kept rather than made again, which is how a
+	// service restored from a backup keeps what its apps were linked with.
+	SeedRoot string
+
 	// Logger reports what is being waited on once the container exists
 	Logger Ui
 }
@@ -295,6 +302,12 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 		return err
 	}
 
+	if input.SeedRoot != "" {
+		if err := CopySeedRoot(input.SeedRoot, serviceRoot); err != nil {
+			return err
+		}
+	}
+
 	// create the service links file
 	serviceFiles := service.Files(input.Datastore, input.ServiceName)
 	if !common.FileExists(serviceFiles.Links) {
@@ -312,12 +325,16 @@ func CreateService(ctx context.Context, input CreateServiceInput) error {
 
 	// before anything is rendered: a config file written below is seeded once and
 	// never rendered again, so one that named the database before it was recorded
-	// would carry the unsanitized service name for the life of the service
-	if err := service.WriteDatabaseName(service.WriteDatabaseNameInput{
-		Datastore:   input.Datastore,
-		ServiceName: input.ServiceName,
-	}); err != nil {
-		return fmt.Errorf("failed to write database name: %w", err)
+	// would carry the unsanitized service name for the life of the service. A
+	// seeded name is kept, since it is the database the seeded data and the
+	// linked apps' urls name
+	if !common.FileExists(serviceFiles.DatabaseName) {
+		if err := service.WriteDatabaseName(service.WriteDatabaseNameInput{
+			Datastore:   input.Datastore,
+			ServiceName: input.ServiceName,
+		}); err != nil {
+			return fmt.Errorf("failed to write database name: %w", err)
+		}
 	}
 
 	err = input.Datastore.CreateService(ctx, input.ServiceName, secrets)
